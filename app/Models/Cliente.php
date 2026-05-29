@@ -1,0 +1,31 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+
+class Cliente extends Model
+{
+    protected $fillable = [
+        'user_id',
+        'nombre_completo',
+        'telefono',
+    ];
+
+    // ── Scope de seguridad ───────────────────────────────────────
+    public function scopeDelUsuario($query, User $user)
+    {
+        return $query->where('user_id', $user->id);
+    }
+
+    // ── Relaciones ───────────────────────────────────────────────
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    public function turnos()
+    {
+        return $this->hasMany(Turno::class);
+    }
+}
