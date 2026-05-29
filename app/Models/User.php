@@ -24,6 +24,7 @@ class User extends Authenticatable
         'confirmacion_automatica',
         'sena_monto',
         'fcm_token',
+        'mensaje_whatsapp',
     ];
 
     protected $hidden = [
