@@ -108,7 +108,6 @@ class AuthController extends Controller
             'direccion'               => 'sometimes|string|max:255',
             'confirmacion_automatica' => 'sometimes|boolean',
             'sena_monto'              => 'sometimes|numeric|min:0',
-            'max_turnos_por_cliente'  => 'sometimes|integer|min:1|max:10',
             'mensaje_whatsapp'        => 'sometimes|string',
             'fcm_token'               => 'sometimes|string',
             'password'                => 'sometimes|string|min:8|confirmed',

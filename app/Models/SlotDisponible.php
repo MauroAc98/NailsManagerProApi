@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class SlotDisponible extends Model
 {
+    protected $table = 'slots_disponibles';
     public $timestamps = false;
 
     protected $fillable = [
