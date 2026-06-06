@@ -79,13 +79,20 @@ class TurnoController extends Controller
             ->delRango($request->desde, $request->hasta)
             ->get(['fecha_hora', 'duracion_total_minutos']);
 
-        $reservas = $user->reservasWeb()
-            ->pendientes()
-            ->whereBetween('fecha', [$request->desde, $request->hasta])
-            ->get(['fecha', 'slot_hora', 'duracion_total_minutos']);
+        $reservas = collect(); // reservas web — pendiente de implementación
 
-        $periodo  = new \DatePeriod(
-            new \DateTime($request->desde),
+        // El periodo arranca desde mañana como mínimo:
+        // no tiene sentido mostrar días pasados o el día de hoy en la imagen
+        $manana = Carbon::today()->toDateString();
+        $inicio = max($request->desde, $manana);
+
+        // Si el inicio ya supera el hasta, no hay nada que mostrar
+        if ($inicio > $request->hasta) {
+            return response()->json([]);
+        }
+
+        $periodo = new \DatePeriod(
+            new \DateTime($inicio),
             new \DateInterval('P1D'),
             (new \DateTime($request->hasta))->modify('+1 day'),
         );

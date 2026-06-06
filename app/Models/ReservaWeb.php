@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class ReservaWeb extends Model
 {
+    protected $table = 'reservas_web';
     protected $fillable = [
         'user_id',
         'nombre_completo',
