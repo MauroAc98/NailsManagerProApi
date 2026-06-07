@@ -11,9 +11,6 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
-    // ─────────────────────────────────────────────
-    // POST /api/auth/register
-    // ─────────────────────────────────────────────
     public function register(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -36,9 +33,6 @@ class AuthController extends Controller
         ], 201);
     }
 
-    // ─────────────────────────────────────────────
-    // POST /api/auth/login
-    // ─────────────────────────────────────────────
     public function login(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -60,12 +54,12 @@ class AuthController extends Controller
             ], 403);
         }
 
-        // Actualizamos el fcm_token si viene en el request
+
         if ($request->filled('fcm_token')) {
             $user->update(['fcm_token' => $request->fcm_token]);
         }
 
-        // Revocamos tokens anteriores y creamos uno nuevo
+
         $user->tokens()->delete();
         $token = $user->createToken('app-mobile')->plainTextToken;
 
@@ -75,9 +69,6 @@ class AuthController extends Controller
         ]);
     }
 
-    // ─────────────────────────────────────────────
-    // POST /api/auth/logout
-    // ─────────────────────────────────────────────
     public function logout(Request $request): JsonResponse
     {
         $request->user()->currentAccessToken()->delete();
@@ -87,29 +78,24 @@ class AuthController extends Controller
         ]);
     }
 
-    // ─────────────────────────────────────────────
-    // GET /api/auth/me
-    // ─────────────────────────────────────────────
+
     public function me(Request $request): JsonResponse
     {
         return response()->json($request->user());
     }
 
-    // ─────────────────────────────────────────────
-    // PUT /api/perfil
-    // ─────────────────────────────────────────────
     public function updatePerfil(Request $request): JsonResponse
     {
         $user = $request->user();
 
         $data = $request->validate([
             'name'                    => 'sometimes|string|max:255',
-            'telefono'                => 'sometimes|string|max:30',
-            'direccion'               => 'sometimes|string|max:255',
+            'telefono'                => 'sometimes|nullable|string|max:30', // ← agregar nullable
+            'direccion'               => 'sometimes|nullable|string|max:255', // ← agregar nullable
             'confirmacion_automatica' => 'sometimes|boolean',
-            'sena_monto'              => 'sometimes|numeric|min:0',
-            'mensaje_whatsapp'        => 'sometimes|string',
-            'fcm_token'               => 'sometimes|string',
+            'sena_monto'              => 'sometimes|nullable|numeric|min:0', // ← agregar nullable
+            'mensaje_whatsapp'        => 'sometimes|nullable|string',
+            'fcm_token'               => 'sometimes|nullable|string',
             'password'                => 'sometimes|string|min:8|confirmed',
         ]);
 

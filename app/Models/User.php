@@ -33,6 +33,10 @@ class User extends Authenticatable
         'fcm_token',
     ];
 
+    protected $attributes = [
+        'mensaje_whatsapp' => 'Hola {nombre} 💅 Te recordamos tu turno el {fecha} a las {hora}. ¡Te espero!',
+    ];
+
     protected function casts(): array
     {
         return [
