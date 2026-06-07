@@ -13,9 +13,6 @@ class TurnoController extends Controller
 {
     private const MAX_TURNOS_POR_CLIENTE = 2;
 
-    // ─────────────────────────────────────────────
-    // GET /api/turnos
-    // ─────────────────────────────────────────────
     public function index(Request $request): JsonResponse
     {
         $user  = $request->user();
@@ -40,9 +37,6 @@ class TurnoController extends Controller
         return response()->json($query->orderBy('fecha_hora')->get());
     }
 
-    // ─────────────────────────────────────────────
-    // GET /api/turnos/marcas?mes=2026-06
-    // ─────────────────────────────────────────────
     public function marcas(Request $request): JsonResponse
     {
         $request->validate(['mes' => 'required|date_format:Y-m']);
@@ -62,9 +56,6 @@ class TurnoController extends Controller
         return response()->json($marcas);
     }
 
-    // ─────────────────────────────────────────────
-    // GET /api/turnos/disponibilidad?desde=&hasta=
-    // ─────────────────────────────────────────────
     public function disponibilidad(Request $request): JsonResponse
     {
         $request->validate([
@@ -79,14 +70,11 @@ class TurnoController extends Controller
             ->delRango($request->desde, $request->hasta)
             ->get(['fecha_hora', 'duracion_total_minutos']);
 
-        $reservas = collect(); // reservas web — pendiente de implementación
+        $reservas = collect();
 
-        // El periodo arranca desde mañana como mínimo:
-        // no tiene sentido mostrar días pasados o el día de hoy en la imagen
         $manana = Carbon::today()->toDateString();
         $inicio = max($request->desde, $manana);
 
-        // Si el inicio ya supera el hasta, no hay nada que mostrar
         if ($inicio > $request->hasta) {
             return response()->json([]);
         }
@@ -141,9 +129,6 @@ class TurnoController extends Controller
         return response()->json($resultado);
     }
 
-    // ─────────────────────────────────────────────
-    // POST /api/turnos
-    // ─────────────────────────────────────────────
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -192,11 +177,18 @@ class TurnoController extends Controller
 
         // ── Regla 3: choque de horario ───────────────────────────
         $duracionTotal = $servicios->sum('duracion_minutos');
+        $turnoChocado  = $this->verificarChoque($user->id, $data['fecha_hora'], $duracionTotal);
 
-        $choque = $this->verificarChoque($user->id, $data['fecha_hora'], $duracionTotal);
-        if ($choque) {
+        if ($turnoChocado) {
+            $nombreCliente  = $turnoChocado->cliente?->nombre_completo ?? 'otra clienta';
+            $serviciosChoque = $turnoChocado->servicios->pluck('nombre')->join(' + ');
+            $horaChoque     = Carbon::parse($turnoChocado->fecha_hora)->format('H:i');
+            $finChoque      = Carbon::parse($turnoChocado->fecha_hora)
+                ->addMinutes($turnoChocado->duracion_total_minutos)
+                ->format('H:i');
+
             return response()->json([
-                'message' => "El horario de las {$fechaHora->format('H:i')} ya está ocupado.",
+                'message' => "Las {$fechaHora->format('H:i')} cae dentro del turno de {$nombreCliente} ({$serviciosChoque}, {$horaChoque} - {$finChoque}). Elegí otro horario.",
             ], 422);
         }
 
@@ -217,9 +209,6 @@ class TurnoController extends Controller
         return response()->json($turno->load(['cliente', 'servicios']), 201);
     }
 
-    // ─────────────────────────────────────────────
-    // PUT /api/turnos/{id}
-    // ─────────────────────────────────────────────
     public function update(Request $request, int $id): JsonResponse
     {
         $data = $request->validate([
@@ -235,7 +224,7 @@ class TurnoController extends Controller
         $servicios = Servicio::whereIn('id', $data['servicio_ids'])->get();
         $fechaHora = Carbon::parse($data['fecha_hora']);
 
-        // ── Regla: no repetir servicio el mismo día (excluyendo este turno) ──
+        // ── Regla: no repetir servicio el mismo día ──────────────
         $serviciosYaAgendados = Turno::delUsuario($user)
             ->where('cliente_id', $data['cliente_id'])
             ->delaFecha($fechaHora->toDateString())
@@ -254,13 +243,20 @@ class TurnoController extends Controller
             ], 422);
         }
 
-        // ── Choque de horario (excluyendo este turno) ────────────
+        // ── Choque de horario ────────────────────────────────────
         $duracionTotal = $servicios->sum('duracion_minutos');
+        $turnoChocado  = $this->verificarChoque($user->id, $data['fecha_hora'], $duracionTotal, $id);
 
-        $choque = $this->verificarChoque($user->id, $data['fecha_hora'], $duracionTotal, $id);
-        if ($choque) {
+        if ($turnoChocado) {
+            $nombreCliente  = $turnoChocado->cliente?->nombre_completo ?? 'otra clienta';
+            $serviciosChoque = $turnoChocado->servicios->pluck('nombre')->join(' + ');
+            $horaChoque     = Carbon::parse($turnoChocado->fecha_hora)->format('H:i');
+            $finChoque      = Carbon::parse($turnoChocado->fecha_hora)
+                ->addMinutes($turnoChocado->duracion_total_minutos)
+                ->format('H:i');
+
             return response()->json([
-                'message' => "El horario de las {$fechaHora->format('H:i')} ya está ocupado.",
+                'message' => "Las {$fechaHora->format('H:i')} cae dentro del turno de {$nombreCliente} ({$serviciosChoque}, {$horaChoque} - {$finChoque}). Elegí otro horario.",
             ], 422);
         }
 
@@ -276,9 +272,6 @@ class TurnoController extends Controller
         return response()->json($turno->load(['cliente', 'servicios']));
     }
 
-    // ─────────────────────────────────────────────
-    // DELETE /api/turnos/{id}
-    // ─────────────────────────────────────────────
     public function destroy(Request $request, int $id): JsonResponse
     {
         $user  = $request->user();
@@ -289,14 +282,15 @@ class TurnoController extends Controller
     }
 
     // ─────────────────────────────────────────────
-    // Helper privado — detecta choques de horario
+    // Helper — devuelve el turno que choca (con relaciones)
+    // o null si no hay conflicto
     // ─────────────────────────────────────────────
     private function verificarChoque(
         int $userId,
         string $fechaHora,
         int $duracion,
         ?int $excluirId = null,
-    ): bool {
+    ): ?Turno {
         $inicio = Carbon::parse($fechaHora);
         $fin    = $inicio->copy()->addMinutes($duracion);
         $fecha  = $inicio->toDateString();
@@ -304,6 +298,7 @@ class TurnoController extends Controller
         $query = Turno::where('user_id', $userId)
             ->confirmados()
             ->delaFecha($fecha)
+            ->with(['cliente', 'servicios'])  
             ->where(function ($q) use ($inicio, $fin) {
                 $q->whereBetween('fecha_hora', [$inicio, $fin->subMinute()])
                     ->orWhereRaw("fecha_hora + (duracion_total_minutos || ' minutes')::interval > ?", [$inicio]);
@@ -313,6 +308,6 @@ class TurnoController extends Controller
             $query->where('id', '!=', $excluirId);
         }
 
-        return $query->exists();
+        return $query->first(); 
     }
 }
