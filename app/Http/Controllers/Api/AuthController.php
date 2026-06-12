@@ -3,14 +3,20 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Mail\ResetCodeMail;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
+    // ─────────────────────────────────────────────
+    // POST /api/auth/register
+    // ─────────────────────────────────────────────
     public function register(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -33,6 +39,9 @@ class AuthController extends Controller
         ], 201);
     }
 
+    // ─────────────────────────────────────────────
+    // POST /api/auth/login
+    // ─────────────────────────────────────────────
     public function login(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -54,11 +63,9 @@ class AuthController extends Controller
             ], 403);
         }
 
-
         if ($request->filled('fcm_token')) {
             $user->update(['fcm_token' => $request->fcm_token]);
         }
-
 
         $user->tokens()->delete();
         $token = $user->createToken('app-mobile')->plainTextToken;
@@ -69,6 +76,9 @@ class AuthController extends Controller
         ]);
     }
 
+    // ─────────────────────────────────────────────
+    // POST /api/auth/logout
+    // ─────────────────────────────────────────────
     public function logout(Request $request): JsonResponse
     {
         $request->user()->currentAccessToken()->delete();
@@ -78,22 +88,27 @@ class AuthController extends Controller
         ]);
     }
 
-
+    // ─────────────────────────────────────────────
+    // GET /api/auth/me
+    // ─────────────────────────────────────────────
     public function me(Request $request): JsonResponse
     {
         return response()->json($request->user());
     }
 
+    // ─────────────────────────────────────────────
+    // PUT /api/perfil
+    // ─────────────────────────────────────────────
     public function updatePerfil(Request $request): JsonResponse
     {
         $user = $request->user();
 
         $data = $request->validate([
             'name'                    => 'sometimes|string|max:255',
-            'telefono'                => 'sometimes|nullable|string|max:30', // ← agregar nullable
-            'direccion'               => 'sometimes|nullable|string|max:255', // ← agregar nullable
+            'telefono'                => 'sometimes|nullable|string|max:30',
+            'direccion'               => 'sometimes|nullable|string|max:255',
             'confirmacion_automatica' => 'sometimes|boolean',
-            'sena_monto'              => 'sometimes|nullable|numeric|min:0', // ← agregar nullable
+            'sena_monto'              => 'sometimes|nullable|numeric|min:0',
             'mensaje_whatsapp'        => 'sometimes|nullable|string',
             'fcm_token'               => 'sometimes|nullable|string',
             'password'                => 'sometimes|string|min:8|confirmed',
@@ -106,5 +121,73 @@ class AuthController extends Controller
         $user->update($data);
 
         return response()->json($user);
+    }
+
+    // ─────────────────────────────────────────────
+    // POST /api/auth/forgot-password
+    // Genera un código de 6 dígitos y lo envía por email
+    // ─────────────────────────────────────────────
+    public function forgotPassword(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'email' => 'required|email|exists:users,email',
+        ]);
+
+        $code = (string) random_int(100000, 999999);
+
+        DB::table('password_reset_tokens')->updateOrInsert(
+            ['email' => $data['email']],
+            [
+                'token'      => Hash::make($code),
+                'created_at' => now(),
+            ],
+        );
+
+        Mail::to($data['email'])->send(new ResetCodeMail($code));
+
+        return response()->json([
+            'message' => 'Te enviamos un código a tu email.',
+        ]);
+    }
+
+    // ─────────────────────────────────────────────
+    // POST /api/auth/reset-password
+    // Valida el código y actualiza la contraseña
+    // ─────────────────────────────────────────────
+    public function resetPassword(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'email'    => 'required|email|exists:users,email',
+            'code'     => 'required|string',
+            'password' => 'required|string|min:8|confirmed',
+        ]);
+
+        $record = DB::table('password_reset_tokens')
+            ->where('email', $data['email'])
+            ->first();
+
+        if (!$record || !Hash::check($data['code'], $record->token)) {
+            throw ValidationException::withMessages([
+                'code' => ['El código ingresado es incorrecto.'],
+            ]);
+        }
+
+        if (now()->diffInMinutes($record->created_at) > 30) {
+            throw ValidationException::withMessages([
+                'code' => ['El código expiró. Solicitá uno nuevo.'],
+            ]);
+        }
+
+        $user = User::where('email', $data['email'])->first();
+        $user->update(['password' => bcrypt($data['password'])]);
+
+        // Revocamos sesiones anteriores por seguridad
+        $user->tokens()->delete();
+
+        DB::table('password_reset_tokens')->where('email', $data['email'])->delete();
+
+        return response()->json([
+            'message' => 'Contraseña actualizada correctamente.',
+        ]);
     }
 }
