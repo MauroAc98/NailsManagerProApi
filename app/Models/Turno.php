@@ -17,6 +17,16 @@ class Turno extends Model
         'notas',
     ];
 
+    /**
+     * Evita que Carbon serialice las fechas convertidas a UTC (con "Z").
+     * Así fecha_hora se devuelve tal cual está guardada
+     * (hora local de Argentina), sin desfases en el frontend.
+     */
+    protected function serializeDate(\DateTimeInterface $date): string
+    {
+        return $date->format('Y-m-d\TH:i:s');
+    }
+
     protected function casts(): array
     {
         return [
