@@ -144,6 +144,12 @@ class TurnoController extends Controller
         $servicios = Servicio::whereIn('id', $data['servicio_ids'])->get();
         $fechaHora = Carbon::parse($data['fecha_hora']);
 
+        // ── Regla 0: la hora debe estar dentro del horario de atención ──
+        $errorHorario = $this->validarHorarioAtencion($user, $fechaHora);
+        if ($errorHorario) {
+            return response()->json(['message' => $errorHorario], 422);
+        }
+
         // ── Regla 1: máximo de turnos por clienta por día ────────
         $turnosClienta = Turno::delUsuario($user)
             ->where('cliente_id', $cliente->id)
@@ -224,6 +230,19 @@ class TurnoController extends Controller
         $servicios = Servicio::whereIn('id', $data['servicio_ids'])->get();
         $fechaHora = Carbon::parse($data['fecha_hora']);
 
+        // ── Regla -1: no se puede editar un turno que ya pasó ────
+        if (Carbon::parse($turno->fecha_hora)->isPast()) {
+            return response()->json([
+                'message' => 'No se pueden modificar turnos que ya pasaron.',
+            ], 422);
+        }
+
+        // ── Regla 0: la nueva hora debe estar dentro del horario de atención ──
+        $errorHorario = $this->validarHorarioAtencion($user, $fechaHora);
+        if ($errorHorario) {
+            return response()->json(['message' => $errorHorario], 422);
+        }
+
         // ── Regla: no repetir servicio el mismo día ──────────────
         $serviciosYaAgendados = Turno::delUsuario($user)
             ->where('cliente_id', $data['cliente_id'])
@@ -276,9 +295,43 @@ class TurnoController extends Controller
     {
         $user  = $request->user();
         $turno = Turno::delUsuario($user)->findOrFail($id);
+
+        // No se puede cancelar un turno que ya pasó
+        if (Carbon::parse($turno->fecha_hora)->isPast()) {
+            return response()->json([
+                'message' => 'No se pueden cancelar turnos que ya pasaron.',
+            ], 422);
+        }
+
         $turno->delete();
 
         return response()->json(['message' => 'Turno cancelado correctamente.']);
+    }
+
+    // ─────────────────────────────────────────────
+    // Helper — valida que la hora del turno esté dentro
+    // del rango definido por los slots activos del usuario.
+    // Devuelve null si es válido, o un mensaje de error.
+    // ─────────────────────────────────────────────
+    private function validarHorarioAtencion(\App\Models\User $user, Carbon $fechaHora): ?string
+    {
+        $slots = $user->slotsDisponibles()->activos()->orderBy('hora')->get();
+
+        if ($slots->isEmpty()) {
+            return 'No tenés horarios de atención configurados. Configurálos en Ajustes.';
+        }
+
+        $horaMin   = Carbon::parse($slots->first()->hora)->format('H:i:s');
+        $horaMax   = Carbon::parse($slots->last()->hora)->format('H:i:s');
+        $horaTurno = $fechaHora->format('H:i:s');
+
+        if ($horaTurno < $horaMin || $horaTurno > $horaMax) {
+            $minFmt = Carbon::parse($horaMin)->format('H:i');
+            $maxFmt = Carbon::parse($horaMax)->format('H:i');
+            return "El horario de atención es de {$minFmt} a {$maxFmt}hs.";
+        }
+
+        return null;
     }
 
     // ─────────────────────────────────────────────
@@ -298,7 +351,7 @@ class TurnoController extends Controller
         $query = Turno::where('user_id', $userId)
             ->confirmados()
             ->delaFecha($fecha)
-            ->with(['cliente', 'servicios'])  
+            ->with(['cliente', 'servicios'])
             ->where(function ($q) use ($inicio, $fin) {
                 $q->whereBetween('fecha_hora', [$inicio, $fin->subMinute()])
                     ->orWhereRaw("fecha_hora + (duracion_total_minutos || ' minutes')::interval > ?", [$inicio]);
@@ -308,6 +361,6 @@ class TurnoController extends Controller
             $query->where('id', '!=', $excluirId);
         }
 
-        return $query->first(); 
+        return $query->first();
     }
 }
