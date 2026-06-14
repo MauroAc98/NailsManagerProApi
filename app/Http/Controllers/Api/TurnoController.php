@@ -186,10 +186,10 @@ class TurnoController extends Controller
         $turnoChocado  = $this->verificarChoque($user->id, $data['fecha_hora'], $duracionTotal);
 
         if ($turnoChocado) {
-            $nombreCliente  = $turnoChocado->cliente?->nombre_completo ?? 'otra clienta';
+            $nombreCliente   = $turnoChocado->cliente?->nombre_completo ?? 'otra clienta';
             $serviciosChoque = $turnoChocado->servicios->pluck('nombre')->join(' + ');
-            $horaChoque     = Carbon::parse($turnoChocado->fecha_hora)->format('H:i');
-            $finChoque      = Carbon::parse($turnoChocado->fecha_hora)
+            $horaChoque      = Carbon::parse($turnoChocado->fecha_hora)->format('H:i');
+            $finChoque       = Carbon::parse($turnoChocado->fecha_hora)
                 ->addMinutes($turnoChocado->duracion_total_minutos)
                 ->format('H:i');
 
@@ -267,10 +267,10 @@ class TurnoController extends Controller
         $turnoChocado  = $this->verificarChoque($user->id, $data['fecha_hora'], $duracionTotal, $id);
 
         if ($turnoChocado) {
-            $nombreCliente  = $turnoChocado->cliente?->nombre_completo ?? 'otra clienta';
+            $nombreCliente   = $turnoChocado->cliente?->nombre_completo ?? 'otra clienta';
             $serviciosChoque = $turnoChocado->servicios->pluck('nombre')->join(' + ');
-            $horaChoque     = Carbon::parse($turnoChocado->fecha_hora)->format('H:i');
-            $finChoque      = Carbon::parse($turnoChocado->fecha_hora)
+            $horaChoque      = Carbon::parse($turnoChocado->fecha_hora)->format('H:i');
+            $finChoque       = Carbon::parse($turnoChocado->fecha_hora)
                 ->addMinutes($turnoChocado->duracion_total_minutos)
                 ->format('H:i');
 
@@ -296,7 +296,6 @@ class TurnoController extends Controller
         $user  = $request->user();
         $turno = Turno::delUsuario($user)->findOrFail($id);
 
-        // No se puede cancelar un turno que ya pasó
         if (Carbon::parse($turno->fecha_hora)->isPast()) {
             return response()->json([
                 'message' => 'No se pueden cancelar turnos que ya pasaron.',
@@ -309,9 +308,7 @@ class TurnoController extends Controller
     }
 
     // ─────────────────────────────────────────────
-    // Helper — valida que la hora del turno esté dentro
-    // del rango definido por los slots activos del usuario.
-    // Devuelve null si es válido, o un mensaje de error.
+    // Helper — valida rango horario de atención
     // ─────────────────────────────────────────────
     private function validarHorarioAtencion(\App\Models\User $user, Carbon $fechaHora): ?string
     {
@@ -336,7 +333,9 @@ class TurnoController extends Controller
 
     // ─────────────────────────────────────────────
     // Helper — devuelve el turno que choca (con relaciones)
-    // o null si no hay conflicto
+    // o null si no hay conflicto.
+    // Algoritmo: hay solapamiento si inicio_existente < nuevo_fin
+    //            AND fin_existente > nuevo_inicio
     // ─────────────────────────────────────────────
     private function verificarChoque(
         int $userId,
@@ -352,10 +351,10 @@ class TurnoController extends Controller
             ->confirmados()
             ->delaFecha($fecha)
             ->with(['cliente', 'servicios'])
-            ->where(function ($q) use ($inicio, $fin) {
-                $q->whereBetween('fecha_hora', [$inicio, $fin->subMinute()])
-                    ->orWhereRaw("fecha_hora + (duracion_total_minutos || ' minutes')::interval > ?", [$inicio]);
-            });
+            ->whereRaw(
+                "fecha_hora < ? AND fecha_hora + (duracion_total_minutos || ' minutes')::interval > ?",
+                [$fin, $inicio]
+            );
 
         if ($excluirId) {
             $query->where('id', '!=', $excluirId);
