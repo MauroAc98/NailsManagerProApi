@@ -34,6 +34,13 @@ class TurnoController extends Controller
             );
         }
 
+        if ($request->filled('servicio_id')) {
+            $query->whereHas(
+                'servicios',
+                fn($q) => $q->where('servicios.id', $request->servicio_id)
+            );
+        }
+
         return response()->json($query->orderBy('fecha_hora')->get());
     }
 
