@@ -41,7 +41,12 @@ class TurnoController extends Controller
             );
         }
 
-        return response()->json($query->orderBy('fecha_hora')->get());
+        $turnos = $query->orderBy('fecha_hora')->get()->map(function ($turno) {
+            $turno->estado_visual = $this->calcularEstadoVisual($turno);
+            return $turno;
+        });
+
+        return response()->json($turnos);
     }
 
     public function marcas(Request $request): JsonResponse
@@ -312,6 +317,49 @@ class TurnoController extends Controller
         $turno->delete();
 
         return response()->json(['message' => 'Turno cancelado correctamente.']);
+    }
+
+    // ─────────────────────────────────────────────
+    // Helper — agrega "en_curso" como excepción liviana sobre
+    // el estado real. "completado" se persiste (cron o manual),
+    // nunca se calcula al vuelo.
+    // ─────────────────────────────────────────────
+    private function calcularEstadoVisual(Turno $turno): string
+    {
+        if ($turno->estado !== 'confirmado') {
+            return $turno->estado; // completado, cancelado, etc. — ya persistido
+        }
+
+        $ahora  = Carbon::now();
+        $inicio = Carbon::parse($turno->fecha_hora);
+        $fin    = $inicio->copy()->addMinutes($turno->duracion_total_minutos);
+
+        if ($inicio->lt($ahora) && $fin->gt($ahora)) {
+            return 'en_curso';
+        }
+
+        return 'confirmado';
+    }
+
+    // ─────────────────────────────────────────────
+    // PATCH /api/turnos/{id}/completar
+    // Permite a la profesional marcar un turno como finalizado
+    // antes de que termine su duración estimada.
+    // ─────────────────────────────────────────────
+    public function completar(Request $request, int $id): JsonResponse
+    {
+        $user  = $request->user();
+        $turno = Turno::delUsuario($user)->findOrFail($id);
+
+        if ($turno->estado !== 'confirmado') {
+            return response()->json([
+                'message' => 'Este turno no se puede marcar como finalizado.',
+            ], 422);
+        }
+
+        $turno->update(['estado' => 'completado']);
+
+        return response()->json($turno->load(['cliente', 'servicios']));
     }
 
     // ─────────────────────────────────────────────

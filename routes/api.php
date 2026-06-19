@@ -55,12 +55,13 @@ Route::middleware(['auth:sanctum', 'check.activo'])->group(function () {
 
     // Turnos
     Route::prefix('turnos')->group(function () {
-        Route::get('marcas',         [TurnoController::class, 'marcas']);
-        Route::get('disponibilidad', [TurnoController::class, 'disponibilidad']);
-        Route::get('/',              [TurnoController::class, 'index']);
-        Route::post('/',             [TurnoController::class, 'store']);
-        Route::put('/{id}',          [TurnoController::class, 'update']);
-        Route::delete('/{id}',       [TurnoController::class, 'destroy']);
+        Route::get('marcas',           [TurnoController::class, 'marcas']);
+        Route::get('disponibilidad',   [TurnoController::class, 'disponibilidad']);
+        Route::get('/',                [TurnoController::class, 'index']);
+        Route::post('/',               [TurnoController::class, 'store']);
+        Route::put('/{id}',            [TurnoController::class, 'update']);
+        Route::patch('{id}/completar', [TurnoController::class, 'completar']); // ← nueva
+        Route::delete('/{id}',         [TurnoController::class, 'destroy']);
     });
 
     // Reservas web — panel de aceptación
