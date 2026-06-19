@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Cliente;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Validation\Rule;
 
 class ClienteController extends Controller
 {
@@ -37,7 +38,15 @@ class ClienteController extends Controller
     {
         $data = $request->validate([
             'nombre_completo' => 'required|string|max:200',
-            'telefono'        => ['required', 'string', 'regex:/^\+[1-9]\d{7,14}$/'],
+            'telefono'        => [
+                'required',
+                'string',
+                'regex:/^\+[1-9]\d{7,14}$/',
+                Rule::unique('clientes', 'telefono')
+                    ->where('user_id', $request->user()->id),
+            ],
+        ], [
+            'telefono.unique' => 'Ya existe una clienta registrada con ese teléfono.',
         ]);
 
         $cliente = $request->user()->clientes()->create($data);
@@ -62,12 +71,22 @@ class ClienteController extends Controller
     // ─────────────────────────────────────────────
     public function update(Request $request, int $id): JsonResponse
     {
+        $cliente = Cliente::delUsuario($request->user())->findOrFail($id);
+
         $data = $request->validate([
             'nombre_completo' => 'sometimes|string|max:200',
-            'telefono'        => ['sometimes', 'string', 'regex:/^\+[1-9]\d{7,14}$/'],
+            'telefono'        => [
+                'sometimes',
+                'string',
+                'regex:/^\+[1-9]\d{7,14}$/',
+                Rule::unique('clientes', 'telefono')
+                    ->where('user_id', $request->user()->id)
+                    ->ignore($cliente->id),
+            ],
+        ], [
+            'telefono.unique' => 'Ya existe una clienta registrada con ese teléfono.',
         ]);
 
-        $cliente = Cliente::delUsuario($request->user())->findOrFail($id);
         $cliente->update($data);
 
         return response()->json($cliente);
