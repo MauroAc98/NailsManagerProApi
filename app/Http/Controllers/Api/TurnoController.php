@@ -89,6 +89,15 @@ class TurnoController extends Controller
         $manana = Carbon::today()->toDateString();
         $inicio = max($request->desde, $manana);
 
+        // Si hoy ya pasó el último horario de atención, no tiene sentido
+        // incluirlo en la imagen — excluimos hoy del periodo.
+        if ($inicio === Carbon::today()->toDateString() && $slots->isNotEmpty()) {
+            $ultimaHoraAtencion = Carbon::parse($slots->last()->hora)->hour;
+            if (Carbon::now()->hour >= $ultimaHoraAtencion) {
+                $inicio = Carbon::tomorrow()->toDateString();
+            }
+        }
+
         if ($inicio > $request->hasta) {
             return response()->json([]);
         }
