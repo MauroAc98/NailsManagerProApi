@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Mail\ProvisionalPasswordMail;
 use App\Mail\ResetCodeMail;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -10,37 +11,49 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
     // ─────────────────────────────────────────────
     // POST /api/auth/register
+    // Genera una contraseña provisoria, la envía por
+    // email y la devuelve en la respuesta. El usuario
+    // queda marcado con debe_cambiar_password = true.
     // ─────────────────────────────────────────────
     public function register(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'name'     => 'required|string|max:255',
-            'email'    => 'required|email|unique:users,email',
-            'password' => 'required|string|min:8|confirmed',
+            'name'  => 'required|string|max:255',
+            'email' => 'required|email|unique:users,email',
         ]);
+
+        $passwordProvisoria = Str::password(10, symbols: false);
 
         $user = User::create([
-            'name'     => $data['name'],
-            'email'    => $data['email'],
-            'password' => $data['password'],
+            'name'                   => $data['name'],
+            'email'                  => $data['email'],
+            'password'               => $passwordProvisoria,
+            'debe_cambiar_password'  => true,
         ]);
 
-        $token = $user->createToken('app-mobile')->plainTextToken;
+        Mail::to($user->email)->send(
+            new ProvisionalPasswordMail($user->name, $user->email, $passwordProvisoria),
+        );
 
         return response()->json([
-            'user'  => $user,
-            'token' => $token,
+            'message'             => 'Usuario creado. Se envió la contraseña provisoria por email.',
+            'user'                => $user,
+            'password_provisoria' => $passwordProvisoria,
         ], 201);
     }
 
     // ─────────────────────────────────────────────
     // POST /api/auth/login
+    // Si el usuario tiene debe_cambiar_password = true,
+    // NO genera token: devuelve un flag para que el
+    // frontend lo redirija a cambiar la contraseña.
     // ─────────────────────────────────────────────
     public function login(Request $request): JsonResponse
     {
@@ -63,9 +76,59 @@ class AuthController extends Controller
             ], 403);
         }
 
+        // ── Contraseña provisoria sin cambiar ──
+        if ($user->debe_cambiar_password) {
+            return response()->json([
+                'debe_cambiar_password' => true,
+                'email'                 => $user->email,
+                'message'               => 'Tenés que establecer una nueva contraseña antes de continuar.',
+            ], 200);
+        }
+
         if ($request->filled('fcm_token')) {
             $user->update(['fcm_token' => $request->fcm_token]);
         }
+
+        $user->tokens()->delete();
+        $token = $user->createToken('app-mobile')->plainTextToken;
+
+        return response()->json([
+            'user'  => $user,
+            'token' => $token,
+        ]);
+    }
+
+    // ─────────────────────────────────────────────
+    // POST /api/auth/cambiar-password-obligatorio
+    // Valida la contraseña provisoria actual + setea
+    // la nueva. Recién acá se genera el token de sesión.
+    // ─────────────────────────────────────────────
+    public function cambiarPasswordObligatorio(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'email'            => 'required|email',
+            'password_actual'  => 'required|string',
+            'password'         => 'required|string|min:8|confirmed',
+        ]);
+
+        $user = User::where('email', $data['email'])->first();
+
+        if (!$user || !Hash::check($data['password_actual'], $user->password)) {
+            throw ValidationException::withMessages([
+                'password_actual' => ['La contraseña actual es incorrecta.'],
+            ]);
+        }
+
+        if (!$user->debe_cambiar_password) {
+            return response()->json([
+                'message' => 'Esta cuenta no requiere cambio de contraseña obligatorio.',
+            ], 422);
+        }
+
+        $user->update([
+            'password'               => bcrypt($data['password']),
+            'debe_cambiar_password'  => false,
+        ]);
 
         $user->tokens()->delete();
         $token = $user->createToken('app-mobile')->plainTextToken;
@@ -125,7 +188,6 @@ class AuthController extends Controller
 
     // ─────────────────────────────────────────────
     // POST /api/auth/forgot-password
-    // Genera un código de 6 dígitos y lo envía por email
     // ─────────────────────────────────────────────
     public function forgotPassword(Request $request): JsonResponse
     {
@@ -152,7 +214,6 @@ class AuthController extends Controller
 
     // ─────────────────────────────────────────────
     // POST /api/auth/reset-password
-    // Valida el código y actualiza la contraseña
     // ─────────────────────────────────────────────
     public function resetPassword(Request $request): JsonResponse
     {
@@ -179,9 +240,11 @@ class AuthController extends Controller
         }
 
         $user = User::where('email', $data['email'])->first();
-        $user->update(['password' => bcrypt($data['password'])]);
+        $user->update([
+            'password'              => bcrypt($data['password']),
+            'debe_cambiar_password' => false,
+        ]);
 
-        // Revocamos sesiones anteriores por seguridad
         $user->tokens()->delete();
 
         DB::table('password_reset_tokens')->where('email', $data['email'])->delete();
