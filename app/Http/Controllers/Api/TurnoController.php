@@ -235,6 +235,9 @@ class TurnoController extends Controller
 
         $turno->servicios()->attach($data['servicio_ids']);
 
+        // Disparar mensaje de confirmación por WhatsApp (en cola, no bloqueante)
+        \App\Jobs\EnviarMensajeConfirmacion::dispatch($turno->id);
+
         return response()->json($turno->load(['cliente', 'servicios']), 201);
     }
 
