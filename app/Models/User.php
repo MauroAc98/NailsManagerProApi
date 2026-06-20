@@ -25,6 +25,7 @@ class User extends Authenticatable
         'sena_monto',
         'fcm_token',
         'mensaje_whatsapp',
+        'debe_cambiar_password',
     ];
 
     protected $hidden = [
@@ -34,7 +35,7 @@ class User extends Authenticatable
     ];
 
     protected $attributes = [
-        'mensaje_whatsapp' => 'Hola {nombre} 💅 Te recordamos tu turno el {fecha} a las {hora}. ¡Te espero!',
+        'mensaje_whatsapp' => 'Hola {nombre} 💅 Te recuerdo tu turno el {fecha} a las {hora}. ¡Te espero!',
     ];
 
     protected function casts(): array
@@ -46,6 +47,7 @@ class User extends Authenticatable
             'confirmacion_automatica' => 'boolean',
             'fecha_vencimiento'       => 'date',
             'sena_monto'              => 'decimal:2',
+            'debe_cambiar_password'   => 'boolean',
         ];
     }
 
