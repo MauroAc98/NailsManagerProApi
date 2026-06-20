@@ -16,7 +16,9 @@ class TurnoController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user  = $request->user();
-        $query = Turno::delUsuario($user)->with(['cliente', 'servicios', 'reservaWeb']);
+        $query = Turno::delUsuario($user)
+            ->where('estado', '!=', 'cancelado') // ocultos por defecto — no aparecen en la agenda
+            ->with(['cliente', 'servicios', 'reservaWeb']);
 
         if ($request->filled('fecha')) {
             $query->delaFecha($request->fecha);
