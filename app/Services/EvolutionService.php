@@ -17,9 +17,6 @@ class EvolutionService
         $this->apiKey  = config('services.evolution.key');
     }
 
-    /**
-     * Headers requeridos por Evolution API en cada request.
-     */
     private function headers(): array
     {
         return [
@@ -31,7 +28,9 @@ class EvolutionService
     /**
      * Crea una instancia nueva en Evolution API para un usuario.
      * Se llama una sola vez, la primera vez que la profesional
-     * quiere conectar su WhatsApp.
+     * quiere conectar su WhatsApp. No inicia el QR automáticamente
+     * (qrcode: false) — el connect se hace en un segundo paso,
+     * que es el flujo validado para pairing code.
      */
     public function crearInstancia(User $user): ?string
     {
@@ -40,7 +39,7 @@ class EvolutionService
         $response = Http::withHeaders($this->headers())
             ->post("{$this->baseUrl}/instance/create", [
                 'instanceName' => $instanceName,
-                'qrcode'       => false, // usamos pairing code, no QR
+                'qrcode'       => false,
                 'integration'  => 'WHATSAPP-BAILEYS',
             ]);
 
@@ -62,13 +61,19 @@ class EvolutionService
 
     /**
      * Solicita un pairing code para vincular el WhatsApp de la profesional
-     * a su instancia. Requiere que la instancia ya exista.
+     * a su instancia. Si la instancia no existe todavía, la crea primero.
+     *
+     * Flujo validado: create (sin qrcode) → connect?number=...
      */
     public function generarPairingCode(User $user, string $numero): ?string
     {
         if (empty($user->evolution_instance_name)) {
             $this->crearInstancia($user);
             $user->refresh();
+        }
+
+        if (empty($user->evolution_instance_name)) {
+            return null; // crearInstancia falló
         }
 
         $instanceName = $user->evolution_instance_name;
@@ -86,7 +91,16 @@ class EvolutionService
             return null;
         }
 
-        return $response->json('pairingCode');
+        $pairingCode = $response->json('pairingCode');
+
+        if (empty($pairingCode)) {
+            Log::warning('EvolutionService::generarPairingCode sin pairingCode en respuesta', [
+                'user_id' => $user->id,
+                'body'    => $response->body(),
+            ]);
+        }
+
+        return $pairingCode;
     }
 
     /**
@@ -124,8 +138,8 @@ class EvolutionService
 
         $response = Http::withHeaders($this->headers())
             ->post("{$this->baseUrl}/message/sendText/{$user->evolution_instance_name}", [
-                'number'  => $numero,
-                'text'    => $mensaje,
+                'number' => $numero,
+                'text'   => $mensaje,
             ]);
 
         if (!$response->successful()) {
