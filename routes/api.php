@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\SlotDisponibleController;
 use App\Http\Controllers\Api\TurnoController;
 use App\Http\Controllers\Api\ReservaWebController;
 use App\Http\Controllers\Api\PublicController;
+use App\Http\Controllers\Api\WhatsappController;
 use Illuminate\Support\Facades\Route;
 
 // ─────────────────────────────────────────────
@@ -71,6 +72,12 @@ Route::middleware(['auth:sanctum', 'check.activo'])->group(function () {
         Route::get('/',           [ReservaWebController::class, 'index']);
         Route::post('{id}/aceptar',  [ReservaWebController::class, 'aceptar']);
         Route::post('{id}/rechazar', [ReservaWebController::class, 'rechazar']);
+    });
+
+    Route::prefix('whatsapp')->group(function () {
+        Route::post('conectar',    [WhatsappController::class, 'conectar']);
+        Route::get('estado',       [WhatsappController::class, 'estado']);
+        Route::delete('desconectar', [WhatsappController::class, 'desconectar']);
     });
 });
 
