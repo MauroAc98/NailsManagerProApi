@@ -55,7 +55,7 @@ class TurnoController extends Controller
 
         $user   = $request->user();
         $turnos = Turno::delUsuario($user)
-            ->confirmados()
+            ->whereIn('estado', ['confirmado', 'completado']) // todo menos cancelado
             ->whereRaw("TO_CHAR(fecha_hora, 'YYYY-MM') = ?", [$request->mes])
             ->get(['fecha_hora']);
 
@@ -314,7 +314,11 @@ class TurnoController extends Controller
             ], 422);
         }
 
-        $turno->delete();
+        // Soft-cancel: se conserva el registro para historial/estadísticas.
+        // index/marcas/disponibilidad/verificarChoque ya filtran por
+        // confirmados(), así que un turno cancelado deja de aparecer
+        // y de bloquear horarios automáticamente.
+        $turno->update(['estado' => 'cancelado']);
 
         return response()->json(['message' => 'Turno cancelado correctamente.']);
     }
