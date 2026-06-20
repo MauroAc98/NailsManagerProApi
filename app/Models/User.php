@@ -26,6 +26,8 @@ class User extends Authenticatable
         'fcm_token',
         'mensaje_whatsapp',
         'debe_cambiar_password',
+        'evolution_instance_name',
+        'whatsapp_estado',
     ];
 
     protected $hidden = [
@@ -36,6 +38,7 @@ class User extends Authenticatable
 
     protected $attributes = [
         'mensaje_whatsapp' => 'Hola {nombre} 💅 Te recuerdo tu turno el {fecha} a las {hora}. ¡Te espero!',
+        'whatsapp_estado'  => 'desconectado',
     ];
 
     protected function casts(): array
@@ -73,6 +76,12 @@ class User extends Authenticatable
         }
 
         return $slug;
+    }
+
+    // ── Helper — instancia de Evolution API ────────────────────────
+    public function tieneWhatsappConectado(): bool
+    {
+        return $this->whatsapp_estado === 'conectado' && !empty($this->evolution_instance_name);
     }
 
     // ── Relaciones ───────────────────────────────────────────────
