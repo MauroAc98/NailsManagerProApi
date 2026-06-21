@@ -51,7 +51,7 @@ class EnviarMensajeConfirmacion implements ShouldQueue
         $mensaje = str_replace(
             ['{nombre}', '{servicios}', '{fecha}', '{hora}', '{negocio}'],
             [
-                $cliente->nombre_completo,
+                trim("{$cliente->nombre} {$cliente->apellido}"),
                 $servicios,
                 $fechaHora->format('d/m'),
                 $fechaHora->format('H:i'),

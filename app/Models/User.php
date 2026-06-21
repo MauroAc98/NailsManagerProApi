@@ -37,7 +37,7 @@ class User extends Authenticatable
     ];
 
     protected $attributes = [
-        'mensaje_whatsapp' => 'Hola {nombre} 💅 Te recuerdo tu turno el {fecha} a las {hora}. ¡Te espero!',
+        'mensaje_whatsapp' => 'Hola {nombre} 💅 Te recuerdo tu turno de {servicios} el {fecha} a las {hora}. ¡Te espero!',
         'whatsapp_estado'  => 'desconectado',
     ];
 

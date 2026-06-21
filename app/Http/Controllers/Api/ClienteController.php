@@ -21,12 +21,13 @@ class ClienteController extends Controller
         if ($request->filled('buscar')) {
             $buscar = $request->buscar;
             $query->where(function ($q) use ($buscar) {
-                $q->where('nombre_completo', 'LIKE', "%{$buscar}%")
+                $q->where('nombre', 'LIKE', "%{$buscar}%")
+                  ->orWhere('apellido', 'LIKE', "%{$buscar}%")
                   ->orWhere('telefono', 'LIKE', "%{$buscar}%");
             });
         }
 
-        $clientes = $query->orderBy('nombre_completo')->get();
+        $clientes = $query->orderBy('apellido')->orderBy('nombre')->get();
 
         return response()->json($clientes);
     }
@@ -37,8 +38,9 @@ class ClienteController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'nombre_completo' => 'required|string|max:200',
-            'telefono'        => [
+            'nombre'   => 'required|string|max:100',
+            'apellido' => 'required|string|max:100',
+            'telefono' => [
                 'required',
                 'string',
                 'regex:/^\+[1-9]\d{7,14}$/',
@@ -74,8 +76,9 @@ class ClienteController extends Controller
         $cliente = Cliente::delUsuario($request->user())->findOrFail($id);
 
         $data = $request->validate([
-            'nombre_completo' => 'sometimes|string|max:200',
-            'telefono'        => [
+            'nombre'   => 'sometimes|string|max:100',
+            'apellido' => 'sometimes|string|max:100',
+            'telefono' => [
                 'sometimes',
                 'string',
                 'regex:/^\+[1-9]\d{7,14}$/',

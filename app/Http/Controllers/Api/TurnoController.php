@@ -32,7 +32,10 @@ class TurnoController extends Controller
             $buscar = $request->buscar;
             $query->whereHas(
                 'cliente',
-                fn($q) => $q->where('nombre_completo', 'LIKE', "%{$buscar}%")
+                fn($q) => $q->where(function ($sub) use ($buscar) {
+                    $sub->where('nombre', 'LIKE', "%{$buscar}%")
+                        ->orWhere('apellido', 'LIKE', "%{$buscar}%");
+                })
             );
         }
 
@@ -209,7 +212,9 @@ class TurnoController extends Controller
         $turnoChocado  = $this->verificarChoque($user->id, $data['fecha_hora'], $duracionTotal);
 
         if ($turnoChocado) {
-            $nombreCliente   = $turnoChocado->cliente?->nombre_completo ?? 'otra clienta';
+            $nombreCliente   = $turnoChocado->cliente
+                ? trim("{$turnoChocado->cliente->nombre} {$turnoChocado->cliente->apellido}")
+                : 'otra clienta';
             $serviciosChoque = $turnoChocado->servicios->pluck('nombre')->join(' + ');
             $horaChoque      = Carbon::parse($turnoChocado->fecha_hora)->format('H:i');
             $finChoque       = Carbon::parse($turnoChocado->fecha_hora)
@@ -293,7 +298,9 @@ class TurnoController extends Controller
         $turnoChocado  = $this->verificarChoque($user->id, $data['fecha_hora'], $duracionTotal, $id);
 
         if ($turnoChocado) {
-            $nombreCliente   = $turnoChocado->cliente?->nombre_completo ?? 'otra clienta';
+            $nombreCliente   = $turnoChocado->cliente
+                ? trim("{$turnoChocado->cliente->nombre} {$turnoChocado->cliente->apellido}")
+                : 'otra clienta';
             $serviciosChoque = $turnoChocado->servicios->pluck('nombre')->join(' + ');
             $horaChoque      = Carbon::parse($turnoChocado->fecha_hora)->format('H:i');
             $finChoque       = Carbon::parse($turnoChocado->fecha_hora)
