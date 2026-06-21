@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\TurnoController;
 use App\Http\Controllers\Api\ReservaWebController;
 use App\Http\Controllers\Api\PublicController;
 use App\Http\Controllers\Api\WhatsappController;
+use App\Http\Controllers\Api\EvolutionWebhookController;
 use Illuminate\Support\Facades\Route;
 
 // ─────────────────────────────────────────────
@@ -85,3 +86,8 @@ Route::middleware(['auth:sanctum', 'check.activo'])->group(function () {
 // Webhook Mercado Pago — sin auth, con firma HMAC
 // ─────────────────────────────────────────────
 Route::post('webhooks/mercadopago', [ReservaWebController::class, 'webhookMercadoPago']);
+
+// ─────────────────────────────────────────────
+// Webhook Evolution API — sin auth, lo llama el propio servicio
+// ─────────────────────────────────────────────
+Route::post('webhooks/evolution', [EvolutionWebhookController::class, 'handle']);
