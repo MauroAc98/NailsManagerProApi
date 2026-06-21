@@ -15,28 +15,24 @@ class WhatsappController extends Controller
 
     /**
      * POST /api/whatsapp/conectar
-     * Recibe el número de la profesional y devuelve el pairing code
-     * para que lo ingrese en WhatsApp → Dispositivos vinculados.
+     * Genera (o regenera) el código QR para vincular WhatsApp.
+     * Devuelve la imagen en base64, lista para mostrar en la app.
      */
     public function conectar(Request $request): JsonResponse
     {
-        $data = $request->validate([
-            'numero' => 'required|string|min:10|max:15',
-        ]);
-
         $user = $request->user();
 
-        $pairingCode = $this->evolutionService->generarPairingCode($user, $data['numero']);
+        $qrBase64 = $this->evolutionService->generarQr($user);
 
-        if (!$pairingCode) {
+        if (!$qrBase64) {
             return response()->json([
-                'message' => 'No se pudo generar el código de vinculación. Intentá de nuevo.',
+                'message' => 'No se pudo generar el código QR. Intentá de nuevo.',
             ], 422);
         }
 
         return response()->json([
-            'pairing_code' => $pairingCode,
-            'estado'       => 'conectando',
+            'qr_base64' => $qrBase64,
+            'estado'    => 'conectando',
         ]);
     }
 
@@ -44,7 +40,7 @@ class WhatsappController extends Controller
      * GET /api/whatsapp/estado
      * Consulta si el WhatsApp de la profesional ya está conectado.
      * La app puede llamar esto en loop (polling) mientras espera
-     * que la profesional ingrese el pairing code.
+     * que la profesional escanee el QR.
      */
     public function estado(Request $request): JsonResponse
     {
@@ -56,14 +52,12 @@ class WhatsappController extends Controller
 
         $estadoReal = $this->evolutionService->consultarEstado($user);
 
-        // Mapeamos el estado de Evolution API a nuestro propio enum
         $estado = match ($estadoReal) {
             'open'  => 'conectado',
             'close' => 'desconectado',
             default => 'conectando',
         };
 
-        // Sincronizamos el estado en la DB si cambió
         if ($user->whatsapp_estado !== $estado) {
             $user->update(['whatsapp_estado' => $estado]);
         }

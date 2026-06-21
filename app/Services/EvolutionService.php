@@ -26,11 +26,9 @@ class EvolutionService
     }
 
     /**
-     * Crea una instancia nueva en Evolution API para un usuario.
-     * Se llama una sola vez, la primera vez que la profesional
-     * quiere conectar su WhatsApp. No inicia el QR automáticamente
-     * (qrcode: false) — el connect se hace en un segundo paso,
-     * que es el flujo validado para pairing code.
+     * Crea una instancia nueva en Evolution API para un usuario,
+     * solicitando el QR directamente. El pairing code no se usa
+     * por inestabilidad confirmada en esta versión de Evolution API.
      */
     public function crearInstancia(User $user): ?string
     {
@@ -39,7 +37,7 @@ class EvolutionService
         $response = Http::withHeaders($this->headers())
             ->post("{$this->baseUrl}/instance/create", [
                 'instanceName' => $instanceName,
-                'qrcode'       => false,
+                'qrcode'       => true,
                 'integration'  => 'WHATSAPP-BAILEYS',
             ]);
 
@@ -60,12 +58,11 @@ class EvolutionService
     }
 
     /**
-     * Solicita un pairing code para vincular el WhatsApp de la profesional
-     * a su instancia. Si la instancia no existe todavía, la crea primero.
-     *
-     * Flujo validado: create (sin qrcode) → connect?number=...
+     * Genera (o regenera) el código QR para vincular WhatsApp.
+     * Si la instancia no existe todavía, la crea primero.
+     * Devuelve la imagen en base64, lista para mostrar en la app.
      */
-    public function generarPairingCode(User $user, string $numero): ?string
+    public function generarQr(User $user): ?string
     {
         if (empty($user->evolution_instance_name)) {
             $this->crearInstancia($user);
@@ -79,28 +76,26 @@ class EvolutionService
         $instanceName = $user->evolution_instance_name;
 
         $response = Http::withHeaders($this->headers())
-            ->get("{$this->baseUrl}/instance/connect/{$instanceName}", [
-                'number' => $numero,
-            ]);
+            ->get("{$this->baseUrl}/instance/connect/{$instanceName}");
 
         if (!$response->successful()) {
-            Log::error('EvolutionService::generarPairingCode falló', [
+            Log::error('EvolutionService::generarQr falló', [
                 'user_id' => $user->id,
                 'body'    => $response->body(),
             ]);
             return null;
         }
 
-        $pairingCode = $response->json('pairingCode');
+        $base64 = $response->json('base64');
 
-        if (empty($pairingCode)) {
-            Log::warning('EvolutionService::generarPairingCode sin pairingCode en respuesta', [
+        if (empty($base64)) {
+            Log::warning('EvolutionService::generarQr sin base64 en respuesta', [
                 'user_id' => $user->id,
                 'body'    => $response->body(),
             ]);
         }
 
-        return $pairingCode;
+        return $base64;
     }
 
     /**
