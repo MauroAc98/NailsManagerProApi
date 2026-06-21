@@ -23,15 +23,13 @@ return new class extends Migration
                 $partes = explode(' ', trim($cliente->nombre_completo), 2);
 
                 DB::table('clientes')->where('id', $cliente->id)->update([
-                    'nombre'   => $partes[0] ?? '',
+                    'nombre'   => $partes[0] !== '' ? $partes[0] : 'Sin nombre',
                     'apellido' => $partes[1] ?? '',
                 ]);
             }
         });
 
         Schema::table('clientes', function (Blueprint $table) {
-            $table->string('nombre', 100)->nullable(false)->change();
-            $table->string('apellido', 100)->nullable(false)->change();
             $table->dropColumn('nombre_completo');
         });
     }
@@ -54,7 +52,6 @@ return new class extends Migration
         });
 
         Schema::table('clientes', function (Blueprint $table) {
-            $table->string('nombre_completo', 200)->nullable(false)->change();
             $table->dropColumn(['nombre', 'apellido']);
         });
     }
