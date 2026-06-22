@@ -6,15 +6,22 @@ use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
-class CheckActivo
+class CheckSubscription
 {
     public function handle(Request $request, Closure $next): Response
     {
         $user = $request->user();
 
-        if (!$user->activo) {
+        if ($user->is_exempt) {
+            return $next($request);
+        }
+
+        $subscription = $user->subscription;
+
+        if (!$subscription || $subscription->ends_at < now()) {
             return response()->json([
-                'message' => 'Tu cuenta está suspendida. Contactá al administrador.',
+                'error' => 'Suscripción vencida',
+                'code'  => 'SUBSCRIPTION_EXPIRED'
             ], 403);
         }
 

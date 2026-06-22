@@ -44,7 +44,7 @@ Route::prefix('auth')->group(function () {
 // ─────────────────────────────────────────────
 // Rutas privadas — requieren Bearer Token
 // ─────────────────────────────────────────────
-Route::middleware(['auth:sanctum', 'check.activo'])->group(function () {
+Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
 
     // Perfil
     Route::put('perfil', [AuthController::class, 'updatePerfil']);

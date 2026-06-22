@@ -32,10 +32,17 @@ class AuthController extends Controller
         $passwordProvisoria = Str::password(10, symbols: false);
 
         $user = User::create([
-            'name'                   => $data['name'],
-            'email'                  => $data['email'],
-            'password'               => $passwordProvisoria,
-            'debe_cambiar_password'  => true,
+            'name'                  => $data['name'],
+            'email'                 => $data['email'],
+            'password'              => $passwordProvisoria,
+            'debe_cambiar_password' => true,
+        ]);
+
+        // Crear suscripción con 30 días de gracia
+        \App\Models\Subscription::create([
+            'user_id'  => $user->id,
+            'ends_at'  => now()->addDays(30),
+            'status'   => 'ACTIVO',
         ]);
 
         Mail::to($user->email)->send(
@@ -70,13 +77,6 @@ class AuthController extends Controller
             ]);
         }
 
-        if (!$user->activo) {
-            return response()->json([
-                'message' => 'Tu cuenta está suspendida. Contactá al administrador.',
-            ], 403);
-        }
-
-        // ── Contraseña provisoria sin cambiar ──
         if ($user->debe_cambiar_password) {
             return response()->json([
                 'debe_cambiar_password' => true,

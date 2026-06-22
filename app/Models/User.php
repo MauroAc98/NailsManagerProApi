@@ -19,8 +19,7 @@ class User extends Authenticatable
         'password',
         'telefono',
         'direccion',
-        'activo',
-        'fecha_vencimiento',
+        'is_exempt',
         'confirmacion_automatica',
         'sena_monto',
         'fcm_token',
@@ -36,7 +35,7 @@ class User extends Authenticatable
     ];
 
     protected $attributes = [
-        'whatsapp_estado'  => 'desconectado',
+        'whatsapp_estado' => 'desconectado',
     ];
 
     protected function casts(): array
@@ -44,9 +43,8 @@ class User extends Authenticatable
         return [
             'email_verified_at'       => 'datetime',
             'password'                => 'hashed',
-            'activo'                  => 'boolean',
+            'is_exempt'               => 'boolean',
             'confirmacion_automatica' => 'boolean',
-            'fecha_vencimiento'       => 'date',
             'sena_monto'              => 'decimal:2',
             'debe_cambiar_password'   => 'boolean',
         ];
@@ -83,6 +81,12 @@ class User extends Authenticatable
     }
 
     // ── Relaciones ───────────────────────────────────────────────
+
+    public function subscription()
+    {
+        return $this->hasOne(Subscription::class)->latest();
+    }
+
     public function servicios()
     {
         return $this->hasMany(Servicio::class);
