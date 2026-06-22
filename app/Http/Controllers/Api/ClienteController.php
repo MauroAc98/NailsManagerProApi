@@ -21,8 +21,8 @@ class ClienteController extends Controller
         if ($request->filled('buscar')) {
             $buscar = $request->buscar;
             $query->where(function ($q) use ($buscar) {
-                $q->where('nombre', 'LIKE', "%{$buscar}%")
-                  ->orWhere('apellido', 'LIKE', "%{$buscar}%")
+                $q->where('nombre', 'ILIKE', "%{$buscar}%")
+                  ->orWhere('apellido', 'ILIKE', "%{$buscar}%")
                   ->orWhere('telefono', 'LIKE', "%{$buscar}%");
             });
         }
@@ -102,7 +102,6 @@ class ClienteController extends Controller
     {
         $cliente = Cliente::delUsuario($request->user())->findOrFail($id);
 
-        // Verificar que no tenga turnos futuros confirmados
         $tieneTurnosFuturos = $cliente->turnos()
             ->confirmados()
             ->where('fecha_hora', '>=', now())

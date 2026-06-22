@@ -33,8 +33,8 @@ class TurnoController extends Controller
             $query->whereHas(
                 'cliente',
                 fn($q) => $q->where(function ($sub) use ($buscar) {
-                    $sub->where('nombre', 'LIKE', "%{$buscar}%")
-                        ->orWhere('apellido', 'LIKE', "%{$buscar}%");
+                    $sub->where('nombre', 'ILIKE', "%{$buscar}%")
+                        ->orWhere('apellido', 'ILIKE', "%{$buscar}%");
                 })
             );
         }
