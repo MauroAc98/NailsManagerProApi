@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Mail\ProvisionalPasswordMail;
 use App\Mail\ResetCodeMail;
+use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -18,9 +19,6 @@ class AuthController extends Controller
 {
     // ─────────────────────────────────────────────
     // POST /api/auth/register
-    // Genera una contraseña provisoria, la envía por
-    // email y la devuelve en la respuesta. El usuario
-    // queda marcado con debe_cambiar_password = true.
     // ─────────────────────────────────────────────
     public function register(Request $request): JsonResponse
     {
@@ -38,7 +36,6 @@ class AuthController extends Controller
             'debe_cambiar_password' => true,
         ]);
 
-        // Crear suscripción con 30 días de gracia
         \App\Models\Subscription::create([
             'user_id'  => $user->id,
             'ends_at'  => now()->addDays(30),
@@ -58,9 +55,6 @@ class AuthController extends Controller
 
     // ─────────────────────────────────────────────
     // POST /api/auth/login
-    // Si el usuario tiene debe_cambiar_password = true,
-    // NO genera token: devuelve un flag para que el
-    // frontend lo redirija a cambiar la contraseña.
     // ─────────────────────────────────────────────
     public function login(Request $request): JsonResponse
     {
@@ -100,8 +94,6 @@ class AuthController extends Controller
 
     // ─────────────────────────────────────────────
     // POST /api/auth/cambiar-password-obligatorio
-    // Valida la contraseña provisoria actual + setea
-    // la nueva. Recién acá se genera el token de sesión.
     // ─────────────────────────────────────────────
     public function cambiarPasswordObligatorio(Request $request): JsonResponse
     {
@@ -254,6 +246,9 @@ class AuthController extends Controller
         ]);
     }
 
+    // ─────────────────────────────────────────────
+    // GET /api/auth/subscription-status
+    // ─────────────────────────────────────────────
     public function subscriptionStatus(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -285,6 +280,18 @@ class AuthController extends Controller
             'is_exempt' => false,
             'ends_at'   => $subscription->ends_at,
             'days_left' => $daysLeft,
+        ]);
+    }
+
+    // ─────────────────────────────────────────────
+    // GET /api/support-info
+    // Público — no requiere autenticación
+    // ─────────────────────────────────────────────
+    public function supportInfo(): JsonResponse
+    {
+        return response()->json([
+            'whatsapp' => Setting::get('support_whatsapp'),
+            'email'    => Setting::get('support_email'),
         ]);
     }
 }

@@ -23,6 +23,8 @@ Route::prefix('public/{slug}')->group(function () {
     Route::post('reservas',      [PublicController::class, 'store'])->middleware('throttle:10,1');
 });
 
+Route::get('support-info', [AuthController::class, 'supportInfo']);
+
 // ─────────────────────────────────────────────
 // Autenticación
 // ─────────────────────────────────────────────
