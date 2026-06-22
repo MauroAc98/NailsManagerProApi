@@ -253,4 +253,38 @@ class AuthController extends Controller
             'message' => 'Contraseña actualizada correctamente.',
         ]);
     }
+
+    public function subscriptionStatus(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        if ($user->is_exempt) {
+            return response()->json([
+                'status'    => 'ACTIVO',
+                'is_exempt' => true,
+                'ends_at'   => null,
+                'days_left' => null,
+            ]);
+        }
+
+        $subscription = $user->subscription;
+
+        if (!$subscription) {
+            return response()->json([
+                'status'    => 'VENCIDO',
+                'is_exempt' => false,
+                'ends_at'   => null,
+                'days_left' => 0,
+            ]);
+        }
+
+        $daysLeft = max(0, (int) now()->diffInDays($subscription->ends_at, false));
+
+        return response()->json([
+            'status'    => $subscription->ends_at > now() ? 'ACTIVO' : 'VENCIDO',
+            'is_exempt' => false,
+            'ends_at'   => $subscription->ends_at,
+            'days_left' => $daysLeft,
+        ]);
+    }
 }
