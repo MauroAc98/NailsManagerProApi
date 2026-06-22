@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\TurnoController;
 use App\Http\Controllers\Api\ReservaWebController;
 use App\Http\Controllers\Api\PublicController;
 use App\Http\Controllers\Api\WhatsappController;
+use App\Http\Controllers\Api\WhatsappTemplateController;
 use App\Http\Controllers\Api\EvolutionWebhookController;
 use Illuminate\Support\Facades\Route;
 
@@ -73,6 +74,13 @@ Route::middleware(['auth:sanctum', 'check.activo'])->group(function () {
         Route::get('/',           [ReservaWebController::class, 'index']);
         Route::post('{id}/aceptar',  [ReservaWebController::class, 'aceptar']);
         Route::post('{id}/rechazar', [ReservaWebController::class, 'rechazar']);
+    });
+
+    // Plantillas de mensajes WhatsApp
+    Route::prefix('whatsapp-templates')->group(function () {
+        Route::get('/',                  [WhatsappTemplateController::class, 'index']);
+        Route::put('/{tipo}',            [WhatsappTemplateController::class, 'update']);
+        Route::post('/{tipo}/resetear',  [WhatsappTemplateController::class, 'resetear']);
     });
 
     Route::prefix('whatsapp')->group(function () {

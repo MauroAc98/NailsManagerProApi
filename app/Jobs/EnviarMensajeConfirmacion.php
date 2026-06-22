@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Turno;
+use App\Models\WhatsappTemplate;
 use App\Services\EvolutionService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -45,20 +46,15 @@ class EnviarMensajeConfirmacion implements ShouldQueue
             return;
         }
 
-        $fechaHora = \Illuminate\Support\Carbon::parse($turno->fecha_hora);
-        $servicios = $turno->servicios->pluck('nombre')->join(' + ');
+        // ── Obtener la plantilla de confirmación ──
+        $plantilla = WhatsappTemplate::obtenerPlantilla($user, 'confirmacion');
 
-        $mensaje = str_replace(
-            ['{nombre}', '{apellido}', '{servicios}', '{fecha}', '{hora}', '{negocio}'],
-            [
-                $cliente->nombre,
-                $cliente->apellido,
-                $servicios,
-                $fechaHora->format('d/m'),
-                $fechaHora->format('H:i'),
-                $user->name,
-            ],
-            $user->mensaje_whatsapp,
+        // ── Procesar la plantilla reemplazando placeholders ──
+        $mensaje = WhatsappTemplate::procesarPlantilla(
+            $plantilla,
+            $cliente,
+            $turno,
+            $user
         );
 
         $numero = preg_replace('/\D/', '', $cliente->telefono); // solo dígitos

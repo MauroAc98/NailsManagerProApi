@@ -24,7 +24,6 @@ class User extends Authenticatable
         'confirmacion_automatica',
         'sena_monto',
         'fcm_token',
-        'mensaje_whatsapp',
         'debe_cambiar_password',
         'evolution_instance_name',
         'whatsapp_estado',
@@ -37,7 +36,6 @@ class User extends Authenticatable
     ];
 
     protected $attributes = [
-        'mensaje_whatsapp' => 'Hola {nombre} 💅 Te recuerdo tu turno de {servicios} el {fecha} a las {hora}. ¡Te espero!',
         'whatsapp_estado'  => 'desconectado',
     ];
 
