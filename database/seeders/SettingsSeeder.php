@@ -23,6 +23,11 @@ class SettingsSeeder extends Seeder
                 'value'       => 'nailsmanagerpro.app@gmail.com',
                 'description' => 'Email de soporte',
             ],
+            [
+                'key'         => 'subscription_warning_days',
+                'value'       => '15',
+                'description' => 'Días antes del vencimiento para mostrar el aviso en la app',
+            ],
         ];
 
         foreach ($settings as $setting) {

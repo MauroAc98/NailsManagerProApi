@@ -290,8 +290,9 @@ class AuthController extends Controller
     public function supportInfo(): JsonResponse
     {
         return response()->json([
-            'whatsapp' => Setting::get('support_whatsapp'),
-            'email'    => Setting::get('support_email'),
+            'whatsapp'                  => Setting::get('support_whatsapp'),
+            'email'                     => Setting::get('support_email'),
+            'subscription_warning_days' => (int) Setting::get('subscription_warning_days'),
         ]);
     }
 }
