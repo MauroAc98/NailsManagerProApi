@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\PublicController;
 use App\Http\Controllers\Api\WhatsappController;
 use App\Http\Controllers\Api\WhatsappTemplateController;
 use App\Http\Controllers\Api\EvolutionWebhookController;
+use App\Http\Controllers\Api\AdminController;
 use Illuminate\Support\Facades\Route;
 
 // ─────────────────────────────────────────────
@@ -25,7 +26,6 @@ Route::prefix('public/{slug}')->group(function () {
 // ─────────────────────────────────────────────
 // Autenticación
 // ─────────────────────────────────────────────
-
 Route::prefix('auth')->group(function () {
     Route::post('register', [AuthController::class, 'register']);
     Route::post('login',    [AuthController::class, 'login']);
@@ -40,6 +40,11 @@ Route::prefix('auth')->group(function () {
         Route::get('me',      [AuthController::class, 'me']);
     });
 });
+
+// ─────────────────────────────────────────────
+// Admin
+// ─────────────────────────────────────────────
+Route::post('admin/subscriptions/{user}/renew', [AdminController::class, 'renewSubscription']);
 
 // ─────────────────────────────────────────────
 // Rutas privadas — requieren Bearer Token
@@ -65,27 +70,27 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
         Route::get('/',                [TurnoController::class, 'index']);
         Route::post('/',               [TurnoController::class, 'store']);
         Route::put('/{id}',            [TurnoController::class, 'update']);
-        Route::patch('{id}/completar', [TurnoController::class, 'completar']); // ← nueva
+        Route::patch('{id}/completar', [TurnoController::class, 'completar']);
         Route::delete('/{id}',         [TurnoController::class, 'destroy']);
     });
 
     // Reservas web — panel de aceptación
     Route::prefix('reservas')->group(function () {
-        Route::get('/',           [ReservaWebController::class, 'index']);
+        Route::get('/',              [ReservaWebController::class, 'index']);
         Route::post('{id}/aceptar',  [ReservaWebController::class, 'aceptar']);
         Route::post('{id}/rechazar', [ReservaWebController::class, 'rechazar']);
     });
 
     // Plantillas de mensajes WhatsApp
     Route::prefix('whatsapp-templates')->group(function () {
-        Route::get('/',                  [WhatsappTemplateController::class, 'index']);
-        Route::put('/{tipo}',            [WhatsappTemplateController::class, 'update']);
-        Route::post('/{tipo}/resetear',  [WhatsappTemplateController::class, 'resetear']);
+        Route::get('/',                 [WhatsappTemplateController::class, 'index']);
+        Route::put('/{tipo}',           [WhatsappTemplateController::class, 'update']);
+        Route::post('/{tipo}/resetear', [WhatsappTemplateController::class, 'resetear']);
     });
 
     Route::prefix('whatsapp')->group(function () {
-        Route::post('conectar',    [WhatsappController::class, 'conectar']);
-        Route::get('estado',       [WhatsappController::class, 'estado']);
+        Route::post('conectar',      [WhatsappController::class, 'conectar']);
+        Route::get('estado',         [WhatsappController::class, 'estado']);
         Route::delete('desconectar', [WhatsappController::class, 'desconectar']);
     });
 });
