@@ -31,7 +31,7 @@ class AuthController extends Controller
 
         $user = User::create([
             'name'                  => $data['name'],
-            'email'                 => $data['email'],
+            'email'                 => strtolower($data['email']),
             'password'              => $passwordProvisoria,
             'debe_cambiar_password' => true,
         ]);
@@ -63,7 +63,7 @@ class AuthController extends Controller
             'password' => 'required|string',
         ]);
 
-        $user = User::where('email', $data['email'])->first();
+        $user = User::where('email', strtolower($data['email']))->first();
 
         if (!$user || !Hash::check($data['password'], $user->password)) {
             throw ValidationException::withMessages([
@@ -103,7 +103,7 @@ class AuthController extends Controller
             'password'         => 'required|string|min:8|confirmed',
         ]);
 
-        $user = User::where('email', $data['email'])->first();
+        $user = User::where('email', strtolower($data['email']))->first();
 
         if (!$user || !Hash::check($data['password_actual'], $user->password)) {
             throw ValidationException::withMessages([
@@ -187,17 +187,18 @@ class AuthController extends Controller
             'email' => 'required|email|exists:users,email',
         ]);
 
+        $email = strtolower($data['email']);
         $code = (string) random_int(100000, 999999);
 
         DB::table('password_reset_tokens')->updateOrInsert(
-            ['email' => $data['email']],
+            ['email' => $email],
             [
                 'token'      => Hash::make($code),
                 'created_at' => now(),
             ],
         );
 
-        Mail::to($data['email'])->send(new ResetCodeMail($code));
+        Mail::to($email)->send(new ResetCodeMail($code));
 
         return response()->json([
             'message' => 'Te enviamos un código a tu email.',
@@ -215,8 +216,10 @@ class AuthController extends Controller
             'password' => 'required|string|min:8|confirmed',
         ]);
 
+        $email = strtolower($data['email']);
+
         $record = DB::table('password_reset_tokens')
-            ->where('email', $data['email'])
+            ->where('email', $email)
             ->first();
 
         if (!$record || !Hash::check($data['code'], $record->token)) {
@@ -231,7 +234,7 @@ class AuthController extends Controller
             ]);
         }
 
-        $user = User::where('email', $data['email'])->first();
+        $user = User::where('email', $email)->first();
         $user->update([
             'password'              => bcrypt($data['password']),
             'debe_cambiar_password' => false,
@@ -239,7 +242,7 @@ class AuthController extends Controller
 
         $user->tokens()->delete();
 
-        DB::table('password_reset_tokens')->where('email', $data['email'])->delete();
+        DB::table('password_reset_tokens')->where('email', $email)->delete();
 
         return response()->json([
             'message' => 'Contraseña actualizada correctamente.',
