@@ -9,4 +9,6 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('turnos:completar-vencidos')->everyFifteenMinutes();
-Schedule::command('recordatorios:enviar')->hourly();
+Schedule::command('recordatorios:enviar')
+    ->hourly()
+    ->appendOutputTo(storage_path('logs/recordatorios.log'));
