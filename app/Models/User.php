@@ -20,7 +20,8 @@ class User extends Authenticatable
         'telefono',
         'direccion',
         'is_exempt',
-        'confirmacion_automatica',
+        'recordatorio_automatico',
+        'hora_recordatorio',
         'sena_monto',
         'fcm_token',
         'debe_cambiar_password',
@@ -35,7 +36,9 @@ class User extends Authenticatable
     ];
 
     protected $attributes = [
-        'whatsapp_estado' => 'desconectado',
+        'whatsapp_estado'         => 'desconectado',
+        'recordatorio_automatico' => false,
+        'hora_recordatorio'       => '20:00',
     ];
 
     protected function casts(): array
@@ -44,7 +47,7 @@ class User extends Authenticatable
             'email_verified_at'       => 'datetime',
             'password'                => 'hashed',
             'is_exempt'               => 'boolean',
-            'confirmacion_automatica' => 'boolean',
+            'recordatorio_automatico' => 'boolean',
             'sena_monto'              => 'decimal:2',
             'debe_cambiar_password'   => 'boolean',
         ];
@@ -74,14 +77,19 @@ class User extends Authenticatable
         return $slug;
     }
 
-    // ── Helper — instancia de Evolution API ────────────────────────
+    // ── Helpers ──────────────────────────────────────────────────
     public function tieneWhatsappConectado(): bool
     {
-        return $this->whatsapp_estado === 'conectado' && !empty($this->evolution_instance_name);
+        return $this->whatsapp_estado === 'conectado'
+            && !empty($this->evolution_instance_name);
+    }
+
+    public function tieneRecordatorioAutomatico(): bool
+    {
+        return $this->recordatorio_automatico && $this->tieneWhatsappConectado();
     }
 
     // ── Relaciones ───────────────────────────────────────────────
-
     public function subscription()
     {
         return $this->hasOne(Subscription::class)->latest();
