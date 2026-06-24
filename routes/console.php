@@ -9,4 +9,4 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('turnos:completar-vencidos')->everyFifteenMinutes();
-Schedule::command('recordatorios:enviar')->dailyAt('20:00');
+Schedule::command('recordatorios:enviar')->hourly();
