@@ -126,15 +126,19 @@ class TurnoController extends Controller
                 $slotMinutos = (int) Carbon::parse($slot->hora)->format('H') * 60
                     + (int) Carbon::parse($slot->hora)->format('i');
 
+                $horaFormateada = Carbon::parse($slot->hora)->minute > 0
+                    ? Carbon::parse($slot->hora)->format('H:i') . 'hs'
+                    : Carbon::parse($slot->hora)->format('H') . 'hs';
+
                 if ($esHoy && (int) Carbon::parse($slot->hora)->format('H') <= $horaActual) {
-                    return ['hora' => Carbon::parse($slot->hora)->format('H') . 'hs', 'libre' => false];
+                    return ['hora' => $horaFormateada, 'libre' => false];
                 }
 
                 foreach ($turnosDia as $turno) {
                     $inicioTurno = Carbon::parse($turno->fecha_hora)->hour * 60 + Carbon::parse($turno->fecha_hora)->minute;
                     $finTurno    = $inicioTurno + $turno->duracion_total_minutos;
                     if ($slotMinutos >= $inicioTurno && $slotMinutos < $finTurno) {
-                        return ['hora' => Carbon::parse($slot->hora)->format('H') . 'hs', 'libre' => false];
+                        return ['hora' => $horaFormateada, 'libre' => false];
                     }
                 }
 
@@ -142,11 +146,11 @@ class TurnoController extends Controller
                     $inicioReserva = Carbon::parse($reserva->slot_hora)->hour * 60 + Carbon::parse($reserva->slot_hora)->minute;
                     $finReserva    = $inicioReserva + $reserva->duracion_total_minutos;
                     if ($slotMinutos >= $inicioReserva && $slotMinutos < $finReserva) {
-                        return ['hora' => Carbon::parse($slot->hora)->format('H') . 'hs', 'libre' => false];
+                        return ['hora' => $horaFormateada, 'libre' => false];
                     }
                 }
 
-                return ['hora' => Carbon::parse($slot->hora)->format('H') . 'hs', 'libre' => true];
+                return ['hora' => $horaFormateada, 'libre' => true];
             });
 
             $resultado[] = ['fecha' => $fecha, 'slots' => $slotsDelDia->values()];
