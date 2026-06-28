@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Turno;
+use App\Models\WhatsappMensaje;
 use App\Models\WhatsappTemplate;
 use App\Services\EvolutionService;
 use Illuminate\Bus\Queueable;
@@ -16,8 +17,8 @@ class EnviarMensajeConfirmacion implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 3;
-    public int $backoff = 10; // segundos entre reintentos
+    public int $tries   = 5;
+    public int $backoff = 15;
 
     public function __construct(
         public int $turnoId,
@@ -40,28 +41,42 @@ class EnviarMensajeConfirmacion implements ShouldQueue
             return;
         }
 
-        // Si la profesional no tiene WhatsApp conectado, no hay nada que hacer.
-        // No es un error — simplemente no tiene la función activada.
         if (!$user->tieneWhatsappConectado()) {
             return;
         }
 
-        // ── Obtener la plantilla de confirmación ──
+        // ── Verificar que la conexión esté estable en Evolution API ──
+        $estadoReal = $evolutionService->consultarEstado($user);
+
+        if ($estadoReal !== 'open') {
+            Log::info('EnviarMensajeConfirmacion: conexión no estable, reintentando', [
+                'turno_id' => $this->turnoId,
+                'estado'   => $estadoReal,
+            ]);
+            $this->release(30);
+            return;
+        }
+
         $plantilla = WhatsappTemplate::obtenerPlantilla($user, 'confirmacion');
+        $mensaje   = WhatsappTemplate::procesarPlantilla($plantilla, $cliente, $turno, $user);
+        $numero    = preg_replace('/\D/', '', $cliente->telefono);
 
-        // ── Procesar la plantilla reemplazando placeholders ──
-        $mensaje = WhatsappTemplate::procesarPlantilla(
-            $plantilla,
-            $cliente,
-            $turno,
-            $user
-        );
+        $messageId = $evolutionService->enviarMensaje($user, $numero, $mensaje);
 
-        $numero = preg_replace('/\D/', '', $cliente->telefono); // solo dígitos
+        // ── Guardar registro para tracking ──
+        WhatsappMensaje::create([
+            'user_id'        => $user->id,
+            'turno_id'       => $turno->id,
+            'numero'         => $numero,
+            'mensaje'        => $mensaje,
+            'tipo'           => 'confirmacion',
+            'message_id'     => $messageId,
+            'status'         => $messageId ? 'pending' : 'failed',
+            'intentos'       => 1,
+            'ultimo_intento' => now(),
+        ]);
 
-        $enviado = $evolutionService->enviarMensaje($user, $numero, $mensaje);
-
-        if (!$enviado) {
+        if (!$messageId) {
             Log::error('EnviarMensajeConfirmacion: fallo al enviar', [
                 'turno_id' => $this->turnoId,
                 'user_id'  => $user->id,

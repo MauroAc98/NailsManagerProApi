@@ -8,8 +8,8 @@ use Illuminate\Support\Facades\Log;
 
 class EvolutionService
 {
-    private string $baseUrl;
-    private string $apiKey;
+    private string $baseUrl = "";
+    private string $apiKey = "";
 
     public function __construct()
     {
@@ -25,11 +25,6 @@ class EvolutionService
         ];
     }
 
-    /**
-     * Crea una instancia nueva en Evolution API para un usuario,
-     * solicitando el QR directamente. El pairing code no se usa
-     * por inestabilidad confirmada en esta versión de Evolution API.
-     */
     public function crearInstancia(User $user): ?string
     {
         $instanceName = "user_{$user->id}";
@@ -57,11 +52,6 @@ class EvolutionService
         return $instanceName;
     }
 
-    /**
-     * Genera (o regenera) el código QR para vincular WhatsApp.
-     * Si la instancia no existe todavía, la crea primero.
-     * Devuelve la imagen en base64, lista para mostrar en la app.
-     */
     public function generarQr(User $user): ?string
     {
         if (empty($user->evolution_instance_name)) {
@@ -70,7 +60,7 @@ class EvolutionService
         }
 
         if (empty($user->evolution_instance_name)) {
-            return null; // crearInstancia falló
+            return null;
         }
 
         $instanceName = $user->evolution_instance_name;
@@ -98,10 +88,6 @@ class EvolutionService
         return $base64;
     }
 
-    /**
-     * Consulta el estado de conexión de la instancia.
-     * Devuelve: 'open' (conectado) | 'close' (desconectado) | 'connecting'
-     */
     public function consultarEstado(User $user): ?string
     {
         if (empty($user->evolution_instance_name)) {
@@ -119,16 +105,16 @@ class EvolutionService
     }
 
     /**
-     * Envía un mensaje de texto a un número de WhatsApp
-     * usando la instancia de la profesional.
+     * Envía un mensaje de texto.
+     * Devuelve el message_id si fue exitoso, null si falló.
      */
-    public function enviarMensaje(User $user, string $numero, string $mensaje): bool
+    public function enviarMensaje(User $user, string $numero, string $mensaje): ?string
     {
         if (!$user->tieneWhatsappConectado()) {
             Log::warning('EvolutionService::enviarMensaje — usuario sin WhatsApp conectado', [
                 'user_id' => $user->id,
             ]);
-            return false;
+            return null;
         }
 
         $response = Http::withHeaders($this->headers())
@@ -143,15 +129,13 @@ class EvolutionService
                 'numero'  => $numero,
                 'body'    => $response->body(),
             ]);
-            return false;
+            return null;
         }
 
-        return true;
+        // Devolver el message_id para tracking
+        return $response->json('key.id');
     }
 
-    /**
-     * Desconecta y elimina la instancia (logout completo).
-     */
     public function desconectar(User $user): bool
     {
         if (empty($user->evolution_instance_name)) {

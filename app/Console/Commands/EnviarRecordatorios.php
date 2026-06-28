@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\Turno;
 use App\Models\User;
+use App\Models\WhatsappMensaje;
 use App\Models\WhatsappTemplate;
 use App\Services\EvolutionService;
 use Illuminate\Console\Command;
@@ -27,7 +28,6 @@ class EnviarRecordatorios extends Command
 
         $this->info("Hora actual: {$horaActual} — buscando recordatorios para {$manana}...");
 
-        // Solo usuarios cuya hora_recordatorio coincida con la hora actual
         $usuarios = User::where('recordatorio_automatico', true)
             ->where('whatsapp_estado', 'conectado')
             ->where('hora_recordatorio', $horaActual)
@@ -68,28 +68,31 @@ class EnviarRecordatorios extends Command
                     continue;
                 }
 
-                $mensaje = WhatsappTemplate::procesarPlantilla(
-                    $plantilla,
-                    $cliente,
-                    $turno,
-                    $user
-                );
-
-                $numero = preg_replace('/\D/', '', $cliente->telefono);
+                $mensaje = WhatsappTemplate::procesarPlantilla($plantilla, $cliente, $turno, $user);
+                $numero  = preg_replace('/\D/', '', $cliente->telefono);
 
                 try {
-                    $enviado = $this->evolutionService->enviarMensaje($user, $numero, $mensaje);
+                    $messageId = $this->evolutionService->enviarMensaje($user, $numero, $mensaje);
 
-                    if ($enviado) {
+                    // ── Guardar registro para tracking ──
+                    WhatsappMensaje::create([
+                        'user_id'        => $user->id,
+                        'turno_id'       => $turno->id,
+                        'numero'         => $numero,
+                        'mensaje'        => $mensaje,
+                        'tipo'           => 'recordatorio',
+                        'message_id'     => $messageId,
+                        'status'         => $messageId ? 'pending' : 'failed',
+                        'intentos'       => 1,
+                        'ultimo_intento' => now(),
+                    ]);
+
+                    if ($messageId) {
                         $this->info("    ✓ {$cliente->nombre} {$cliente->apellido}");
                         $totalEnviados++;
                     } else {
                         $this->error("    ✗ Fallo: {$cliente->nombre} {$cliente->apellido}");
                         $totalFallidos++;
-                        Log::error('EnviarRecordatorios: fallo al enviar', [
-                            'turno_id' => $turno->id,
-                            'user_id'  => $user->id,
-                        ]);
                     }
                 } catch (\Exception $e) {
                     $this->error("    ✗ Error: {$e->getMessage()}");
