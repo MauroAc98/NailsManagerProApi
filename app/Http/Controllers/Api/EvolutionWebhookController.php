@@ -63,8 +63,10 @@ class EvolutionWebhookController extends Controller
         $updates = is_array($data) && isset($data[0]) ? $data : [$data];
 
         foreach ($updates as $update) {
-            $messageId = $update['key']['id'] ?? null;
-            $status    = $update['update']['status'] ?? null;
+            // Evolution API v2.2.3 manda keyId y status directamente
+            // Soporte para ambas estructuras por compatibilidad
+            $messageId = $update['keyId'] ?? $update['key']['id'] ?? null;
+            $status    = $update['status'] ?? $update['update']['status'] ?? null;
 
             if (!$messageId || !$status) continue;
 
@@ -73,16 +75,19 @@ class EvolutionWebhookController extends Controller
 
             if (!$registro) continue; // no es nuestro, ignorar sin loguear
 
-            // Mapear status numérico de WhatsApp a texto
-            // 1 = PENDING, 2 = SERVER_ACK, 3 = DELIVERY_ACK, 4 = READ
-            $nuevoStatus = match ((int) $status) {
-                3       => 'delivered',
-                4       => 'read',
-                default => null,
+            // Evolution API manda status como string
+            $nuevoStatus = match ($status) {
+                'DELIVERY_ACK' => 'delivered',
+                'READ'         => 'read',
+                default        => null,
             };
 
             if ($nuevoStatus) {
                 $registro->update(['status' => $nuevoStatus]);
+                Log::info('WhatsApp mensaje entregado', [
+                    'message_id' => $messageId,
+                    'status'     => $nuevoStatus,
+                ]);
             }
         }
 
