@@ -39,19 +39,22 @@ class EvolutionWebhookController extends Controller
             return response()->json(['ok' => true]);
         }
 
-        $estadoReal = $data['state'] ?? null;
+        $estadoReal   = $data['state']        ?? null;
+        $statusReason = $data['statusReason'] ?? null;
 
-        $estado = match ($estadoReal) {
-            'open'  => 'conectado',
-            'close' => 'desconectado',
-            default => 'conectando',
+        $estado = match (true) {
+            $estadoReal === 'open'  => 'conectado',
+            $estadoReal === 'close' => 'desconectado',
+            $statusReason === 401   => 'desconectado', // device_removed / unauthorized
+            default                 => 'conectando',
         };
 
         $user->update(['whatsapp_estado' => $estado]);
 
         Log::info('Evolution webhook: estado actualizado', [
-            'user_id' => $user->id,
-            'estado'  => $estado,
+            'user_id'      => $user->id,
+            'estado'       => $estado,
+            'statusReason' => $statusReason,
         ]);
 
         return response()->json(['ok' => true]);
