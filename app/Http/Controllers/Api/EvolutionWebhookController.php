@@ -5,17 +5,17 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\WhatsappMensaje;
-use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
 class EvolutionWebhookController extends Controller
 {
     public function handle(Request $request): JsonResponse
     {
-        $event        = $request->input('event');
+        $event = $request->input('event');
         $instanceName = $request->input('instance');
-        $data         = $request->input('data');
+        $data = $request->input('data');
 
         // ── Manejar cambios de estado de conexión ──
         if ($event === 'connection.update' || $event === 'CONNECTION_UPDATE') {
@@ -35,25 +35,32 @@ class EvolutionWebhookController extends Controller
     {
         $user = User::where('evolution_instance_name', $instanceName)->first();
 
-        if (!$user) {
+        if (! $user) {
             return response()->json(['ok' => true]);
         }
 
-        $estadoReal   = $data['state']        ?? null;
+        $estadoReal = $data['state'] ?? null;
         $statusReason = $data['statusReason'] ?? null;
 
+        // Códigos de Baileys que indican un fallo terminal de la conexión:
+        // 401 loggedOut/device_removed, 408 timedOut, 428 connectionClosed,
+        // 440 connectionReplaced, 515 restartRequired. Sin esto, cualquier
+        // razón distinta de 401 caía en el default y dejaba al usuario
+        // "colgado" en conectando sin ninguna señal de que falló.
+        $fallosTerminales = [401, 408, 428, 440, 515];
+
         $estado = match (true) {
-            $estadoReal === 'open'  => 'conectado',
+            $estadoReal === 'open' => 'conectado',
             $estadoReal === 'close' => 'desconectado',
-            $statusReason === 401   => 'desconectado', // device_removed / unauthorized
-            default                 => 'conectando',
+            in_array($statusReason, $fallosTerminales, true) => 'desconectado',
+            default => 'conectando',
         };
 
         $user->update(['whatsapp_estado' => $estado]);
 
         Log::info('Evolution webhook: estado actualizado', [
-            'user_id'      => $user->id,
-            'estado'       => $estado,
+            'user_id' => $user->id,
+            'estado' => $estado,
             'statusReason' => $statusReason,
         ]);
 
@@ -69,29 +76,33 @@ class EvolutionWebhookController extends Controller
             // Evolution API v2.2.3 manda keyId y status directamente
             // Soporte para ambas estructuras por compatibilidad
             $messageId = $update['keyId'] ?? $update['key']['id'] ?? null;
-            $status    = $update['status'] ?? $update['update']['status'] ?? null;
+            $status = $update['status'] ?? $update['update']['status'] ?? null;
 
-            if (!$messageId || !$status) continue;
+            if (! $messageId || ! $status) {
+                continue;
+            }
 
             // Buscar si es un mensaje que enviamos nosotros
             $registro = WhatsappMensaje::where('message_id', $messageId)->first();
 
-            if (!$registro) continue; // no es nuestro, ignorar sin loguear
+            if (! $registro) {
+                continue;
+            } // no es nuestro, ignorar sin loguear
 
             // Evolution API manda status como string o numérico (Baileys)
             // Numeric: 3=DELIVERY_ACK, 4=READ, 5=PLAYED (implica leído)
             $nuevoStatus = match (true) {
                 $status === 'DELIVERY_ACK' || $status === 3 => 'delivered',
-                $status === 'READ'         || $status === 4 => 'read',
-                $status === 'PLAYED'       || $status === 5 => 'read',
-                default                                     => null,
+                $status === 'READ' || $status === 4 => 'read',
+                $status === 'PLAYED' || $status === 5 => 'read',
+                default => null,
             };
 
             if ($nuevoStatus) {
                 $registro->update(['status' => $nuevoStatus]);
                 Log::info('WhatsApp mensaje entregado', [
                     'message_id' => $messageId,
-                    'status'     => $nuevoStatus,
+                    'status' => $nuevoStatus,
                 ]);
             }
         }
