@@ -75,11 +75,13 @@ class EvolutionWebhookController extends Controller
 
             if (!$registro) continue; // no es nuestro, ignorar sin loguear
 
-            // Evolution API manda status como string
-            $nuevoStatus = match ($status) {
-                'DELIVERY_ACK' => 'delivered',
-                'READ'         => 'read',
-                default        => null,
+            // Evolution API manda status como string o numérico (Baileys)
+            // Numeric: 3=DELIVERY_ACK, 4=READ, 5=PLAYED (implica leído)
+            $nuevoStatus = match (true) {
+                $status === 'DELIVERY_ACK' || $status === 3 => 'delivered',
+                $status === 'READ'         || $status === 4 => 'read',
+                $status === 'PLAYED'       || $status === 5 => 'read',
+                default                                     => null,
             };
 
             if ($nuevoStatus) {
