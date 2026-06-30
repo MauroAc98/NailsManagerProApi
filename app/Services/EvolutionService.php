@@ -65,9 +65,9 @@ class EvolutionService
 
         $instanceName = $user->evolution_instance_name;
 
-        // Si la instancia estaba desconectada, limpiar la sesión de Baileys
-        // antes de pedir un QR nuevo — evita el estado sucio post-desconexión
-        if ($user->whatsapp_estado === 'desconectado') {
+        // Limpiar sesión de Baileys antes de pedir QR cuando no está conectado
+        // Evita el estado sucio post-desconexión o reconexión fallida
+        if (in_array($user->whatsapp_estado, ['desconectado', 'conectando'])) {
             Http::withHeaders($this->headers())
                 ->delete("{$this->baseUrl}/instance/logout/{$instanceName}");
         }
