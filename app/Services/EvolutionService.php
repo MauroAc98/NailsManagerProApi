@@ -124,11 +124,21 @@ class EvolutionService
             ]);
 
         if (!$response->successful()) {
-            Log::error('EvolutionService::enviarMensaje falló', [
-                'user_id' => $user->id,
-                'numero'  => $numero,
-                'body'    => $response->body(),
-            ]);
+            $body = $response->body();
+
+            if (str_contains($body, 'SessionError') || str_contains($body, 'No sessions')) {
+                $user->update(['whatsapp_estado' => 'desconectado']);
+                Log::warning('EvolutionService::enviarMensaje — sesión rota, instancia marcada desconectada', [
+                    'user_id' => $user->id,
+                ]);
+            } else {
+                Log::error('EvolutionService::enviarMensaje falló', [
+                    'user_id' => $user->id,
+                    'numero'  => $numero,
+                    'body'    => $body,
+                ]);
+            }
+
             return null;
         }
 
