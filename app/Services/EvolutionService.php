@@ -172,8 +172,17 @@ class EvolutionService
         $response = Http::withHeaders($this->headers())
             ->delete("{$this->baseUrl}/instance/logout/{$user->evolution_instance_name}");
 
+        if (! $response->successful()) {
+            Log::error('EvolutionService::desconectar falló', [
+                'user_id' => $user->id,
+                'body' => $response->body(),
+            ]);
+
+            return false;
+        }
+
         $user->update(['whatsapp_estado' => 'desconectado']);
 
-        return $response->successful();
+        return true;
     }
 }

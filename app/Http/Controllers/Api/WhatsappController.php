@@ -73,7 +73,11 @@ class WhatsappController extends Controller
     {
         $user = $request->user();
 
-        $this->evolutionService->desconectar($user);
+        if (!$this->evolutionService->desconectar($user)) {
+            return response()->json([
+                'message' => 'No se pudo desvincular WhatsApp. Intentá de nuevo.',
+            ], 422);
+        }
 
         return response()->json(['message' => 'WhatsApp desconectado correctamente.']);
     }
