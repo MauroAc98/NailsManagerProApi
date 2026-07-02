@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Servicio;
 use App\Models\Turno;
+use App\Models\WhatsappMensaje;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Carbon;
@@ -316,6 +317,8 @@ class TurnoController extends Controller
             ], 422);
         }
 
+        $cambioDeFecha = Carbon::parse($turno->fecha_hora)->toDateString() !== $fechaHora->toDateString();
+
         $turno->update([
             'cliente_id'             => $data['cliente_id'],
             'fecha_hora'             => $data['fecha_hora'],
@@ -324,6 +327,16 @@ class TurnoController extends Controller
         ]);
 
         $turno->servicios()->sync($data['servicio_ids']);
+
+        // Si el turno cambió de fecha, borrar el recordatorio ya enviado (si
+        // existe) para que EnviarRecordatorios pueda volver a mandar uno para
+        // la fecha nueva. El unique constraint (turno_id, tipo) en
+        // whatsapp_mensajes bloquearía ese envío en silencio si no se limpia.
+        if ($cambioDeFecha) {
+            WhatsappMensaje::where('turno_id', $turno->id)
+                ->where('tipo', 'recordatorio')
+                ->delete();
+        }
 
         return response()->json($turno->load(['cliente', 'servicios']));
     }
