@@ -69,12 +69,17 @@ class ReenviarMensajesPendientes extends Command
 
                 if ($nuevosIntentos >= 3) {
                     $this->error("  ✗ Fallido definitivamente — {$registro->numero}");
-                    Log::error('ReenviarMensajesPendientes: fallido definitivamente', [
-                        'whatsapp_mensaje_id' => $registro->id,
-                        'user_id'             => $user->id,
-                        'numero'              => $registro->numero,
-                        'tipo'                => $registro->tipo,
-                    ]);
+
+                    try {
+                        Log::error('ReenviarMensajesPendientes: fallido definitivamente', [
+                            'whatsapp_mensaje_id' => $registro->id,
+                            'user_id'             => $user->id,
+                            'numero'              => $registro->numero,
+                            'tipo'                => $registro->tipo,
+                        ]);
+                    } catch (\Throwable $logError) {
+                        // no-op: no dejar que un fallo de logging tumbe el resto de la corrida
+                    }
                 }
             }
 

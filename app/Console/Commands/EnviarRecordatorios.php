@@ -29,7 +29,6 @@ class EnviarRecordatorios extends Command
         $this->info("Hora actual: {$horaActual} — buscando recordatorios para {$manana}...");
 
         $usuarios = User::where('recordatorio_automatico', true)
-            ->where('whatsapp_estado', 'conectado')
             ->where('hora_recordatorio', $horaActual)
             ->whereNotNull('evolution_instance_name')
             ->get();
@@ -45,6 +44,24 @@ class EnviarRecordatorios extends Command
         $totalFallidos = 0;
 
         foreach ($usuarios as $user) {
+            // Validar estado real contra Evolution, no confiar en whatsapp_estado
+            // de la DB: puede quedar desincronizado si algún webhook se perdió.
+            $estadoReal = $this->evolutionService->consultarEstado($user);
+            $estadoSincronizado = match ($estadoReal) {
+                'open'  => 'conectado',
+                'close' => 'desconectado',
+                default => 'conectando',
+            };
+
+            if ($user->whatsapp_estado !== $estadoSincronizado) {
+                $user->update(['whatsapp_estado' => $estadoSincronizado]);
+            }
+
+            if ($estadoReal !== 'open') {
+                $this->warn("  → {$user->name}: WhatsApp no conectado ({$estadoSincronizado}), omitido");
+                continue;
+            }
+
             $turnos = Turno::delUsuario($user)
                 ->with(['cliente', 'servicios'])
                 ->confirmados()
@@ -97,11 +114,16 @@ class EnviarRecordatorios extends Command
                 } catch (\Exception $e) {
                     $this->error("    ✗ Error: {$e->getMessage()}");
                     $totalFallidos++;
-                    Log::error('EnviarRecordatorios: excepción', [
-                        'turno_id' => $turno->id,
-                        'user_id'  => $user->id,
-                        'error'    => $e->getMessage(),
-                    ]);
+
+                    try {
+                        Log::error('EnviarRecordatorios: excepción', [
+                            'turno_id' => $turno->id,
+                            'user_id'  => $user->id,
+                            'error'    => $e->getMessage(),
+                        ]);
+                    } catch (\Throwable $logError) {
+                        // no-op: no dejar que un fallo de logging tumbe el resto de la corrida
+                    }
                 }
 
                 sleep(3);
