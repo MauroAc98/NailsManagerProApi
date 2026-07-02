@@ -45,6 +45,16 @@ class EnviarMensajeConfirmacion implements ShouldQueue
             return;
         }
 
+        // Evitar duplicar el mensaje si el job se reintenta (timeout de worker,
+        // etc.) después de haber enviado y registrado exitosamente.
+        $yaEnviado = WhatsappMensaje::where('turno_id', $turno->id)
+            ->where('tipo', 'confirmacion')
+            ->exists();
+
+        if ($yaEnviado) {
+            return;
+        }
+
         // ── Verificar que la conexión esté estable en Evolution API ──
         $estadoReal = $evolutionService->consultarEstado($user);
 
@@ -77,10 +87,14 @@ class EnviarMensajeConfirmacion implements ShouldQueue
         ]);
 
         if (!$messageId) {
-            Log::error('EnviarMensajeConfirmacion: fallo al enviar', [
-                'turno_id' => $this->turnoId,
-                'user_id'  => $user->id,
-            ]);
+            try {
+                Log::error('EnviarMensajeConfirmacion: fallo al enviar', [
+                    'turno_id' => $this->turnoId,
+                    'user_id'  => $user->id,
+                ]);
+            } catch (\Throwable $logError) {
+                // no-op: el estado ya se guardó, el log es best-effort
+            }
         }
     }
 }
