@@ -58,11 +58,17 @@ class EvolutionWebhookController extends Controller
 
         $user->update(['whatsapp_estado' => $estado]);
 
-        Log::info('Evolution webhook: estado actualizado', [
-            'user_id' => $user->id,
-            'estado' => $estado,
-            'statusReason' => $statusReason,
-        ]);
+        // Un fallo al escribir el log (ej. permisos rotos) no debe tumbar
+        // la actualización de estado que ya se persistió arriba.
+        try {
+            Log::info('Evolution webhook: estado actualizado', [
+                'user_id' => $user->id,
+                'estado' => $estado,
+                'statusReason' => $statusReason,
+            ]);
+        } catch (\Throwable $e) {
+            // no-op: el estado ya se guardó, el log es best-effort
+        }
 
         return response()->json(['ok' => true]);
     }
@@ -100,10 +106,15 @@ class EvolutionWebhookController extends Controller
 
             if ($nuevoStatus) {
                 $registro->update(['status' => $nuevoStatus]);
-                Log::info('WhatsApp mensaje entregado', [
-                    'message_id' => $messageId,
-                    'status' => $nuevoStatus,
-                ]);
+
+                try {
+                    Log::info('WhatsApp mensaje entregado', [
+                        'message_id' => $messageId,
+                        'status' => $nuevoStatus,
+                    ]);
+                } catch (\Throwable $e) {
+                    // no-op: el estado ya se guardó, el log es best-effort
+                }
             }
         }
 
