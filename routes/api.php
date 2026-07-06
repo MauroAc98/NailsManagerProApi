@@ -71,6 +71,7 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
         Route::get('marcas',           [TurnoController::class, 'marcas']);
         Route::get('disponibilidad',   [TurnoController::class, 'disponibilidad']);
         Route::get('/',                [TurnoController::class, 'index']);
+        Route::get('/{id}',            [TurnoController::class, 'show']);
         Route::post('/',               [TurnoController::class, 'store']);
         Route::put('/{id}',            [TurnoController::class, 'update']);
         Route::patch('{id}/completar', [TurnoController::class, 'completar']);

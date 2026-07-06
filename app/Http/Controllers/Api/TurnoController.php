@@ -55,6 +55,18 @@ class TurnoController extends Controller
         return response()->json($turnos);
     }
 
+    public function show(Request $request, int $id): JsonResponse
+    {
+        $user  = $request->user();
+        $turno = Turno::delUsuario($user)
+            ->with(['cliente', 'servicios'])
+            ->findOrFail($id);
+
+        $turno->estado_visual = $this->calcularEstadoVisual($turno);
+
+        return response()->json($turno);
+    }
+
     public function marcas(Request $request): JsonResponse
     {
         $request->validate(['mes' => 'required|date_format:Y-m']);
