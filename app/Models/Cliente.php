@@ -11,7 +11,15 @@ class Cliente extends Model
         'nombre',
         'apellido',
         'telefono',
+        'activo',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'activo' => 'boolean',
+        ];
+    }
 
     // ── Scope de seguridad ───────────────────────────────────────
     public function scopeDelUsuario($query, User $user)

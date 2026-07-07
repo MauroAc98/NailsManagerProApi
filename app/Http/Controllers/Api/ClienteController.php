@@ -86,9 +86,16 @@ class ClienteController extends Controller
                     ->where('user_id', $request->user()->id)
                     ->ignore($cliente->id),
             ],
+            'activo' => 'sometimes|boolean',
         ], [
             'telefono.unique' => 'Ya existe una clienta registrada con ese teléfono.',
         ]);
+
+        if (($data['activo'] ?? null) === false && $this->tieneTurnosFuturosConfirmados($cliente)) {
+            return response()->json([
+                'message' => 'No se puede inhabilitar una clienta con turnos futuros confirmados.',
+            ], 422);
+        }
 
         $cliente->update($data);
 
@@ -102,21 +109,29 @@ class ClienteController extends Controller
     {
         $cliente = Cliente::delUsuario($request->user())->findOrFail($id);
 
-        $tieneTurnosFuturos = $cliente->turnos()
-            ->confirmados()
-            ->where('fecha_hora', '>=', now())
-            ->exists();
-
-        if ($tieneTurnosFuturos) {
+        if ($this->tieneTurnosFuturosConfirmados($cliente)) {
             return response()->json([
-                'message' => 'No se puede eliminar una clienta con turnos futuros confirmados.',
+                'message' => 'No se puede inhabilitar una clienta con turnos futuros confirmados.',
             ], 422);
         }
 
-        $cliente->delete();
+        $cliente->update(['activo' => false]);
 
         return response()->json([
-            'message' => 'Clienta eliminada correctamente.',
+            'message' => 'Clienta inhabilitada correctamente.',
         ]);
+    }
+
+    // ─────────────────────────────────────────────
+    // Comparte el guard entre destroy() y update() — ambos pueden
+    // desactivar la clienta (DELETE físico vía destroy quedó sin uso
+    // en el frontend, que ahora inhabilita con PUT activo:false).
+    // ─────────────────────────────────────────────
+    private function tieneTurnosFuturosConfirmados(Cliente $cliente): bool
+    {
+        return $cliente->turnos()
+            ->confirmados()
+            ->where('fecha_hora', '>=', now())
+            ->exists();
     }
 }
