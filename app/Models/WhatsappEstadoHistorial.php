@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class WhatsappEstadoHistorial extends Model
 {
+    protected $table = 'whatsapp_estado_historiales';
+
     protected $fillable = [
         'user_id',
         'estado',
