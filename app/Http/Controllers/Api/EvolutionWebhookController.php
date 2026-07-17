@@ -60,11 +60,7 @@ class EvolutionWebhookController extends Controller
         // Registrar en el historial solo cuando el estado realmente cambia,
         // para no llenar la tabla con reintentos/pings que repiten el mismo estado.
         if ($user->whatsapp_estado !== $estado) {
-            WhatsappEstadoHistorial::create([
-                'user_id' => $user->id,
-                'estado' => $estado,
-                'status_reason' => $statusReason,
-            ]);
+            WhatsappEstadoHistorial::registrar($user, $estado, $statusReason);
         }
 
         $user->update(['whatsapp_estado' => $estado]);

@@ -16,4 +16,13 @@ class WhatsappEstadoHistorial extends Model
     {
         return $this->belongsTo(User::class);
     }
+
+    public static function registrar(User $user, string $estado, ?int $statusReason = null): void
+    {
+        static::create([
+            'user_id' => $user->id,
+            'estado' => $estado,
+            'status_reason' => $statusReason,
+        ]);
+    }
 }

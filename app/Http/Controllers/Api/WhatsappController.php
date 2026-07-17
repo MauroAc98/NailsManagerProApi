@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\WhatsappEstadoHistorial;
 use App\Services\EvolutionService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -59,6 +60,7 @@ class WhatsappController extends Controller
         };
 
         if ($user->whatsapp_estado !== $estado) {
+            WhatsappEstadoHistorial::registrar($user, $estado);
             $user->update(['whatsapp_estado' => $estado]);
         }
 
