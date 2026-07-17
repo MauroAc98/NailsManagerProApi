@@ -124,4 +124,9 @@ class User extends Authenticatable
     {
         return $this->hasOne(UserMpCredential::class);
     }
+
+    public function whatsappEstadoHistoriales()
+    {
+        return $this->hasMany(WhatsappEstadoHistorial::class);
+    }
 }

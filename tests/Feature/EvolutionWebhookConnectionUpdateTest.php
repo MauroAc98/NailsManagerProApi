@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Models\WhatsappEstadoHistorial;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -47,6 +48,37 @@ class EvolutionWebhookConnectionUpdateTest extends TestCase
         $this->postConnectionUpdate('user_1', 'connecting', $statusReason);
 
         $this->assertSame('desconectado', $user->fresh()->whatsapp_estado);
+    }
+
+    public function test_registra_historial_cuando_el_estado_cambia(): void
+    {
+        $user = User::factory()->create([
+            'evolution_instance_name' => 'user_1',
+            'whatsapp_estado' => 'conectando',
+        ]);
+
+        $this->postConnectionUpdate('user_1', 'open', null);
+
+        $this->assertDatabaseHas('whatsapp_estado_historiales', [
+            'user_id' => $user->id,
+            'estado' => 'conectado',
+            'status_reason' => null,
+        ]);
+    }
+
+    public function test_no_duplica_historial_cuando_el_estado_no_cambia(): void
+    {
+        $user = User::factory()->create([
+            'evolution_instance_name' => 'user_1',
+            'whatsapp_estado' => 'conectado',
+        ]);
+
+        $this->postConnectionUpdate('user_1', 'open', null);
+
+        $this->assertSame(
+            0,
+            WhatsappEstadoHistorial::where('user_id', $user->id)->count(),
+        );
     }
 
     public static function fallosTerminalesProvider(): array

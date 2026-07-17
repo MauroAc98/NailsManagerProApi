@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\WhatsappEstadoHistorial;
 use App\Models\WhatsappMensaje;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -55,6 +56,16 @@ class EvolutionWebhookController extends Controller
             in_array($statusReason, $fallosTerminales, true) => 'desconectado',
             default => 'conectando',
         };
+
+        // Registrar en el historial solo cuando el estado realmente cambia,
+        // para no llenar la tabla con reintentos/pings que repiten el mismo estado.
+        if ($user->whatsapp_estado !== $estado) {
+            WhatsappEstadoHistorial::create([
+                'user_id' => $user->id,
+                'estado' => $estado,
+                'status_reason' => $statusReason,
+            ]);
+        }
 
         $user->update(['whatsapp_estado' => $estado]);
 

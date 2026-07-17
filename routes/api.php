@@ -48,6 +48,8 @@ Route::prefix('auth')->group(function () {
 // Admin
 // ─────────────────────────────────────────────
 Route::post('admin/subscriptions/{user}/renew', [AdminController::class, 'renewSubscription']);
+Route::get('admin/whatsapp/instancias', [AdminController::class, 'whatsappInstancias']);
+Route::get('admin/whatsapp/instancias/{user}/historial', [AdminController::class, 'whatsappHistorial']);
 
 // ─────────────────────────────────────────────
 // Rutas privadas — requieren Bearer Token
