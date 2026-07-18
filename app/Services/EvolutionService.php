@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\User;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -70,15 +71,25 @@ class EvolutionService
 
         $instanceName = $user->evolution_instance_name;
 
-        // Limpiar sesión de Baileys antes de pedir QR cuando no está conectado.
-        // Evita el estado sucio post-desconexión o reconexión fallida.
-        // Si la instancia se acaba de crear en esta misma llamada no hay
-        // sesión que limpiar: desloguearla acá la mata antes de que el
-        // usuario pueda escanear el QR (era el bug de auto-logout en alta).
-        if (! $instanciaNueva && in_array($user->whatsapp_estado, ['desconectado', 'conectando'])) {
+        // El frontend refresca el QR cada 25s mientras espera el escaneo (hasta
+        // 3 min de polling). El logout de limpieza de abajo debe correr una
+        // sola vez por intento de conexión, no en cada refresh: antes corría
+        // siempre que el estado fuera desconectado/conectando (es decir, en
+        // TODOS los refreshes), generando ciclos de logout+relink del
+        // dispositivo cada 25s — un patrón que WhatsApp puede leer como
+        // automatización y arriesga el número. La cache key marca que ya se
+        // hizo la limpieza para este intento; expira sola pasada la ventana
+        // de polling del frontend, así un intento abandonado y retomado más
+        // tarde sigue limpiando la sesión sucia como antes.
+        $cacheKeyIntento = "evolution_qr_intento_{$user->id}";
+        $esNuevoIntento = ! Cache::has($cacheKeyIntento);
+
+        if (! $instanciaNueva && $esNuevoIntento && in_array($user->whatsapp_estado, ['desconectado', 'conectando'])) {
             Http::withHeaders($this->headers())
                 ->delete("{$this->baseUrl}/instance/logout/{$instanceName}");
         }
+
+        Cache::put($cacheKeyIntento, true, now()->addMinutes(5));
 
         $response = Http::withHeaders($this->headers())
             ->get("{$this->baseUrl}/instance/connect/{$instanceName}");
@@ -181,6 +192,7 @@ class EvolutionService
             return false;
         }
 
+        Cache::forget("evolution_qr_intento_{$user->id}");
         $user->update(['whatsapp_estado' => 'desconectado']);
 
         return true;
