@@ -87,6 +87,7 @@ class ClienteController extends Controller
                     ->ignore($cliente->id),
             ],
             'activo' => 'sometimes|boolean',
+            'whatsapp_opt_out' => 'sometimes|boolean',
         ], [
             'telefono.unique' => 'Ya existe una clienta registrada con ese teléfono.',
         ]);

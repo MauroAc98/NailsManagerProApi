@@ -10,6 +10,7 @@ use App\Models\WhatsappMensaje;
 use App\Services\EvolutionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class EvolutionWebhookController extends Controller
@@ -32,6 +33,13 @@ class EvolutionWebhookController extends Controller
         $event = $request->input('event');
         $instanceName = $request->input('instance');
         $data = $request->input('data');
+
+        // Sin nombre de instancia no hay nada que resolver — mismo trato
+        // que un evento desconocido, en vez de un TypeError si el payload
+        // viene incompleto.
+        if (! is_string($instanceName) || $instanceName === '') {
+            return response()->json(['ok' => true]);
+        }
 
         // ── Manejar cambios de estado de conexión ──
         if ($event === 'connection.update' || $event === 'CONNECTION_UPDATE') {
@@ -84,6 +92,16 @@ class EvolutionWebhookController extends Controller
         }
 
         $user->update(['whatsapp_estado' => $estado]);
+
+        // Si la conexión se cae de verdad a mitad de un intento de QR, el
+        // guard de logout de generarQr() (ventana deslizante de 45s) puede
+        // seguir vigente por los refreshes que ya venían llegando — sin
+        // esto, esos refreshes se saltearían la limpieza justo cuando la
+        // sesión quedó en el estado sucio que esa limpieza existe para
+        // resolver.
+        if ($estado === 'desconectado') {
+            Cache::forget("evolution_qr_intento_{$user->id}");
+        }
 
         // Un fallo al escribir el log (ej. permisos rotos) no debe tumbar
         // la actualización de estado que ya se persistió arriba.
@@ -175,7 +193,10 @@ class EvolutionWebhookController extends Controller
                 ?? $mensaje['message']['extendedTextMessage']['text']
                 ?? null;
 
-            if (! $remoteJid || ! $texto) {
+            // Solo chats 1:1 reales: un grupo (@g.us) o un JID tipo @lid
+            // tratado como si fuera un teléfono podría matchear por
+            // casualidad contra los últimos 10 dígitos de algún cliente.
+            if (! $remoteJid || ! $texto || ! str_ends_with($remoteJid, '@s.whatsapp.net')) {
                 continue;
             }
 
@@ -185,13 +206,13 @@ class EvolutionWebhookController extends Controller
                 continue;
             }
 
-            $cliente = Cliente::porTelefono($user, $remoteJid);
+            $clientes = Cliente::todosPorTelefono($user, $remoteJid);
 
-            if (! $cliente) {
+            if ($clientes->isEmpty()) {
                 continue;
             }
 
-            $cliente->update(['whatsapp_opt_out' => true]);
+            $clientes->each(fn (Cliente $cliente) => $cliente->update(['whatsapp_opt_out' => true]));
 
             $numeroRemitente = preg_replace('/\D/', '', explode('@', $remoteJid)[0]);
             $this->evolutionService->enviarMensaje($user, $numeroRemitente, self::MENSAJE_CONFIRMACION_OPT_OUT);
@@ -199,7 +220,7 @@ class EvolutionWebhookController extends Controller
             try {
                 Log::info('WhatsApp opt-out registrado', [
                     'user_id' => $user->id,
-                    'cliente_id' => $cliente->id,
+                    'cliente_ids' => $clientes->pluck('id')->all(),
                 ]);
             } catch (\Throwable $e) {
                 // no-op: el opt-out ya se guardó, el log es best-effort
