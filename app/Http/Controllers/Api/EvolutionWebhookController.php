@@ -12,8 +12,17 @@ use Illuminate\Support\Facades\Log;
 
 class EvolutionWebhookController extends Controller
 {
-    public function handle(Request $request): JsonResponse
+    public function handle(Request $request, string $secret): JsonResponse
     {
+        $secretoValido = config('services.evolution.webhook_secret');
+
+        // 404 en vez de 401/403: no delatar que la ruta existe ante un
+        // secreto incorrecto. hash_equals evita timing attacks sobre la
+        // comparación.
+        if (! $secretoValido || ! hash_equals($secretoValido, $secret)) {
+            abort(404);
+        }
+
         $event = $request->input('event');
         $instanceName = $request->input('instance');
         $data = $request->input('data');

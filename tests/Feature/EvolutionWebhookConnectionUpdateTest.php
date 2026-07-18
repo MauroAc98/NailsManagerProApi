@@ -11,9 +11,17 @@ class EvolutionWebhookConnectionUpdateTest extends TestCase
 {
     use RefreshDatabase;
 
+    private const SECRETO = 'secreto-de-test';
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config(['services.evolution.webhook_secret' => self::SECRETO]);
+    }
+
     private function postConnectionUpdate(string $instanceName, ?string $state, ?int $statusReason): void
     {
-        $this->postJson('/api/webhooks/evolution', [
+        $this->postJson('/api/webhooks/evolution/'.self::SECRETO, [
             'event' => 'connection.update',
             'instance' => $instanceName,
             'data' => array_filter([
@@ -21,6 +29,22 @@ class EvolutionWebhookConnectionUpdateTest extends TestCase
                 'statusReason' => $statusReason,
             ], fn ($value) => $value !== null),
         ])->assertOk();
+    }
+
+    public function test_rechaza_secreto_incorrecto(): void
+    {
+        $user = User::factory()->create([
+            'evolution_instance_name' => 'user_1',
+            'whatsapp_estado' => 'conectando',
+        ]);
+
+        $this->postJson('/api/webhooks/evolution/secreto-incorrecto', [
+            'event' => 'connection.update',
+            'instance' => 'user_1',
+            'data' => ['state' => 'open'],
+        ])->assertNotFound();
+
+        $this->assertSame('conectando', $user->fresh()->whatsapp_estado);
     }
 
     public function test_marca_conectado_cuando_state_es_open(): void

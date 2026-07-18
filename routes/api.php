@@ -113,6 +113,9 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
 Route::post('webhooks/mercadopago', [ReservaWebController::class, 'webhookMercadoPago']);
 
 // ─────────────────────────────────────────────
-// Webhook Evolution API — sin auth, lo llama el propio servicio
+// Webhook Evolution API — la URL incluye un secreto como path param.
+// Evolution no firma sus payloads, así que el control de acceso es la URL
+// misma: solo quien conoce el secreto (nosotros, vía WEBHOOK_GLOBAL_URL en
+// el docker-compose de Evolution) puede pegarle a esta ruta.
 // ─────────────────────────────────────────────
-Route::post('webhooks/evolution', [EvolutionWebhookController::class, 'handle']);
+Route::post('webhooks/evolution/{secret}', [EvolutionWebhookController::class, 'handle']);
