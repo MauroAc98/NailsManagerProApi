@@ -100,10 +100,16 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
         Route::post('/{tipo}/resetear', [WhatsappTemplateController::class, 'resetear']);
     });
 
+    // Límites por endpoint según su patrón de uso real: "estado" se
+    // pollea cada 3s durante la espera de escaneo (~20/min legítimos),
+    // "conectar" se refresca cada 25s (~3/min legítimos) más el click
+    // inicial, "desconectar" es una acción manual esporádica. Los topes
+    // dan margen holgado sobre el uso normal pero cortan cualquier loop
+    // fuera de control antes de que le pegue sin límite a Evolution.
     Route::prefix('whatsapp')->group(function () {
-        Route::post('conectar',      [WhatsappController::class, 'conectar']);
-        Route::get('estado',         [WhatsappController::class, 'estado']);
-        Route::delete('desconectar', [WhatsappController::class, 'desconectar']);
+        Route::post('conectar',      [WhatsappController::class, 'conectar'])->middleware('throttle:12,1');
+        Route::get('estado',         [WhatsappController::class, 'estado'])->middleware('throttle:40,1');
+        Route::delete('desconectar', [WhatsappController::class, 'desconectar'])->middleware('throttle:6,1');
     });
 });
 
