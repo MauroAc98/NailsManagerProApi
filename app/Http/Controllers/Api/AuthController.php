@@ -42,6 +42,12 @@ class AuthController extends Controller
             'status'   => 'ACTIVO',
         ]);
 
+        \App\Models\Profesional::create([
+            'user_id' => $user->id,
+            'nombre'  => $user->name,
+            'activo'  => true,
+        ]);
+
         Mail::to($user->email)->send(
             new ProvisionalPasswordMail($user->name, $user->email, $passwordProvisoria),
         );

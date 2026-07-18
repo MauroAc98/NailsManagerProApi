@@ -115,6 +115,11 @@ class User extends Authenticatable
         return $this->hasMany(SlotDisponible::class);
     }
 
+    public function profesionales()
+    {
+        return $this->hasMany(Profesional::class);
+    }
+
     public function reservasWeb()
     {
         return $this->hasMany(ReservaWeb::class);

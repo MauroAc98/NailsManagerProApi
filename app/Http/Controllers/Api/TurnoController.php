@@ -3,8 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Profesional;
 use App\Models\Servicio;
+use App\Models\SlotDisponible;
 use App\Models\Turno;
+use App\Models\User;
 use App\Models\WhatsappMensaje;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -69,12 +72,19 @@ class TurnoController extends Controller
 
     public function marcas(Request $request): JsonResponse
     {
-        $request->validate(['mes' => 'required|date_format:Y-m']);
+        $request->validate([
+            'mes'            => 'required|date_format:Y-m',
+            'profesional_id' => 'sometimes|nullable|integer|exists:profesionales,id',
+        ]);
 
         $user   = $request->user();
         $turnos = Turno::delUsuario($user)
             ->whereIn('estado', ['confirmado', 'completado']) // todo menos cancelado
             ->whereRaw("TO_CHAR(fecha_hora, 'YYYY-MM') = ?", [$request->mes])
+            ->when(
+                $request->filled('profesional_id'),
+                fn ($q) => $q->where('profesional_id', $request->integer('profesional_id')),
+            )
             ->get(['fecha_hora']);
 
         $marcas = $turnos->groupBy(fn($t) => Carbon::parse($t->fecha_hora)->toDateString())
@@ -89,13 +99,23 @@ class TurnoController extends Controller
     public function disponibilidad(Request $request): JsonResponse
     {
         $request->validate([
-            'desde' => 'required|date',
-            'hasta' => 'required|date|after_or_equal:desde',
+            'desde'          => 'required|date',
+            'hasta'          => 'required|date|after_or_equal:desde',
+            'profesional_id' => 'sometimes|nullable|integer|exists:profesionales,id',
         ]);
 
-        $user     = $request->user();
-        $slots    = $user->slotsDisponibles()->activos()->orderBy('hora')->get();
-        $turnos   = Turno::delUsuario($user)
+        $user = $request->user();
+
+        $profesional = $this->resolverProfesional($user, $request->filled('profesional_id') ? (int) $request->profesional_id : null);
+
+        if (!$profesional) {
+            return response()->json([
+                'message' => 'No hay profesionales configurados para esta cuenta.',
+            ], 422);
+        }
+
+        $slots    = SlotDisponible::where('profesional_id', $profesional->id)->activos()->orderBy('hora')->get();
+        $turnos   = Turno::where('profesional_id', $profesional->id)
             ->confirmados()
             ->delRango($request->desde, $request->hasta)
             ->get(['fecha_hora', 'duracion_total_minutos']);
@@ -180,12 +200,24 @@ class TurnoController extends Controller
             'servicio_ids.*' => 'integer|exists:servicios,id',
             'fecha_hora'     => 'required|date|after_or_equal:today',
             'notas'          => 'nullable|string',
+            'profesional_id' => 'sometimes|nullable|integer|exists:profesionales,id',
         ]);
 
         $user      = $request->user();
         $cliente   = $user->clientes()->findOrFail($data['cliente_id']);
         $servicios = Servicio::whereIn('id', $data['servicio_ids'])->get();
         $fechaHora = Carbon::parse($data['fecha_hora']);
+
+        // Backward compat: la app RN nunca manda profesional_id, así que
+        // por defecto se resuelve al único Profesional de la cuenta (el que
+        // existe siempre, ya sea por el backfill o por AuthController@register).
+        $profesional = $this->resolverProfesional($user, $data['profesional_id'] ?? null);
+
+        if (!$profesional) {
+            return response()->json([
+                'message' => 'No hay profesionales configurados para esta cuenta.',
+            ], 422);
+        }
 
         // ── Regla 0: la hora debe estar dentro del horario de atención ──
         $errorHorario = $this->validarHorarioAtencion($user, $fechaHora);
@@ -226,7 +258,7 @@ class TurnoController extends Controller
 
         // ── Regla 3: choque de horario ───────────────────────────
         $duracionTotal = $servicios->sum('duracion_minutos');
-        $turnoChocado  = $this->verificarChoque($user->id, $data['fecha_hora'], $duracionTotal);
+        $turnoChocado  = $this->verificarChoque($profesional->id, $data['fecha_hora'], $duracionTotal);
 
         if ($turnoChocado) {
             $nombreCliente   = $turnoChocado->cliente
@@ -246,6 +278,7 @@ class TurnoController extends Controller
         // ── Crear turno ──────────────────────────────────────────
         $turno = Turno::create([
             'user_id'                => $user->id,
+            'profesional_id'         => $profesional->id,
             'cliente_id'             => $cliente->id,
             'reserva_web_id'         => null,
             'fecha_hora'             => $data['fecha_hora'],
@@ -271,12 +304,22 @@ class TurnoController extends Controller
             'servicio_ids.*' => 'integer|exists:servicios,id',
             'fecha_hora'     => 'required|date|after_or_equal:today',
             'notas'          => 'nullable|string',
+            'profesional_id' => 'sometimes|nullable|integer|exists:profesionales,id',
         ]);
 
         $user      = $request->user();
         $turno     = Turno::delUsuario($user)->findOrFail($id);
         $servicios = Servicio::whereIn('id', $data['servicio_ids'])->get();
         $fechaHora = Carbon::parse($data['fecha_hora']);
+
+        // Backward compat: mismo default-resolution que en store().
+        $profesional = $this->resolverProfesional($user, $data['profesional_id'] ?? null);
+
+        if (!$profesional) {
+            return response()->json([
+                'message' => 'No hay profesionales configurados para esta cuenta.',
+            ], 422);
+        }
 
         // ── Regla -1: no se puede editar un turno que ya pasó ────
         if (Carbon::parse($turno->fecha_hora)->isPast()) {
@@ -312,7 +355,7 @@ class TurnoController extends Controller
 
         // ── Choque de horario ────────────────────────────────────
         $duracionTotal = $servicios->sum('duracion_minutos');
-        $turnoChocado  = $this->verificarChoque($user->id, $data['fecha_hora'], $duracionTotal, $id);
+        $turnoChocado  = $this->verificarChoque($profesional->id, $data['fecha_hora'], $duracionTotal, $id);
 
         if ($turnoChocado) {
             $nombreCliente   = $turnoChocado->cliente
@@ -333,6 +376,7 @@ class TurnoController extends Controller
 
         $turno->update([
             'cliente_id'             => $data['cliente_id'],
+            'profesional_id'         => $profesional->id,
             'fecha_hora'             => $data['fecha_hora'],
             'duracion_total_minutos' => $duracionTotal,
             'notas'                  => $data['notas'] ?? null,
@@ -445,9 +489,12 @@ class TurnoController extends Controller
     // o null si no hay conflicto.
     // Algoritmo: hay solapamiento si inicio_existente < nuevo_fin
     //            AND fin_existente > nuevo_inicio
+    // Se escopea por profesional_id (no por user_id): dos profesionales de
+    // la misma cuenta pueden tener turnos válidos en el mismo horario, cada
+    // uno con su propia agenda independiente.
     // ─────────────────────────────────────────────
     private function verificarChoque(
-        int $userId,
+        int $profesionalId,
         string $fechaHora,
         int $duracion,
         ?int $excluirId = null,
@@ -456,7 +503,7 @@ class TurnoController extends Controller
         $fin    = $inicio->copy()->addMinutes($duracion);
         $fecha  = $inicio->toDateString();
 
-        $query = Turno::where('user_id', $userId)
+        $query = Turno::where('profesional_id', $profesionalId)
             ->confirmados()
             ->delaFecha($fecha)
             ->with(['cliente', 'servicios'])
@@ -470,5 +517,17 @@ class TurnoController extends Controller
         }
 
         return $query->first();
+    }
+
+    // ─────────────────────────────────────────────
+    // Helper — resuelve el Profesional a usar para una request.
+    // Si se manda profesional_id explícito, lo valida contra la cuenta
+    // (404 si no existe o es de otro usuario). Si se omite, resuelve al
+    // profesional default de la cuenta (el más antiguo) — este es el
+    // mecanismo de backward-compat: la app RN nunca manda profesional_id.
+    // ─────────────────────────────────────────────
+    private function resolverProfesional(User $user, ?int $profesionalIdSolicitado): ?Profesional
+    {
+        return Profesional::resolverParaUsuario($user, $profesionalIdSolicitado);
     }
 }

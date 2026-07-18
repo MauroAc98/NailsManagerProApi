@@ -11,6 +11,7 @@ class SlotDisponible extends Model
 
     protected $fillable = [
         'user_id',
+        'profesional_id',
         'hora',
         'activo',
     ];
@@ -39,5 +40,10 @@ class SlotDisponible extends Model
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function profesional()
+    {
+        return $this->belongsTo(Profesional::class);
     }
 }

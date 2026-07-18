@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\ServicioController;
 use App\Http\Controllers\Api\ClienteController;
 use App\Http\Controllers\Api\SlotDisponibleController;
 use App\Http\Controllers\Api\TurnoController;
+use App\Http\Controllers\Api\ProfesionalController;
 use App\Http\Controllers\Api\ReservaWebController;
 use App\Http\Controllers\Api\PublicController;
 use App\Http\Controllers\Api\WhatsappController;
@@ -67,6 +68,11 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
 
     // Slots disponibles
     Route::apiResource('slots', SlotDisponibleController::class);
+
+    // Profesionales (multi-agenda)
+    Route::apiResource('profesionales', ProfesionalController::class)->only([
+        'index', 'store', 'update', 'destroy',
+    ]);
 
     // Turnos
     Route::prefix('turnos')->group(function () {

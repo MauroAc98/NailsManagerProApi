@@ -8,6 +8,7 @@ class Turno extends Model
 {
     protected $fillable = [
         'user_id',
+        'profesional_id',
         'cliente_id',
         'reserva_web_id',
         'fecha_hora',
@@ -72,6 +73,11 @@ class Turno extends Model
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function profesional()
+    {
+        return $this->belongsTo(Profesional::class);
     }
 
     public function cliente()

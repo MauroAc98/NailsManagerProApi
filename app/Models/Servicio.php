@@ -39,4 +39,9 @@ class Servicio extends Model
     {
         return $this->belongsToMany(Turno::class, 'turno_servicio');
     }
+
+    public function profesionales()
+    {
+        return $this->belongsToMany(Profesional::class, 'profesional_servicio');
+    }
 }
