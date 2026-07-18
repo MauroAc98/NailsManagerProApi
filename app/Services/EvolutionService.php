@@ -71,16 +71,22 @@ class EvolutionService
 
         $instanceName = $user->evolution_instance_name;
 
-        // El frontend refresca el QR cada 25s mientras espera el escaneo (hasta
-        // 3 min de polling). El logout de limpieza de abajo debe correr una
-        // sola vez por intento de conexión, no en cada refresh: antes corría
-        // siempre que el estado fuera desconectado/conectando (es decir, en
-        // TODOS los refreshes), generando ciclos de logout+relink del
-        // dispositivo cada 25s — un patrón que WhatsApp puede leer como
-        // automatización y arriesga el número. La cache key marca que ya se
-        // hizo la limpieza para este intento; expira sola pasada la ventana
-        // de polling del frontend, así un intento abandonado y retomado más
-        // tarde sigue limpiando la sesión sucia como antes.
+        // El frontend refresca el QR cada 25s mientras espera el escaneo. El
+        // logout de limpieza de abajo debe correr una sola vez por intento de
+        // conexión, no en cada refresh: antes corría siempre que el estado
+        // fuera desconectado/conectando (es decir, en TODOS los refreshes),
+        // generando ciclos de logout+relink del dispositivo cada 25s — un
+        // patrón que WhatsApp puede leer como automatización y arriesga el
+        // número. La cache key marca que ya se hizo la limpieza para este
+        // intento, con una ventana corta que se desliza en cada llamada: si
+        // los refreshes siguen llegando cada 25s, la key nunca llega a vencer
+        // entre ellos y es el mismo intento; si hay un salto real (el
+        // usuario dejó pasar el intento y volvió, cerró la pestaña, etc.) la
+        // key ya venció sola y el próximo pedido se trata como intento nuevo,
+        // limpiando la sesión sucia como corresponde. Un TTL largo acá sería
+        // un error: un reintento manual rápido después de "expiró" seguiría
+        // cayendo dentro de la ventana y se saltearía la limpieza que ese
+        // caso justamente necesita.
         $cacheKeyIntento = "evolution_qr_intento_{$user->id}";
         $esNuevoIntento = ! Cache::has($cacheKeyIntento);
 
@@ -89,7 +95,7 @@ class EvolutionService
                 ->delete("{$this->baseUrl}/instance/logout/{$instanceName}");
         }
 
-        Cache::put($cacheKeyIntento, true, now()->addMinutes(5));
+        Cache::put($cacheKeyIntento, true, now()->addSeconds(45));
 
         $response = Http::withHeaders($this->headers())
             ->get("{$this->baseUrl}/instance/connect/{$instanceName}");

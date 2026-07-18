@@ -71,4 +71,30 @@ class EvolutionServiceGenerarQrTest extends TestCase
 
         $this->assertSame(1, $logouts);
     }
+
+    public function test_desloguea_de_nuevo_si_paso_mas_tiempo_que_la_ventana_de_refresh(): void
+    {
+        Http::fake([
+            '*/instance/logout/*' => Http::response([], 200),
+            '*/instance/connect/*' => Http::response(['base64' => 'data:image/png;base64,abc'], 200),
+        ]);
+
+        $user = User::factory()->create([
+            'evolution_instance_name' => 'user_1',
+            'whatsapp_estado' => 'desconectado',
+        ]);
+
+        $service = app(EvolutionService::class);
+        $service->generarQr($user);
+
+        $this->travel(46)->seconds();
+
+        $service->generarQr($user->fresh());
+
+        $logouts = collect(Http::recorded())
+            ->filter(fn ($pair) => str_contains($pair[0]->url(), '/instance/logout/'))
+            ->count();
+
+        $this->assertSame(2, $logouts);
+    }
 }
