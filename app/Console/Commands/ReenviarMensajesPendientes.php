@@ -20,7 +20,7 @@ class ReenviarMensajesPendientes extends Command
     public function handle(): void
     {
         $pendientes = WhatsappMensaje::pendientesParaReenviar()
-            ->with('user')
+            ->with(['user', 'turno.cliente'])
             ->get();
 
         if ($pendientes->isEmpty()) {
@@ -34,6 +34,12 @@ class ReenviarMensajesPendientes extends Command
 
             if (!$user || !$user->tieneWhatsappConectado()) {
                 $registro->update(['status' => 'failed']);
+                continue;
+            }
+
+            if ($registro->turno?->cliente?->whatsapp_opt_out) {
+                $registro->update(['status' => 'failed']);
+                $this->info("  → {$user->name}: destinatario dio de baja los mensajes, omitido — {$registro->numero}");
                 continue;
             }
 

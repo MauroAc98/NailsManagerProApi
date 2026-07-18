@@ -3,15 +3,21 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Cliente;
 use App\Models\User;
 use App\Models\WhatsappEstadoHistorial;
 use App\Models\WhatsappMensaje;
+use App\Services\EvolutionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
 class EvolutionWebhookController extends Controller
 {
+    public function __construct(
+        private EvolutionService $evolutionService,
+    ) {}
+
     public function handle(Request $request, string $secret): JsonResponse
     {
         $secretoValido = config('services.evolution.webhook_secret');
@@ -35,6 +41,11 @@ class EvolutionWebhookController extends Controller
         // ── Manejar actualizaciones de mensajes ──
         if ($event === 'messages.update' || $event === 'MESSAGES_UPDATE') {
             return $this->handleMessagesUpdate($data);
+        }
+
+        // ── Manejar mensajes entrantes (opt-out por "BAJA") ──
+        if ($event === 'messages.upsert' || $event === 'MESSAGES_UPSERT') {
+            return $this->handleMessagesUpsert($instanceName, $data);
         }
 
         // Ignorar cualquier otro evento sin loguear
@@ -131,6 +142,67 @@ class EvolutionWebhookController extends Controller
                 } catch (\Throwable $e) {
                     // no-op: el estado ya se guardó, el log es best-effort
                 }
+            }
+        }
+
+        return response()->json(['ok' => true]);
+    }
+
+    private const MENSAJE_OPT_OUT = 'BAJA';
+
+    private const MENSAJE_CONFIRMACION_OPT_OUT = 'Listo, no vas a recibir más mensajes automáticos nuestros. Si en algún momento querés reactivarlos, avisale al salón.';
+
+    private function handleMessagesUpsert(string $instanceName, mixed $data): JsonResponse
+    {
+        // Evolution puede mandar un array de mensajes o uno solo, igual que en messages.update
+        $mensajes = is_array($data) && isset($data[0]) ? $data : [$data];
+
+        $user = User::where('evolution_instance_name', $instanceName)->first();
+
+        if (! $user) {
+            return response()->json(['ok' => true]);
+        }
+
+        foreach ($mensajes as $mensaje) {
+            // Ignorar los mensajes que salen de nuestro propio número (confirmaciones,
+            // recordatorios, la respuesta de opt-out de este mismo handler, etc.)
+            if (($mensaje['key']['fromMe'] ?? true) !== false) {
+                continue;
+            }
+
+            $remoteJid = $mensaje['key']['remoteJid'] ?? null;
+            $texto = $mensaje['message']['conversation']
+                ?? $mensaje['message']['extendedTextMessage']['text']
+                ?? null;
+
+            if (! $remoteJid || ! $texto) {
+                continue;
+            }
+
+            // Comparación exacta (no "contiene"), para no disparar el opt-out
+            // con frases que solo mencionan la palabra de paso.
+            if (mb_strtoupper(trim($texto)) !== self::MENSAJE_OPT_OUT) {
+                continue;
+            }
+
+            $cliente = Cliente::porTelefono($user, $remoteJid);
+
+            if (! $cliente) {
+                continue;
+            }
+
+            $cliente->update(['whatsapp_opt_out' => true]);
+
+            $numeroRemitente = preg_replace('/\D/', '', explode('@', $remoteJid)[0]);
+            $this->evolutionService->enviarMensaje($user, $numeroRemitente, self::MENSAJE_CONFIRMACION_OPT_OUT);
+
+            try {
+                Log::info('WhatsApp opt-out registrado', [
+                    'user_id' => $user->id,
+                    'cliente_id' => $cliente->id,
+                ]);
+            } catch (\Throwable $e) {
+                // no-op: el opt-out ya se guardó, el log es best-effort
             }
         }
 

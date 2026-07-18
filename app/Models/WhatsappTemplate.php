@@ -52,7 +52,8 @@ class WhatsappTemplate extends Model
     public static function plantillaDefault(string $tipo): string
     {
         return match ($tipo) {
-            'recordatorio' => 'Hola {nombre} 💅 Te recuerdo tu turno el {fecha} a las {hora} para {servicios}. ¡Te espero!',
+            'recordatorio' => 'Hola {nombre} 💅 Te recuerdo tu turno el {fecha} a las {hora} para {servicios}. ¡Te espero!'
+                ."\n\nSi no querés recibir más recordatorios automáticos, respondé BAJA.",
             'confirmacion' => 'Hola {nombre} 💅 Tu turno de {servicios} está confirmado para el {fecha} a las {hora}. ¡Te espero!',
             default => '',
         };

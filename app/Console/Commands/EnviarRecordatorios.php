@@ -85,6 +85,11 @@ class EnviarRecordatorios extends Command
                     continue;
                 }
 
+                if ($cliente->whatsapp_opt_out) {
+                    $this->info("    → {$cliente->nombre} {$cliente->apellido}: dio de baja los recordatorios, omitido");
+                    continue;
+                }
+
                 $mensaje = WhatsappTemplate::procesarPlantilla($plantilla, $cliente, $turno, $user);
                 $numero  = preg_replace('/\D/', '', $cliente->telefono);
 

@@ -41,6 +41,10 @@ class EnviarMensajeConfirmacion implements ShouldQueue
             return;
         }
 
+        if ($cliente->whatsapp_opt_out) {
+            return;
+        }
+
         if (!$user->tieneWhatsappConectado()) {
             return;
         }
