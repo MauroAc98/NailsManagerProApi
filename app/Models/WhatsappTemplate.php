@@ -70,12 +70,13 @@ class WhatsappTemplate extends Model
         $hora = $turno->fecha_hora->format('H:i');
 
         return strtr($plantilla, [
-            '{nombre}'   => $cliente->nombre,     
+            '{nombre}'   => $cliente->nombre,
             '{apellido}' => $cliente->apellido ?? '',
             '{servicios}' => $servicios,
             '{fecha}' => $fecha,
             '{hora}' => $hora,
             '{negocio}' => $user->name,
+            '{profesional}' => $turno->profesional?->nombre ?? $user->name,
         ]);
     }
 }

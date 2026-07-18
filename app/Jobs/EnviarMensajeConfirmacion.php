@@ -26,7 +26,7 @@ class EnviarMensajeConfirmacion implements ShouldQueue
 
     public function handle(EvolutionService $evolutionService): void
     {
-        $turno = Turno::with(['cliente', 'servicios', 'user'])->find($this->turnoId);
+        $turno = Turno::with(['cliente', 'servicios', 'user', 'profesional'])->find($this->turnoId);
 
         if (!$turno) {
             Log::warning('EnviarMensajeConfirmacion: turno no encontrado', ['turno_id' => $this->turnoId]);

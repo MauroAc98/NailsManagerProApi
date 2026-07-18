@@ -63,7 +63,7 @@ class EnviarRecordatorios extends Command
             }
 
             $turnos = Turno::delUsuario($user)
-                ->with(['cliente', 'servicios'])
+                ->with(['cliente', 'servicios', 'profesional'])
                 ->confirmados()
                 ->delaFecha($manana)
                 ->get();
