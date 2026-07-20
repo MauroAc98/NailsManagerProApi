@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Log;
 class ReenviarMensajesPendientes extends Command
 {
     protected $signature = 'whatsapp:reenviar-pendientes';
-    protected $description = 'Reenvía mensajes de WhatsApp que quedaron en PENDING por más de 5 minutos';
+    protected $description = 'Reenvía mensajes de WhatsApp cuyo envío falló (sin message_id) hace más de 5 minutos';
 
     public function __construct(private EvolutionService $evolutionService)
     {

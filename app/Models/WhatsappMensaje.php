@@ -39,11 +39,16 @@ class WhatsappMensaje extends Model
 
     // ── Scopes ───────────────────────────────────────────────────
 
-    // Mensajes pendientes de más de 5 minutos con menos de 3 intentos
+    // Mensajes cuyo envío falló de verdad (Evolution no devolvió message_id),
+    // hace más de 5 minutos, con menos de 3 intentos. No se incluye 'pending':
+    // ese estado significa que Evolution ya aceptó el mensaje y está esperando
+    // la confirmación de entrega al dispositivo del destinatario, no que el
+    // envío falló — reenviarlo ahí duplica el mensaje cuando el teléfono
+    // simplemente estaba apagado o sin señal.
     public function scopePendientesParaReenviar($query)
     {
         return $query
-            ->where('status', 'pending')
+            ->where('status', 'failed')
             ->where('ultimo_intento', '<=', now()->subMinutes(5))
             ->where('intentos', '<', 3);
     }

@@ -78,17 +78,37 @@ class EnviarMensajeConfirmacion implements ShouldQueue
         $messageId = $evolutionService->enviarMensaje($user, $numero, $mensaje);
 
         // ── Guardar registro para tracking ──
-        WhatsappMensaje::create([
-            'user_id'        => $user->id,
-            'turno_id'       => $turno->id,
-            'numero'         => $numero,
-            'mensaje'        => $mensaje,
-            'tipo'           => 'confirmacion',
-            'message_id'     => $messageId,
-            'status'         => $messageId ? 'pending' : 'failed',
-            'intentos'       => 1,
-            'ultimo_intento' => now(),
-        ]);
+        try {
+            WhatsappMensaje::create([
+                'user_id'        => $user->id,
+                'turno_id'       => $turno->id,
+                'numero'         => $numero,
+                'mensaje'        => $mensaje,
+                'tipo'           => 'confirmacion',
+                'message_id'     => $messageId,
+                'status'         => $messageId ? 'pending' : 'failed',
+                'intentos'       => 1,
+                'ultimo_intento' => now(),
+            ]);
+        } catch (\Throwable $e) {
+            if ($messageId) {
+                // El mensaje ya salió por WhatsApp. No dejamos que la
+                // excepción tire el job a retry: un reintento acá volvería
+                // a llamar a enviarMensaje() y mandaría un duplicado real
+                // al cliente solo porque se perdió el registro de tracking.
+                Log::error('EnviarMensajeConfirmacion: mensaje enviado pero falló el guardado del registro — no se reintenta para evitar duplicado', [
+                    'turno_id'   => $this->turnoId,
+                    'user_id'    => $user->id,
+                    'message_id' => $messageId,
+                    'error'      => $e->getMessage(),
+                ]);
+
+                return;
+            }
+
+            // No se envió nada todavía: es seguro dejar que el job reintente.
+            throw $e;
+        }
 
         if (!$messageId) {
             try {
