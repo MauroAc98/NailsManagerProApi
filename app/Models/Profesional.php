@@ -2,7 +2,9 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Storage;
 
 class Profesional extends Model
 {
@@ -13,13 +15,30 @@ class Profesional extends Model
         'nombre',
         'color',
         'activo',
+        'fondo_historia_path',
     ];
+
+    protected $appends = ['fondo_historia_url'];
+    protected $hidden  = ['fondo_historia_path'];
 
     protected function casts(): array
     {
         return [
             'activo' => 'boolean',
         ];
+    }
+
+    // URL pública del fondo fijo guardado para "generar historia", o null si
+    // esta profesional no tiene uno guardado. fondo_historia_path nunca se
+    // expone directo (es una ruta relativa del disco 'public', no algo que
+    // el frontend necesite armar a mano).
+    protected function fondoHistoriaUrl(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => $this->fondo_historia_path
+                ? Storage::disk('public')->url($this->fondo_historia_path)
+                : null,
+        );
     }
 
     // ── Scope de seguridad ───────────────────────────────────────

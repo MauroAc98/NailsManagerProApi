@@ -73,6 +73,8 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
     Route::apiResource('profesionales', ProfesionalController::class)->only([
         'index', 'store', 'update', 'destroy',
     ]);
+    Route::post('profesionales/{id}/fondo-historia', [ProfesionalController::class, 'subirFondoHistoria']);
+    Route::delete('profesionales/{id}/fondo-historia', [ProfesionalController::class, 'borrarFondoHistoria']);
 
     // Turnos
     Route::prefix('turnos')->group(function () {
