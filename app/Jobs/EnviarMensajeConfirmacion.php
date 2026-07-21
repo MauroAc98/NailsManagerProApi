@@ -17,7 +17,8 @@ class EnviarMensajeConfirmacion implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries   = 5;
+    public int $tries = 5;
+
     public int $backoff = 15;
 
     public function __construct(
@@ -28,16 +29,18 @@ class EnviarMensajeConfirmacion implements ShouldQueue
     {
         $turno = Turno::with(['cliente', 'servicios', 'user', 'profesional'])->find($this->turnoId);
 
-        if (!$turno) {
+        if (! $turno) {
             Log::warning('EnviarMensajeConfirmacion: turno no encontrado', ['turno_id' => $this->turnoId]);
+
             return;
         }
 
-        $user    = $turno->user;
+        $user = $turno->user;
         $cliente = $turno->cliente;
 
-        if (!$user || !$cliente || empty($cliente->telefono)) {
+        if (! $user || ! $cliente || empty($cliente->telefono)) {
             Log::warning('EnviarMensajeConfirmacion: faltan datos', ['turno_id' => $this->turnoId]);
+
             return;
         }
 
@@ -45,7 +48,7 @@ class EnviarMensajeConfirmacion implements ShouldQueue
             return;
         }
 
-        if (!$user->tieneWhatsappConectado()) {
+        if (! $user->tieneWhatsappConectado()) {
             return;
         }
 
@@ -65,29 +68,30 @@ class EnviarMensajeConfirmacion implements ShouldQueue
         if ($estadoReal !== 'open') {
             Log::info('EnviarMensajeConfirmacion: conexión no estable, reintentando', [
                 'turno_id' => $this->turnoId,
-                'estado'   => $estadoReal,
+                'estado' => $estadoReal,
             ]);
             $this->release(30);
+
             return;
         }
 
         $plantilla = WhatsappTemplate::obtenerPlantilla($user, 'confirmacion');
-        $mensaje   = WhatsappTemplate::procesarPlantilla($plantilla, $cliente, $turno, $user);
-        $numero    = preg_replace('/\D/', '', $cliente->telefono);
+        $mensaje = WhatsappTemplate::procesarPlantilla($plantilla, $cliente, $turno, $user);
+        $numero = $evolutionService->normalizarNumero($cliente->telefono);
 
         $messageId = $evolutionService->enviarMensaje($user, $numero, $mensaje);
 
         // ── Guardar registro para tracking ──
         try {
             WhatsappMensaje::create([
-                'user_id'        => $user->id,
-                'turno_id'       => $turno->id,
-                'numero'         => $numero,
-                'mensaje'        => $mensaje,
-                'tipo'           => 'confirmacion',
-                'message_id'     => $messageId,
-                'status'         => $messageId ? 'pending' : 'failed',
-                'intentos'       => 1,
+                'user_id' => $user->id,
+                'turno_id' => $turno->id,
+                'numero' => $numero,
+                'mensaje' => $mensaje,
+                'tipo' => 'confirmacion',
+                'message_id' => $messageId,
+                'status' => $messageId ? 'pending' : 'failed',
+                'intentos' => 1,
                 'ultimo_intento' => now(),
             ]);
         } catch (\Throwable $e) {
@@ -97,10 +101,10 @@ class EnviarMensajeConfirmacion implements ShouldQueue
                 // a llamar a enviarMensaje() y mandaría un duplicado real
                 // al cliente solo porque se perdió el registro de tracking.
                 Log::error('EnviarMensajeConfirmacion: mensaje enviado pero falló el guardado del registro — no se reintenta para evitar duplicado', [
-                    'turno_id'   => $this->turnoId,
-                    'user_id'    => $user->id,
+                    'turno_id' => $this->turnoId,
+                    'user_id' => $user->id,
                     'message_id' => $messageId,
-                    'error'      => $e->getMessage(),
+                    'error' => $e->getMessage(),
                 ]);
 
                 return;
@@ -110,11 +114,11 @@ class EnviarMensajeConfirmacion implements ShouldQueue
             throw $e;
         }
 
-        if (!$messageId) {
+        if (! $messageId) {
             try {
                 Log::error('EnviarMensajeConfirmacion: fallo al enviar', [
                     'turno_id' => $this->turnoId,
-                    'user_id'  => $user->id,
+                    'user_id' => $user->id,
                 ]);
             } catch (\Throwable $logError) {
                 // no-op: el estado ya se guardó, el log es best-effort

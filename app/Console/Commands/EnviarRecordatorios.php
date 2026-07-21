@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Log;
 class EnviarRecordatorios extends Command
 {
     protected $signature = 'recordatorios:enviar';
+
     protected $description = 'Envía recordatorios de WhatsApp a las clientas con turno mañana';
 
     public function __construct(private EvolutionService $evolutionService)
@@ -24,7 +25,7 @@ class EnviarRecordatorios extends Command
     public function handle(): void
     {
         $horaActual = Carbon::now()->format('H:00');
-        $manana     = Carbon::tomorrow()->toDateString();
+        $manana = Carbon::tomorrow()->toDateString();
 
         $this->info("Hora actual: {$horaActual} — buscando recordatorios para {$manana}...");
 
@@ -35,6 +36,7 @@ class EnviarRecordatorios extends Command
 
         if ($usuarios->isEmpty()) {
             $this->info('No hay profesionales con recordatorio programado para esta hora.');
+
             return;
         }
 
@@ -48,7 +50,7 @@ class EnviarRecordatorios extends Command
             // de la DB: puede quedar desincronizado si algún webhook se perdió.
             $estadoReal = $this->evolutionService->consultarEstado($user);
             $estadoSincronizado = match ($estadoReal) {
-                'open'  => 'conectado',
+                'open' => 'conectado',
                 'close' => 'desconectado',
                 default => 'conectando',
             };
@@ -59,6 +61,7 @@ class EnviarRecordatorios extends Command
 
             if ($estadoReal !== 'open') {
                 $this->warn("  → {$user->name}: WhatsApp no conectado ({$estadoSincronizado}), omitido");
+
                 continue;
             }
 
@@ -70,6 +73,7 @@ class EnviarRecordatorios extends Command
 
             if ($turnos->isEmpty()) {
                 $this->info("  → {$user->name}: sin turnos mañana, omitido");
+
                 continue;
             }
 
@@ -82,30 +86,32 @@ class EnviarRecordatorios extends Command
 
                 if (empty($cliente?->telefono)) {
                     $this->warn("    ⚠ Turno #{$turno->id}: clienta sin teléfono, omitido");
+
                     continue;
                 }
 
                 if ($cliente->whatsapp_opt_out) {
                     $this->info("    → {$cliente->nombre} {$cliente->apellido}: dio de baja los recordatorios, omitido");
+
                     continue;
                 }
 
                 $mensaje = WhatsappTemplate::procesarPlantilla($plantilla, $cliente, $turno, $user);
-                $numero  = preg_replace('/\D/', '', $cliente->telefono);
+                $numero = $this->evolutionService->normalizarNumero($cliente->telefono);
 
                 try {
                     $messageId = $this->evolutionService->enviarMensaje($user, $numero, $mensaje);
 
                     // ── Guardar registro para tracking ──
                     WhatsappMensaje::create([
-                        'user_id'        => $user->id,
-                        'turno_id'       => $turno->id,
-                        'numero'         => $numero,
-                        'mensaje'        => $mensaje,
-                        'tipo'           => 'recordatorio',
-                        'message_id'     => $messageId,
-                        'status'         => $messageId ? 'pending' : 'failed',
-                        'intentos'       => 1,
+                        'user_id' => $user->id,
+                        'turno_id' => $turno->id,
+                        'numero' => $numero,
+                        'mensaje' => $mensaje,
+                        'tipo' => 'recordatorio',
+                        'message_id' => $messageId,
+                        'status' => $messageId ? 'pending' : 'failed',
+                        'intentos' => 1,
                         'ultimo_intento' => now(),
                     ]);
 
@@ -123,8 +129,8 @@ class EnviarRecordatorios extends Command
                     try {
                         Log::error('EnviarRecordatorios: excepción', [
                             'turno_id' => $turno->id,
-                            'user_id'  => $user->id,
-                            'error'    => $e->getMessage(),
+                            'user_id' => $user->id,
+                            'error' => $e->getMessage(),
                         ]);
                     } catch (\Throwable $logError) {
                         // no-op: no dejar que un fallo de logging tumbe el resto de la corrida
@@ -135,7 +141,7 @@ class EnviarRecordatorios extends Command
             }
         }
 
-        $this->info("─────────────────────────────────");
+        $this->info('─────────────────────────────────');
         $this->info("✓ Enviados: {$totalEnviados}");
         if ($totalFallidos > 0) {
             $this->error("✗ Fallidos: {$totalFallidos}");

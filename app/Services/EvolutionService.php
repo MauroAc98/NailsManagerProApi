@@ -27,6 +27,27 @@ class EvolutionService
         ];
     }
 
+    /**
+     * WhatsApp requiere el "9" después del código de país para celulares
+     * argentinos (54) — sin esto el mensaje puede no llegar. Mismo criterio
+     * que lib/phoneUtils.ts::formatForWhatsApp en el frontend.
+     *
+     * Pública para que los callers puedan normalizar antes de armar su
+     * propio registro de tracking (WhatsappMensaje.numero), y que ese
+     * registro refleje el número que realmente se mandó — enviarMensaje()
+     * también normaliza internamente, así que llamarla dos veces es inofensivo.
+     */
+    public function normalizarNumero(string $numero): string
+    {
+        $numero = preg_replace('/\D/', '', $numero);
+
+        if (str_starts_with($numero, '54') && ($numero[2] ?? null) !== '9') {
+            $numero = '549'.substr($numero, 2);
+        }
+
+        return $numero;
+    }
+
     public function crearInstancia(User $user): ?string
     {
         $instanceName = "user_{$user->id}";
@@ -150,6 +171,8 @@ class EvolutionService
 
             return null;
         }
+
+        $numero = $this->normalizarNumero($numero);
 
         $response = Http::withHeaders($this->headers())
             ->post("{$this->baseUrl}/message/sendText/{$user->evolution_instance_name}", [
