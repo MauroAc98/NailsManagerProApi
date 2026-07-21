@@ -19,25 +19,6 @@ class AdminController extends Controller
         return null;
     }
 
-    /**
-     * DIAGNÓSTICO TEMPORAL — no compara nada, solo informa qué recibió
-     * el servidor vs. lo que espera, sin exponer el secret en texto plano.
-     * Sacar este método y su ruta una vez resuelto el mismatch de Postman.
-     */
-    public function debugAdminSecret(Request $request): JsonResponse
-    {
-        $received = $request->header('X-Admin-Secret') ?? '';
-        $expected = config('app.admin_secret') ?? '';
-
-        return response()->json([
-            'received_length' => strlen($received),
-            'received_sha256' => hash('sha256', $received),
-            'expected_length' => strlen($expected),
-            'expected_sha256' => hash('sha256', $expected),
-            'matches' => hash_equals($expected, $received),
-        ]);
-    }
-
     public function renewSubscription(Request $request, User $user): JsonResponse
     {
         if ($response = $this->noAutorizado($request)) {
