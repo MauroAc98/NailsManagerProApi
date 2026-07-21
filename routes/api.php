@@ -49,6 +49,7 @@ Route::prefix('auth')->group(function () {
 // Admin
 // ─────────────────────────────────────────────
 Route::post('admin/subscriptions/{user}/renew', [AdminController::class, 'renewSubscription']);
+Route::post('admin/debug-secret', [AdminController::class, 'debugAdminSecret']); // TEMPORAL — sacar tras diagnosticar
 Route::get('admin/whatsapp/instancias', [AdminController::class, 'whatsappInstancias']);
 Route::get('admin/whatsapp/instancias/{user}/historial', [AdminController::class, 'whatsappHistorial']);
 
