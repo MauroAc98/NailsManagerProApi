@@ -3,14 +3,15 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\EnviarMensajeConfirmacion;
 use App\Models\Profesional;
 use App\Models\Servicio;
 use App\Models\SlotDisponible;
 use App\Models\Turno;
 use App\Models\User;
 use App\Models\WhatsappMensaje;
-use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 
 class TurnoController extends Controller
@@ -19,7 +20,7 @@ class TurnoController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $user  = $request->user();
+        $user = $request->user();
         $query = Turno::delUsuario($user)
             ->where('estado', '!=', 'cancelado') // ocultos por defecto — no aparecen en la agenda
             ->with(['cliente', 'servicios', 'reservaWeb']);
@@ -36,7 +37,7 @@ class TurnoController extends Controller
             $buscar = $request->buscar;
             $query->whereHas(
                 'cliente',
-                fn($q) => $q->where(function ($sub) use ($buscar) {
+                fn ($q) => $q->where(function ($sub) use ($buscar) {
                     $sub->where('nombre', 'ILIKE', "%{$buscar}%")
                         ->orWhere('apellido', 'ILIKE', "%{$buscar}%");
                 })
@@ -46,12 +47,13 @@ class TurnoController extends Controller
         if ($request->filled('servicio_id')) {
             $query->whereHas(
                 'servicios',
-                fn($q) => $q->where('servicios.id', $request->servicio_id)
+                fn ($q) => $q->where('servicios.id', $request->servicio_id)
             );
         }
 
         $turnos = $query->orderBy('fecha_hora')->get()->map(function ($turno) {
             $turno->estado_visual = $this->calcularEstadoVisual($turno);
+
             return $turno;
         });
 
@@ -60,7 +62,7 @@ class TurnoController extends Controller
 
     public function show(Request $request, int $id): JsonResponse
     {
-        $user  = $request->user();
+        $user = $request->user();
         $turno = Turno::delUsuario($user)
             ->with(['cliente', 'servicios'])
             ->findOrFail($id);
@@ -73,11 +75,11 @@ class TurnoController extends Controller
     public function marcas(Request $request): JsonResponse
     {
         $request->validate([
-            'mes'            => 'required|date_format:Y-m',
+            'mes' => 'required|date_format:Y-m',
             'profesional_id' => 'sometimes|nullable|integer|exists:profesionales,id',
         ]);
 
-        $user   = $request->user();
+        $user = $request->user();
         $turnos = Turno::delUsuario($user)
             ->whereIn('estado', ['confirmado', 'completado']) // todo menos cancelado
             ->whereRaw("TO_CHAR(fecha_hora, 'YYYY-MM') = ?", [$request->mes])
@@ -87,10 +89,10 @@ class TurnoController extends Controller
             )
             ->get(['fecha_hora']);
 
-        $marcas = $turnos->groupBy(fn($t) => Carbon::parse($t->fecha_hora)->toDateString())
-            ->map(fn($grupo) => [
+        $marcas = $turnos->groupBy(fn ($t) => Carbon::parse($t->fecha_hora)->toDateString())
+            ->map(fn ($grupo) => [
                 'cantidad' => $grupo->count(),
-                'dots'     => [['color' => 'pink']],
+                'dots' => [['color' => 'pink']],
             ]);
 
         return response()->json($marcas);
@@ -99,8 +101,8 @@ class TurnoController extends Controller
     public function disponibilidad(Request $request): JsonResponse
     {
         $request->validate([
-            'desde'          => 'required|date',
-            'hasta'          => 'required|date|after_or_equal:desde',
+            'desde' => 'required|date',
+            'hasta' => 'required|date|after_or_equal:desde',
             'profesional_id' => 'sometimes|nullable|integer|exists:profesionales,id',
         ]);
 
@@ -108,14 +110,14 @@ class TurnoController extends Controller
 
         $profesional = $this->resolverProfesional($user, $request->filled('profesional_id') ? (int) $request->profesional_id : null);
 
-        if (!$profesional) {
+        if (! $profesional) {
             return response()->json([
                 'message' => 'No hay profesionales configurados para esta cuenta.',
             ], 422);
         }
 
-        $slots    = SlotDisponible::where('profesional_id', $profesional->id)->activos()->orderBy('hora')->get();
-        $turnos   = Turno::where('profesional_id', $profesional->id)
+        $slots = SlotDisponible::where('profesional_id', $profesional->id)->activos()->orderBy('hora')->get();
+        $turnos = Turno::where('profesional_id', $profesional->id)
             ->confirmados()
             ->delRango($request->desde, $request->hasta)
             ->get(['fecha_hora', 'duracion_total_minutos']);
@@ -147,21 +149,21 @@ class TurnoController extends Controller
         $resultado = [];
 
         foreach ($periodo as $dia) {
-            $fecha      = $dia->format('Y-m-d');
-            $ahora      = Carbon::now();
-            $esHoy      = $fecha === $ahora->toDateString();
+            $fecha = $dia->format('Y-m-d');
+            $ahora = Carbon::now();
+            $esHoy = $fecha === $ahora->toDateString();
             $horaActual = $ahora->hour;
 
-            $turnosDia   = $turnos->filter(fn($t) => Carbon::parse($t->fecha_hora)->toDateString() === $fecha);
-            $reservasDia = $reservas->filter(fn($r) => $r->fecha->toDateString() === $fecha);
+            $turnosDia = $turnos->filter(fn ($t) => Carbon::parse($t->fecha_hora)->toDateString() === $fecha);
+            $reservasDia = $reservas->filter(fn ($r) => $r->fecha->toDateString() === $fecha);
 
             $slotsDelDia = $slots->map(function ($slot) use ($turnosDia, $reservasDia, $esHoy, $horaActual) {
                 $slotMinutos = (int) Carbon::parse($slot->hora)->format('H') * 60
                     + (int) Carbon::parse($slot->hora)->format('i');
 
                 $horaFormateada = Carbon::parse($slot->hora)->minute > 0
-                    ? Carbon::parse($slot->hora)->format('H:i') . 'hs'
-                    : Carbon::parse($slot->hora)->format('H') . 'hs';
+                    ? Carbon::parse($slot->hora)->format('H:i').'hs'
+                    : Carbon::parse($slot->hora)->format('H').'hs';
 
                 if ($esHoy && (int) Carbon::parse($slot->hora)->format('H') <= $horaActual) {
                     return ['hora' => $horaFormateada, 'libre' => false];
@@ -169,7 +171,7 @@ class TurnoController extends Controller
 
                 foreach ($turnosDia as $turno) {
                     $inicioTurno = Carbon::parse($turno->fecha_hora)->hour * 60 + Carbon::parse($turno->fecha_hora)->minute;
-                    $finTurno    = $inicioTurno + $turno->duracion_total_minutos;
+                    $finTurno = $inicioTurno + $turno->duracion_total_minutos;
                     if ($slotMinutos >= $inicioTurno && $slotMinutos < $finTurno) {
                         return ['hora' => $horaFormateada, 'libre' => false];
                     }
@@ -177,7 +179,7 @@ class TurnoController extends Controller
 
                 foreach ($reservasDia as $reserva) {
                     $inicioReserva = Carbon::parse($reserva->slot_hora)->hour * 60 + Carbon::parse($reserva->slot_hora)->minute;
-                    $finReserva    = $inicioReserva + $reserva->duracion_total_minutos;
+                    $finReserva = $inicioReserva + $reserva->duracion_total_minutos;
                     if ($slotMinutos >= $inicioReserva && $slotMinutos < $finReserva) {
                         return ['hora' => $horaFormateada, 'libre' => false];
                     }
@@ -195,16 +197,16 @@ class TurnoController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'cliente_id'     => 'required|integer|exists:clientes,id',
-            'servicio_ids'   => 'required|array|min:1',
+            'cliente_id' => 'required|integer|exists:clientes,id',
+            'servicio_ids' => 'required|array|min:1',
             'servicio_ids.*' => 'integer|exists:servicios,id',
-            'fecha_hora'     => 'required|date|after_or_equal:today',
-            'notas'          => 'nullable|string',
+            'fecha_hora' => 'required|date|after_or_equal:today',
+            'notas' => 'nullable|string',
             'profesional_id' => 'sometimes|nullable|integer|exists:profesionales,id',
         ]);
 
-        $user      = $request->user();
-        $cliente   = $user->clientes()->findOrFail($data['cliente_id']);
+        $user = $request->user();
+        $cliente = $user->clientes()->findOrFail($data['cliente_id']);
         $servicios = Servicio::whereIn('id', $data['servicio_ids'])->get();
         $fechaHora = Carbon::parse($data['fecha_hora']);
 
@@ -213,7 +215,7 @@ class TurnoController extends Controller
         // existe siempre, ya sea por el backfill o por AuthController@register).
         $profesional = $this->resolverProfesional($user, $data['profesional_id'] ?? null);
 
-        if (!$profesional) {
+        if (! $profesional) {
             return response()->json([
                 'message' => 'No hay profesionales configurados para esta cuenta.',
             ], 422);
@@ -234,7 +236,7 @@ class TurnoController extends Controller
 
         if ($turnosClienta >= self::MAX_TURNOS_POR_CLIENTE) {
             return response()->json([
-                'message' => 'La clienta ya tiene el máximo de ' . self::MAX_TURNOS_POR_CLIENTE . ' turnos para este día.',
+                'message' => 'La clienta ya tiene el máximo de '.self::MAX_TURNOS_POR_CLIENTE.' turnos para este día.',
             ], 422);
         }
 
@@ -245,12 +247,13 @@ class TurnoController extends Controller
             ->confirmados()
             ->with('servicios')
             ->get()
-            ->flatMap(fn($t) => $t->servicios->pluck('id'));
+            ->flatMap(fn ($t) => $t->servicios->pluck('id'));
 
         $repetidos = collect($data['servicio_ids'])->intersect($serviciosYaAgendados);
 
         if ($repetidos->isNotEmpty()) {
             $nombresRepetidos = $servicios->whereIn('id', $repetidos)->pluck('nombre')->join(', ');
+
             return response()->json([
                 'message' => "La clienta ya tiene agendado: {$nombresRepetidos} para este día.",
             ], 422);
@@ -258,15 +261,15 @@ class TurnoController extends Controller
 
         // ── Regla 3: choque de horario ───────────────────────────
         $duracionTotal = $servicios->sum('duracion_minutos');
-        $turnoChocado  = $this->verificarChoque($profesional->id, $data['fecha_hora'], $duracionTotal);
+        $turnoChocado = $this->verificarChoque($profesional->id, $data['fecha_hora'], $duracionTotal);
 
         if ($turnoChocado) {
-            $nombreCliente   = $turnoChocado->cliente
+            $nombreCliente = $turnoChocado->cliente
                 ? trim("{$turnoChocado->cliente->nombre} {$turnoChocado->cliente->apellido}")
                 : 'otra clienta';
             $serviciosChoque = $turnoChocado->servicios->pluck('nombre')->join(' + ');
-            $horaChoque      = Carbon::parse($turnoChocado->fecha_hora)->format('H:i');
-            $finChoque       = Carbon::parse($turnoChocado->fecha_hora)
+            $horaChoque = Carbon::parse($turnoChocado->fecha_hora)->format('H:i');
+            $finChoque = Carbon::parse($turnoChocado->fecha_hora)
                 ->addMinutes($turnoChocado->duracion_total_minutos)
                 ->format('H:i');
 
@@ -277,21 +280,21 @@ class TurnoController extends Controller
 
         // ── Crear turno ──────────────────────────────────────────
         $turno = Turno::create([
-            'user_id'                => $user->id,
-            'profesional_id'         => $profesional->id,
-            'cliente_id'             => $cliente->id,
-            'reserva_web_id'         => null,
-            'fecha_hora'             => $data['fecha_hora'],
+            'user_id' => $user->id,
+            'profesional_id' => $profesional->id,
+            'cliente_id' => $cliente->id,
+            'reserva_web_id' => null,
+            'fecha_hora' => $data['fecha_hora'],
             'duracion_total_minutos' => $duracionTotal,
-            'estado'                 => 'confirmado',
-            'origen'                 => 'app',
-            'notas'                  => $data['notas'] ?? null,
+            'estado' => 'confirmado',
+            'origen' => 'app',
+            'notas' => $data['notas'] ?? null,
         ]);
 
         $turno->servicios()->attach($data['servicio_ids']);
 
         // Disparar mensaje de confirmación por WhatsApp (en cola, no bloqueante)
-        \App\Jobs\EnviarMensajeConfirmacion::dispatch($turno->id);
+        EnviarMensajeConfirmacion::dispatch($turno->id);
 
         return response()->json($turno->load(['cliente', 'servicios']), 201);
     }
@@ -299,23 +302,23 @@ class TurnoController extends Controller
     public function update(Request $request, int $id): JsonResponse
     {
         $data = $request->validate([
-            'cliente_id'     => 'required|integer|exists:clientes,id',
-            'servicio_ids'   => 'required|array|min:1',
+            'cliente_id' => 'required|integer|exists:clientes,id',
+            'servicio_ids' => 'required|array|min:1',
             'servicio_ids.*' => 'integer|exists:servicios,id',
-            'fecha_hora'     => 'required|date|after_or_equal:today',
-            'notas'          => 'nullable|string',
+            'fecha_hora' => 'required|date|after_or_equal:today',
+            'notas' => 'nullable|string',
             'profesional_id' => 'sometimes|nullable|integer|exists:profesionales,id',
         ]);
 
-        $user      = $request->user();
-        $turno     = Turno::delUsuario($user)->findOrFail($id);
+        $user = $request->user();
+        $turno = Turno::delUsuario($user)->findOrFail($id);
         $servicios = Servicio::whereIn('id', $data['servicio_ids'])->get();
         $fechaHora = Carbon::parse($data['fecha_hora']);
 
         // Backward compat: mismo default-resolution que en store().
         $profesional = $this->resolverProfesional($user, $data['profesional_id'] ?? null);
 
-        if (!$profesional) {
+        if (! $profesional) {
             return response()->json([
                 'message' => 'No hay profesionales configurados para esta cuenta.',
             ], 422);
@@ -342,12 +345,13 @@ class TurnoController extends Controller
             ->where('id', '!=', $id)
             ->with('servicios')
             ->get()
-            ->flatMap(fn($t) => $t->servicios->pluck('id'));
+            ->flatMap(fn ($t) => $t->servicios->pluck('id'));
 
         $repetidos = collect($data['servicio_ids'])->intersect($serviciosYaAgendados);
 
         if ($repetidos->isNotEmpty()) {
             $nombresRepetidos = $servicios->whereIn('id', $repetidos)->pluck('nombre')->join(', ');
+
             return response()->json([
                 'message' => "La clienta ya tiene agendado: {$nombresRepetidos} para este día.",
             ], 422);
@@ -355,15 +359,15 @@ class TurnoController extends Controller
 
         // ── Choque de horario ────────────────────────────────────
         $duracionTotal = $servicios->sum('duracion_minutos');
-        $turnoChocado  = $this->verificarChoque($profesional->id, $data['fecha_hora'], $duracionTotal, $id);
+        $turnoChocado = $this->verificarChoque($profesional->id, $data['fecha_hora'], $duracionTotal, $id);
 
         if ($turnoChocado) {
-            $nombreCliente   = $turnoChocado->cliente
+            $nombreCliente = $turnoChocado->cliente
                 ? trim("{$turnoChocado->cliente->nombre} {$turnoChocado->cliente->apellido}")
                 : 'otra clienta';
             $serviciosChoque = $turnoChocado->servicios->pluck('nombre')->join(' + ');
-            $horaChoque      = Carbon::parse($turnoChocado->fecha_hora)->format('H:i');
-            $finChoque       = Carbon::parse($turnoChocado->fecha_hora)
+            $horaChoque = Carbon::parse($turnoChocado->fecha_hora)->format('H:i');
+            $finChoque = Carbon::parse($turnoChocado->fecha_hora)
                 ->addMinutes($turnoChocado->duracion_total_minutos)
                 ->format('H:i');
 
@@ -375,11 +379,11 @@ class TurnoController extends Controller
         $cambioDeFecha = Carbon::parse($turno->fecha_hora)->toDateString() !== $fechaHora->toDateString();
 
         $turno->update([
-            'cliente_id'             => $data['cliente_id'],
-            'profesional_id'         => $profesional->id,
-            'fecha_hora'             => $data['fecha_hora'],
+            'cliente_id' => $data['cliente_id'],
+            'profesional_id' => $profesional->id,
+            'fecha_hora' => $data['fecha_hora'],
             'duracion_total_minutos' => $duracionTotal,
-            'notas'                  => $data['notas'] ?? null,
+            'notas' => $data['notas'] ?? null,
         ]);
 
         $turno->servicios()->sync($data['servicio_ids']);
@@ -399,7 +403,7 @@ class TurnoController extends Controller
 
     public function destroy(Request $request, int $id): JsonResponse
     {
-        $user  = $request->user();
+        $user = $request->user();
         $turno = Turno::delUsuario($user)->findOrFail($id);
 
         if (Carbon::parse($turno->fecha_hora)->isPast()) {
@@ -408,11 +412,19 @@ class TurnoController extends Controller
             ], 422);
         }
 
+        $data = $request->validate([
+            'motivo_cancelacion' => 'required|string|max:255',
+        ]);
+
         // Soft-cancel: se conserva el registro para historial/estadísticas.
         // index/marcas/disponibilidad/verificarChoque ya filtran por
         // confirmados(), así que un turno cancelado deja de aparecer
         // y de bloquear horarios automáticamente.
-        $turno->update(['estado' => 'cancelado']);
+        $turno->update([
+            'estado' => 'cancelado',
+            'motivo_cancelacion' => $data['motivo_cancelacion'],
+            'cancelado_en' => now(),
+        ]);
 
         return response()->json(['message' => 'Turno cancelado correctamente.']);
     }
@@ -428,9 +440,9 @@ class TurnoController extends Controller
             return $turno->estado; // completado, cancelado, etc. — ya persistido
         }
 
-        $ahora  = Carbon::now();
+        $ahora = Carbon::now();
         $inicio = Carbon::parse($turno->fecha_hora);
-        $fin    = $inicio->copy()->addMinutes($turno->duracion_total_minutos);
+        $fin = $inicio->copy()->addMinutes($turno->duracion_total_minutos);
 
         if ($inicio->lt($ahora) && $fin->gt($ahora)) {
             return 'en_curso';
@@ -446,7 +458,7 @@ class TurnoController extends Controller
     // ─────────────────────────────────────────────
     public function completar(Request $request, int $id): JsonResponse
     {
-        $user  = $request->user();
+        $user = $request->user();
         $turno = Turno::delUsuario($user)->findOrFail($id);
 
         if ($turno->estado !== 'confirmado') {
@@ -463,7 +475,7 @@ class TurnoController extends Controller
     // ─────────────────────────────────────────────
     // Helper — valida rango horario de atención
     // ─────────────────────────────────────────────
-    private function validarHorarioAtencion(\App\Models\User $user, Carbon $fechaHora): ?string
+    private function validarHorarioAtencion(User $user, Carbon $fechaHora): ?string
     {
         $slots = $user->slotsDisponibles()->activos()->orderBy('hora')->get();
 
@@ -471,13 +483,14 @@ class TurnoController extends Controller
             return 'No tenés horarios de atención configurados. Configurálos en Ajustes.';
         }
 
-        $horaMin   = Carbon::parse($slots->first()->hora)->format('H:i:s');
-        $horaMax   = Carbon::parse($slots->last()->hora)->format('H:i:s');
+        $horaMin = Carbon::parse($slots->first()->hora)->format('H:i:s');
+        $horaMax = Carbon::parse($slots->last()->hora)->format('H:i:s');
         $horaTurno = $fechaHora->format('H:i:s');
 
         if ($horaTurno < $horaMin || $horaTurno > $horaMax) {
             $minFmt = Carbon::parse($horaMin)->format('H:i');
             $maxFmt = Carbon::parse($horaMax)->format('H:i');
+
             return "El horario de atención es de {$minFmt} a {$maxFmt}hs.";
         }
 
@@ -500,8 +513,8 @@ class TurnoController extends Controller
         ?int $excluirId = null,
     ): ?Turno {
         $inicio = Carbon::parse($fechaHora);
-        $fin    = $inicio->copy()->addMinutes($duracion);
-        $fecha  = $inicio->toDateString();
+        $fin = $inicio->copy()->addMinutes($duracion);
+        $fecha = $inicio->toDateString();
 
         $query = Turno::where('profesional_id', $profesionalId)
             ->confirmados()

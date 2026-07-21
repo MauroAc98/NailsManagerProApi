@@ -14,6 +14,8 @@ class Turno extends Model
         'fecha_hora',
         'duracion_total_minutos',
         'estado',
+        'motivo_cancelacion',
+        'cancelado_en',
         'origen',
         'notas',
     ];
@@ -31,7 +33,8 @@ class Turno extends Model
     protected function casts(): array
     {
         return [
-            'fecha_hora'             => 'datetime',
+            'fecha_hora' => 'datetime',
+            'cancelado_en' => 'datetime',
             'duracion_total_minutos' => 'integer',
         ];
     }
@@ -55,7 +58,7 @@ class Turno extends Model
     public function scopeDelRango($query, string $desde, string $hasta)
     {
         return $query->whereDate('fecha_hora', '>=', $desde)
-                     ->whereDate('fecha_hora', '<=', $hasta);
+            ->whereDate('fecha_hora', '<=', $hasta);
     }
 
     // ── Helpers de estado ────────────────────────────────────────
