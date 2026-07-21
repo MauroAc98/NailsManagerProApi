@@ -99,4 +99,68 @@ class AdminRenewSubscriptionTest extends TestCase
 
         $this->assertEquals('ACTIVO', $subscription->fresh()->status);
     }
+
+    public function test_bloquea_renovacion_duplicada_dentro_de_las_24hs(): void
+    {
+        $user = User::factory()->create();
+
+        $subscription = $user->subscription()->create([
+            'ends_at' => now()->addDays(10),
+            'status' => 'ACTIVO',
+            'renewed_at' => now()->subHours(2),
+        ]);
+
+        $this->withHeader('X-Admin-Secret', 'secreto-de-test')
+            ->postJson("/api/admin/subscriptions/{$user->id}/renew")
+            ->assertStatus(409)
+            ->assertJsonStructure(['error', 'renewed_at', 'ends_at', 'hint']);
+
+        $this->assertEqualsWithDelta(
+            now()->addDays(10)->timestamp,
+            $subscription->fresh()->ends_at->timestamp,
+            5
+        );
+    }
+
+    public function test_permite_forzar_renovacion_duplicada_con_query_param(): void
+    {
+        $user = User::factory()->create();
+
+        $subscription = $user->subscription()->create([
+            'ends_at' => now()->addDays(10),
+            'status' => 'ACTIVO',
+            'renewed_at' => now()->subHours(2),
+        ]);
+
+        $this->withHeader('X-Admin-Secret', 'secreto-de-test')
+            ->postJson("/api/admin/subscriptions/{$user->id}/renew?force=true")
+            ->assertOk();
+
+        $this->assertEqualsWithDelta(
+            now()->addDays(40)->timestamp,
+            $subscription->fresh()->ends_at->timestamp,
+            5
+        );
+    }
+
+    public function test_permite_renovar_de_nuevo_pasadas_las_24hs(): void
+    {
+        $user = User::factory()->create();
+
+        $subscription = $user->subscription()->create([
+            'ends_at' => now()->addDays(10),
+            'status' => 'ACTIVO',
+            'renewed_at' => now()->subHours(25),
+        ]);
+
+        $this->withHeader('X-Admin-Secret', 'secreto-de-test')
+            ->postJson("/api/admin/subscriptions/{$user->id}/renew")
+            ->assertOk();
+
+        $this->assertEqualsWithDelta(
+            now()->addDays(40)->timestamp,
+            $subscription->fresh()->ends_at->timestamp,
+            5
+        );
+    }
 }

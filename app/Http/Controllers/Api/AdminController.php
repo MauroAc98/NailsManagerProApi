@@ -31,9 +31,21 @@ class AdminController extends Controller
             return response()->json(['error' => 'El usuario no tiene suscripción'], 404);
         }
 
+        $renewedRecently = $subscription->renewed_at && $subscription->renewed_at->gt(now()->subHours(24));
+
+        if ($renewedRecently && !$request->boolean('force')) {
+            return response()->json([
+                'error' => 'Esta suscripción ya fue renovada hace menos de 24hs',
+                'renewed_at' => $subscription->renewed_at,
+                'ends_at' => $subscription->ends_at,
+                'hint' => 'Si es intencional, repetí el request con ?force=true',
+            ], 409);
+        }
+
         $subscription->update([
             'ends_at' => now()->max($subscription->ends_at)->copy()->addDays(30),
             'status'  => 'ACTIVO',
+            'renewed_at' => now(),
         ]);
 
         return response()->json([

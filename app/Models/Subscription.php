@@ -11,10 +11,12 @@ class Subscription extends Model
         'user_id',
         'ends_at',
         'status',
+        'renewed_at',
     ];
 
     protected $casts = [
         'ends_at' => 'datetime',
+        'renewed_at' => 'datetime',
     ];
 
     public function user(): BelongsTo
