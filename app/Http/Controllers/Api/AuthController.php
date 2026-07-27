@@ -53,7 +53,7 @@ class AuthController extends Controller
 
         \App\Models\Subscription::create([
             'user_id'  => $user->id,
-            'ends_at'  => now()->addDays(30),
+            'ends_at'  => now()->addDays(10),
             'status'   => 'ACTIVO',
         ]);
 
