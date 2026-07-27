@@ -43,6 +43,13 @@ class ServicioController extends Controller
 
         $servicio = $request->user()->servicios()->create($data);
 
+        // Default "lo ofrece todo el mundo": un servicio nuevo queda
+        // disponible para todas las profesionales activas de la cuenta.
+        // Restringirlo a alguna puntual es la acción explícita, en
+        // Configuración > Profesionales — no al revés.
+        $profesionalIds = $request->user()->profesionales()->where('activo', true)->pluck('id');
+        $servicio->profesionales()->sync($profesionalIds);
+
         return response()->json($servicio, 201);
     }
 
