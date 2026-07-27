@@ -222,7 +222,7 @@ class TurnoController extends Controller
         }
 
         // ── Regla 0: la hora debe estar dentro del horario de atención ──
-        $errorHorario = $this->validarHorarioAtencion($user, $fechaHora);
+        $errorHorario = $this->validarHorarioAtencion($profesional->id, $fechaHora);
         if ($errorHorario) {
             return response()->json(['message' => $errorHorario], 422);
         }
@@ -332,7 +332,7 @@ class TurnoController extends Controller
         }
 
         // ── Regla 0: la nueva hora debe estar dentro del horario de atención ──
-        $errorHorario = $this->validarHorarioAtencion($user, $fechaHora);
+        $errorHorario = $this->validarHorarioAtencion($profesional->id, $fechaHora);
         if ($errorHorario) {
             return response()->json(['message' => $errorHorario], 422);
         }
@@ -475,9 +475,9 @@ class TurnoController extends Controller
     // ─────────────────────────────────────────────
     // Helper — valida rango horario de atención
     // ─────────────────────────────────────────────
-    private function validarHorarioAtencion(User $user, Carbon $fechaHora): ?string
+    private function validarHorarioAtencion(int $profesionalId, Carbon $fechaHora): ?string
     {
-        $slots = $user->slotsDisponibles()->activos()->orderBy('hora')->get();
+        $slots = SlotDisponible::where('profesional_id', $profesionalId)->activos()->orderBy('hora')->get();
 
         if ($slots->isEmpty()) {
             return 'No tenés horarios de atención configurados. Configurálos en Ajustes.';
