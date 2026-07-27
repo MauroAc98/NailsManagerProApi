@@ -31,12 +31,12 @@ Route::get('support-info', [AuthController::class, 'supportInfo']);
 // ─────────────────────────────────────────────
 Route::prefix('auth')->group(function () {
     Route::post('register', [AuthController::class, 'register']);
-    Route::post('login',    [AuthController::class, 'login']);
+    Route::post('login',    [AuthController::class, 'login'])->middleware('throttle:10,1');
 
     Route::post('cambiar-password-obligatorio', [AuthController::class, 'cambiarPasswordObligatorio']);
 
     Route::post('forgot-password', [AuthController::class, 'forgotPassword']);
-    Route::post('reset-password',  [AuthController::class, 'resetPassword']);
+    Route::post('reset-password',  [AuthController::class, 'resetPassword'])->middleware('throttle:10,1');
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('logout', [AuthController::class, 'logout']);

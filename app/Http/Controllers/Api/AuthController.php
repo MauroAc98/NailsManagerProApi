@@ -17,11 +17,26 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
+    private function noAutorizado(Request $request): ?JsonResponse
+    {
+        if ($request->header('X-Admin-Secret') !== config('app.admin_secret')) {
+            return response()->json(['error' => 'No autorizado'], 401);
+        }
+
+        return null;
+    }
+
     // ─────────────────────────────────────────────
     // POST /api/auth/register
     // ─────────────────────────────────────────────
     public function register(Request $request): JsonResponse
     {
+        if ($response = $this->noAutorizado($request)) {
+            return $response;
+        }
+
+        $request->merge(['email' => strtolower((string) $request->input('email'))]);
+
         $data = $request->validate([
             'name'  => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
@@ -31,7 +46,7 @@ class AuthController extends Controller
 
         $user = User::create([
             'name'                  => $data['name'],
-            'email'                 => strtolower($data['email']),
+            'email'                 => $data['email'],
             'password'              => $passwordProvisoria,
             'debe_cambiar_password' => true,
         ]);
