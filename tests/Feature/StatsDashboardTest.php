@@ -73,6 +73,30 @@ class StatsDashboardTest extends TestCase
 
         $this->assertSame([], $response->json('servicios_mas_pedidos'));
         $this->assertSame(['nuevas' => 0, 'recurrentes' => 0], $response->json('clientes'));
+        $this->assertSame(['completados' => 0, 'confirmados' => 0, 'cancelados' => 1], $response->json('turnos_por_estado'));
+    }
+
+    public function test_desglosa_turnos_por_estado(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $profesional = Profesional::create(['user_id' => $user->id, 'nombre' => 'Jefa', 'activo' => true]);
+        $cliente = Cliente::create(['user_id' => $user->id, 'nombre' => 'Cliente Test', 'telefono' => '3765252395']);
+        $servicio = Servicio::create(['user_id' => $user->id, 'nombre' => 'Manicura', 'duracion_minutos' => 30, 'activo' => true]);
+
+        $this->crearTurno($user, $profesional, $cliente, [$servicio], '2026-07-05 10:00:00', 'completado');
+        $this->crearTurno($user, $profesional, $cliente, [$servicio], '2026-07-06 10:00:00', 'confirmado');
+        $this->crearTurno($user, $profesional, $cliente, [$servicio], '2026-07-07 10:00:00', 'confirmado');
+        $this->crearTurno($user, $profesional, $cliente, [$servicio], '2026-07-08 10:00:00', 'cancelado');
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/stats/dashboard?desde=2026-07-01&hasta=2026-07-31')
+            ->assertOk();
+
+        $this->assertSame(3, $response->json('total_turnos'));
+        $this->assertSame(
+            ['completados' => 1, 'confirmados' => 2, 'cancelados' => 1],
+            $response->json('turnos_por_estado')
+        );
     }
 
     public function test_clasifica_clienta_nueva_vs_recurrente_segun_su_primer_turno_historico(): void

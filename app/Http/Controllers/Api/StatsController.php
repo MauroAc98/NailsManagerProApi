@@ -23,20 +23,28 @@ class StatsController extends Controller
 
         $user = $request->user();
 
-        $turnosQuery = Turno::delUsuario($user)
-            ->whereIn('estado', ['confirmado', 'completado'])
-            ->delRango($request->desde, $request->hasta);
+        $todosQuery = Turno::delUsuario($user)->delRango($request->desde, $request->hasta);
 
         if ($request->filled('profesional_id')) {
-            $turnosQuery->where('profesional_id', (int) $request->profesional_id);
+            $todosQuery->where('profesional_id', (int) $request->profesional_id);
         }
 
-        $turnos = $turnosQuery->with('servicios')->get();
+        $todos = $todosQuery->with('servicios')->get();
+
+        // Las métricas de servicios/clientas se calculan sobre los turnos
+        // "reales" (no cancelados) — un turno cancelado no representa ni un
+        // servicio prestado ni una visita de la clienta.
+        $turnosValidos = $todos->whereIn('estado', ['confirmado', 'completado']);
 
         return response()->json([
-            'total_turnos' => $turnos->count(),
-            'servicios_mas_pedidos' => $this->serviciosMasPedidos($turnos),
-            'clientes' => $this->clientesNuevasVsRecurrentes($user, $turnos, $request->desde, $request->hasta),
+            'total_turnos' => $turnosValidos->count(),
+            'turnos_por_estado' => [
+                'completados' => $todos->where('estado', 'completado')->count(),
+                'confirmados' => $todos->where('estado', 'confirmado')->count(),
+                'cancelados' => $todos->where('estado', 'cancelado')->count(),
+            ],
+            'servicios_mas_pedidos' => $this->serviciosMasPedidos($turnosValidos),
+            'clientes' => $this->clientesNuevasVsRecurrentes($user, $turnosValidos, $request->desde, $request->hasta),
         ]);
     }
 
