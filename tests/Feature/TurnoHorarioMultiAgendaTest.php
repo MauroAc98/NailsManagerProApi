@@ -37,6 +37,8 @@ class TurnoHorarioMultiAgendaTest extends TestCase
             'precio' => 1000,
             'activo' => true,
         ]);
+        $jefa->servicios()->attach($servicio->id);
+        $empleada->servicios()->attach($servicio->id);
 
         return [$user, $jefa, $empleada, $cliente, $servicio];
     }

@@ -221,6 +221,13 @@ class TurnoController extends Controller
             ], 422);
         }
 
+        // ── Regla -0.5: los servicios deben estar asignados a la profesional ──
+        if ($servicios->pluck('id')->diff($profesional->servicios->pluck('id'))->isNotEmpty()) {
+            return response()->json([
+                'message' => 'Alguno de los servicios seleccionados no está asignado a esta profesional.',
+            ], 422);
+        }
+
         // ── Regla 0: la hora debe estar dentro del horario de atención ──
         $errorHorario = $this->validarHorarioAtencion($profesional->id, $fechaHora);
         if ($errorHorario) {
@@ -328,6 +335,13 @@ class TurnoController extends Controller
         if (Carbon::parse($turno->fecha_hora)->isPast()) {
             return response()->json([
                 'message' => 'No se pueden modificar turnos que ya pasaron.',
+            ], 422);
+        }
+
+        // ── Regla -0.5: los servicios deben estar asignados a la profesional ──
+        if ($servicios->pluck('id')->diff($profesional->servicios->pluck('id'))->isNotEmpty()) {
+            return response()->json([
+                'message' => 'Alguno de los servicios seleccionados no está asignado a esta profesional.',
             ], 422);
         }
 
