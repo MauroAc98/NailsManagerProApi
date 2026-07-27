@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\WhatsappController;
 use App\Http\Controllers\Api\WhatsappTemplateController;
 use App\Http\Controllers\Api\EvolutionWebhookController;
 use App\Http\Controllers\Api\AdminController;
+use App\Http\Controllers\Api\StatsController;
 use Illuminate\Support\Facades\Route;
 
 // ─────────────────────────────────────────────
@@ -75,6 +76,9 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
     ]);
     Route::post('profesionales/{id}/fondo-historia', [ProfesionalController::class, 'subirFondoHistoria']);
     Route::delete('profesionales/{id}/fondo-historia', [ProfesionalController::class, 'borrarFondoHistoria']);
+
+    // Estadísticas
+    Route::get('stats/dashboard', [StatsController::class, 'dashboard']);
 
     // Turnos
     Route::prefix('turnos')->group(function () {
