@@ -11,7 +11,7 @@ class ClienteWhatsappOptOutTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_el_salon_puede_reactivar_a_una_clienta_que_dio_de_baja(): void
+    public function test_el_salon_puede_reactivar_a_una_cliente_que_dio_de_baja(): void
     {
         $user = User::factory()->create(['is_exempt' => true]);
 

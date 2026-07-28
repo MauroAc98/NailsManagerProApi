@@ -31,9 +31,9 @@ class StatsController extends Controller
 
         $todos = $todosQuery->with('servicios')->get();
 
-        // Las métricas de servicios/clientas se calculan sobre los turnos
+        // Las métricas de servicios/clientes se calculan sobre los turnos
         // "reales" (no cancelados) — un turno cancelado no representa ni un
-        // servicio prestado ni una visita de la clienta.
+        // servicio prestado ni una visita de la cliente.
         $turnosValidos = $todos->whereIn('estado', ['confirmado', 'completado']);
 
         return response()->json([
@@ -62,10 +62,10 @@ class StatsController extends Controller
             ->values();
     }
 
-    // Una clienta es "nueva" si su turno más antiguo (con cualquier
+    // Una cliente es "nueva" si su turno más antiguo (con cualquier
     // profesional de la cuenta, no solo la filtrada acá) cae dentro del
     // período consultado — no es "nueva para esta profesional", es nueva
-    // para el estudio. El resto de las clientas con turnos en el período
+    // para el estudio. El resto de las clientes con turnos en el período
     // son "recurrentes".
     private function clientesNuevasVsRecurrentes($user, $turnos, string $desde, string $hasta): array
     {

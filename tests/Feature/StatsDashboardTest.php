@@ -99,18 +99,18 @@ class StatsDashboardTest extends TestCase
         );
     }
 
-    public function test_clasifica_clienta_nueva_vs_recurrente_segun_su_primer_turno_historico(): void
+    public function test_clasifica_cliente_nueva_vs_recurrente_segun_su_primer_turno_historico(): void
     {
         $user = User::factory()->create(['is_exempt' => true]);
         $profesional = Profesional::create(['user_id' => $user->id, 'nombre' => 'Jefa', 'activo' => true]);
         $servicio = Servicio::create(['user_id' => $user->id, 'nombre' => 'Manicura', 'duracion_minutos' => 30, 'activo' => true]);
 
-        // Clienta A: su primer turno fue en junio (antes del período) -> recurrente en julio.
+        // Cliente A: su primer turno fue en junio (antes del período) -> recurrente en julio.
         $clienteA = Cliente::create(['user_id' => $user->id, 'nombre' => 'A', 'telefono' => '3765252391']);
         $this->crearTurno($user, $profesional, $clienteA, [$servicio], '2026-06-15 10:00:00');
         $this->crearTurno($user, $profesional, $clienteA, [$servicio], '2026-07-10 10:00:00');
 
-        // Clienta B: su primer turno ES en julio (dentro del período) -> nueva.
+        // Cliente B: su primer turno ES en julio (dentro del período) -> nueva.
         $clienteB = Cliente::create(['user_id' => $user->id, 'nombre' => 'B', 'telefono' => '3765252392']);
         $this->crearTurno($user, $profesional, $clienteB, [$servicio], '2026-07-20 10:00:00');
 

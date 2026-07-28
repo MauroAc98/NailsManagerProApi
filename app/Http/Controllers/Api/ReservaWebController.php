@@ -44,7 +44,7 @@ class ReservaWebController extends Controller
         $reserva = ReservaWeb::delUsuario($user)->pendientes()->findOrFail($id);
 
         DB::transaction(function () use ($reserva, $user) {
-            // Buscar o crear la clienta por teléfono
+            // Buscar o crear la cliente por teléfono
             $cliente = Cliente::delUsuario($user)
                 ->where('telefono', $reserva->telefono)
                 ->first();

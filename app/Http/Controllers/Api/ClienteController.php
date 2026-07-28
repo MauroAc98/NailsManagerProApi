@@ -48,7 +48,7 @@ class ClienteController extends Controller
                     ->where('user_id', $request->user()->id),
             ],
         ], [
-            'telefono.unique' => 'Ya existe una clienta registrada con ese teléfono.',
+            'telefono.unique' => 'Ya existe una cliente registrada con ese teléfono.',
         ]);
 
         $cliente = $request->user()->clientes()->create($data);
@@ -89,12 +89,12 @@ class ClienteController extends Controller
             'activo' => 'sometimes|boolean',
             'whatsapp_opt_out' => 'sometimes|boolean',
         ], [
-            'telefono.unique' => 'Ya existe una clienta registrada con ese teléfono.',
+            'telefono.unique' => 'Ya existe una cliente registrada con ese teléfono.',
         ]);
 
         if (($data['activo'] ?? null) === false && $this->tieneTurnosFuturosConfirmados($cliente)) {
             return response()->json([
-                'message' => 'No se puede inhabilitar una clienta con turnos futuros confirmados.',
+                'message' => 'No se puede inhabilitar una cliente con turnos futuros confirmados.',
             ], 422);
         }
 
@@ -112,20 +112,20 @@ class ClienteController extends Controller
 
         if ($this->tieneTurnosFuturosConfirmados($cliente)) {
             return response()->json([
-                'message' => 'No se puede inhabilitar una clienta con turnos futuros confirmados.',
+                'message' => 'No se puede inhabilitar una cliente con turnos futuros confirmados.',
             ], 422);
         }
 
         $cliente->update(['activo' => false]);
 
         return response()->json([
-            'message' => 'Clienta inhabilitada correctamente.',
+            'message' => 'Cliente inhabilitada correctamente.',
         ]);
     }
 
     // ─────────────────────────────────────────────
     // Comparte el guard entre destroy() y update() — ambos pueden
-    // desactivar la clienta (DELETE físico vía destroy quedó sin uso
+    // desactivar la cliente (DELETE físico vía destroy quedó sin uso
     // en el frontend, que ahora inhabilita con PUT activo:false).
     // ─────────────────────────────────────────────
     private function tieneTurnosFuturosConfirmados(Cliente $cliente): bool

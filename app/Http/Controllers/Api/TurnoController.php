@@ -234,16 +234,16 @@ class TurnoController extends Controller
             return response()->json(['message' => $errorHorario], 422);
         }
 
-        // ── Regla 1: máximo de turnos por clienta por día ────────
-        $turnosClienta = Turno::delUsuario($user)
+        // ── Regla 1: máximo de turnos por cliente por día ────────
+        $turnosCliente = Turno::delUsuario($user)
             ->where('cliente_id', $cliente->id)
             ->delaFecha($fechaHora->toDateString())
             ->confirmados()
             ->count();
 
-        if ($turnosClienta >= self::MAX_TURNOS_POR_CLIENTE) {
+        if ($turnosCliente >= self::MAX_TURNOS_POR_CLIENTE) {
             return response()->json([
-                'message' => 'La clienta ya tiene el máximo de '.self::MAX_TURNOS_POR_CLIENTE.' turnos para este día.',
+                'message' => 'La cliente ya tiene el máximo de '.self::MAX_TURNOS_POR_CLIENTE.' turnos para este día.',
             ], 422);
         }
 
@@ -262,7 +262,7 @@ class TurnoController extends Controller
             $nombresRepetidos = $servicios->whereIn('id', $repetidos)->pluck('nombre')->join(', ');
 
             return response()->json([
-                'message' => "La clienta ya tiene agendado: {$nombresRepetidos} para este día.",
+                'message' => "La cliente ya tiene agendado: {$nombresRepetidos} para este día.",
             ], 422);
         }
 
@@ -273,7 +273,7 @@ class TurnoController extends Controller
         if ($turnoChocado) {
             $nombreCliente = $turnoChocado->cliente
                 ? trim("{$turnoChocado->cliente->nombre} {$turnoChocado->cliente->apellido}")
-                : 'otra clienta';
+                : 'otra cliente';
             $serviciosChoque = $turnoChocado->servicios->pluck('nombre')->join(' + ');
             $horaChoque = Carbon::parse($turnoChocado->fecha_hora)->format('H:i');
             $finChoque = Carbon::parse($turnoChocado->fecha_hora)
@@ -367,7 +367,7 @@ class TurnoController extends Controller
             $nombresRepetidos = $servicios->whereIn('id', $repetidos)->pluck('nombre')->join(', ');
 
             return response()->json([
-                'message' => "La clienta ya tiene agendado: {$nombresRepetidos} para este día.",
+                'message' => "La cliente ya tiene agendado: {$nombresRepetidos} para este día.",
             ], 422);
         }
 
@@ -378,7 +378,7 @@ class TurnoController extends Controller
         if ($turnoChocado) {
             $nombreCliente = $turnoChocado->cliente
                 ? trim("{$turnoChocado->cliente->nombre} {$turnoChocado->cliente->apellido}")
-                : 'otra clienta';
+                : 'otra cliente';
             $serviciosChoque = $turnoChocado->servicios->pluck('nombre')->join(' + ');
             $horaChoque = Carbon::parse($turnoChocado->fecha_hora)->format('H:i');
             $finChoque = Carbon::parse($turnoChocado->fecha_hora)

@@ -15,7 +15,7 @@ class EnviarRecordatorios extends Command
 {
     protected $signature = 'recordatorios:enviar';
 
-    protected $description = 'Envía recordatorios de WhatsApp a las clientas con turno mañana';
+    protected $description = 'Envía recordatorios de WhatsApp a las clientes con turno mañana';
 
     public function __construct(private EvolutionService $evolutionService)
     {
@@ -85,7 +85,7 @@ class EnviarRecordatorios extends Command
                 $cliente = $turno->cliente;
 
                 if (empty($cliente?->telefono)) {
-                    $this->warn("    ⚠ Turno #{$turno->id}: clienta sin teléfono, omitido");
+                    $this->warn("    ⚠ Turno #{$turno->id}: cliente sin teléfono, omitido");
 
                     continue;
                 }
