@@ -188,6 +188,7 @@ class AuthController extends Controller
             'sena_monto'              => 'sometimes|nullable|numeric|min:0',
             'fcm_token'               => 'sometimes|nullable|string',
             'password'                => 'sometimes|string|min:8|confirmed',
+            'locale'                  => 'sometimes|nullable|in:es,pt-BR,en',
         ]);
 
         if (isset($data['password'])) {
