@@ -44,13 +44,27 @@ class WhatsappTemplate extends Model
             return $template->contenido;
         }
 
-        // Valores por defecto según el tipo
-        return static::plantillaDefault($tipo);
+        // Valores por defecto según el tipo, en el idioma de la profesional
+        return static::plantillaDefault($tipo, $user->locale);
     }
 
     // ── Plantillas por defecto ──────────────────────────────────
-    public static function plantillaDefault(string $tipo): string
+    // "BAJA" queda igual en todos los locales a propósito: es el literal que
+    // EvolutionWebhookController::MENSAJE_OPT_OUT reconoce en los mensajes
+    // entrantes para dar de baja a una clienta. Traducirlo (ej. "SAIR" en
+    // portugués) rompería esa detección sin tocar el webhook — ver
+    // WhatsappTemplateDefaultLocaleTest.
+    public static function plantillaDefault(string $tipo, ?string $locale = null): string
     {
+        if ($locale === 'pt-BR') {
+            return match ($tipo) {
+                'recordatorio' => 'Oi {nombre} 💅 Passando para lembrar do seu horário em {fecha} às {hora} para {servicios}. Te espero!'
+                    ."\n\nSe você não quiser mais receber lembretes automáticos, responda BAJA.",
+                'confirmacion' => 'Oi {nombre} 💅 Seu horário de {servicios} está confirmado para {fecha} às {hora}. Te espero!',
+                default => '',
+            };
+        }
+
         return match ($tipo) {
             'recordatorio' => 'Hola {nombre} 💅 Te recuerdo tu turno el {fecha} a las {hora} para {servicios}. ¡Te espero!'
                 ."\n\nSi no querés recibir más recordatorios automáticos, respondé BAJA.",

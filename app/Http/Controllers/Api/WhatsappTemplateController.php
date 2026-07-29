@@ -25,7 +25,7 @@ class WhatsappTemplateController extends Controller
                 WhatsappTemplate::create([
                     'user_id' => $user->id,
                     'tipo' => $tipo,
-                    'contenido' => WhatsappTemplate::plantillaDefault($tipo),
+                    'contenido' => WhatsappTemplate::plantillaDefault($tipo, $user->locale),
                 ]);
             }
             $templates = WhatsappTemplate::delUsuario($user)->get();
@@ -50,7 +50,7 @@ class WhatsappTemplateController extends Controller
             ->delTipo($tipo)
             ->firstOrCreate(
                 ['user_id' => $user->id, 'tipo' => $tipo],
-                ['contenido' => WhatsappTemplate::plantillaDefault($tipo)]
+                ['contenido' => WhatsappTemplate::plantillaDefault($tipo, $user->locale)]
             );
 
         $template->update($data);
@@ -71,7 +71,7 @@ class WhatsappTemplateController extends Controller
             ->firstOrFail();
 
         $template->update([
-            'contenido' => WhatsappTemplate::plantillaDefault($tipo),
+            'contenido' => WhatsappTemplate::plantillaDefault($tipo, $user->locale),
         ]);
 
         return response()->json($template);
