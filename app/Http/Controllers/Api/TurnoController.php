@@ -482,16 +482,18 @@ class TurnoController extends Controller
         }
 
         $data = $request->validate([
-            'servicios' => 'required|array|min:1',
-            'servicios.*.servicio_id' => 'required|integer|exists:servicios,id',
-            'servicios.*.precio' => 'required|numeric|min:0',
+            'servicios' => 'sometimes|array|min:1',
+            'servicios.*.servicio_id' => 'required_with:servicios|integer|exists:servicios,id',
+            'servicios.*.precio' => 'required_with:servicios|numeric|min:0',
         ]);
 
         $turno->update(['estado' => 'completado']);
 
-        $turno->servicios()->sync(
-            collect($data['servicios'])->mapWithKeys(fn ($s) => [$s['servicio_id'] => ['precio' => $s['precio']]])
-        );
+        if (!empty($data['servicios'])) {
+            $turno->servicios()->sync(
+                collect($data['servicios'])->mapWithKeys(fn ($s) => [$s['servicio_id'] => ['precio' => $s['precio']]])
+            );
+        }
 
         return response()->json($turno->load(['cliente', 'servicios']));
     }
