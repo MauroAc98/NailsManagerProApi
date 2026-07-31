@@ -487,14 +487,17 @@ class TurnoController extends Controller
             'servicios.*.precio' => 'required_with:servicios|numeric|min:0',
         ]);
 
-        $turno->update(['estado' => 'completado']);
-
         if (!empty($data['servicios'])) {
-            $error = $this->validarServiciosDeLaCuenta($user, $data['servicios']);
+            $error = $this->validarServiciosDeLaCuenta($user, $data['servicios'])
+                ?? $this->validarSinCambiosConcurrentes($turno, $data['servicios']);
             if ($error) {
                 return $error;
             }
+        }
 
+        $turno->update(['estado' => 'completado']);
+
+        if (!empty($data['servicios'])) {
             $turno->servicios()->sync(
                 collect($data['servicios'])->mapWithKeys(fn ($s) => [$s['servicio_id'] => ['precio' => $s['precio']]])
             );
@@ -517,6 +520,26 @@ class TurnoController extends Controller
             return response()->json([
                 'message' => 'Alguno de los servicios seleccionados no pertenece a esta cuenta.',
             ], 422);
+        }
+
+        return null;
+    }
+
+    // ── sync() reemplaza el pivot completo con lo que mande el cliente. Si
+    // el turno cambió de servicios (otra pestaña/dispositivo) entre que este
+    // cliente lo cargó y confirmó el precio, un sync() a ciegas pisaría ese
+    // cambio en silencio. En vez de eso, se rechaza y se pide reintentar con
+    // datos frescos — para precios/plata, perder una actualización es peor
+    // que pedirle a la profesional que reintente. ──
+    private function validarSinCambiosConcurrentes(Turno $turno, array $servicios): ?JsonResponse
+    {
+        $enviados = collect($servicios)->pluck('servicio_id')->sort()->values()->all();
+        $actuales = $turno->servicios()->pluck('servicios.id')->sort()->values()->all();
+
+        if ($enviados !== $actuales) {
+            return response()->json([
+                'message' => 'Los servicios de este turno cambiaron mientras cargabas el precio. Volvé a intentar.',
+            ], 409);
         }
 
         return null;
@@ -546,7 +569,8 @@ class TurnoController extends Controller
             'servicios.*.precio' => 'required|numeric|min:0',
         ]);
 
-        $error = $this->validarServiciosDeLaCuenta($user, $data['servicios']);
+        $error = $this->validarServiciosDeLaCuenta($user, $data['servicios'])
+            ?? $this->validarSinCambiosConcurrentes($turno, $data['servicios']);
         if ($error) {
             return $error;
         }
@@ -557,6 +581,14 @@ class TurnoController extends Controller
 
         return response()->json($turno->load(['cliente', 'servicios']));
     }
+
+    // Ventana de "pendientes de cobro" — sin esto la query trae TODOS los
+    // turnos completados desde el origen de la cuenta, para siempre, y se
+    // llama seguido (cada mount del layout + cada vez que la PWA vuelve a
+    // primer plano). Un pendiente de cobro de más de 90 días es un caso que
+    // ya debería resolverse a mano, no algo que la lista tenga que seguir
+    // cargando indefinidamente.
+    private const DIAS_VENTANA_PENDIENTES_DE_COBRO = 90;
 
     // ─────────────────────────────────────────────
     // GET /api/turnos/pendientes-de-cobro
@@ -570,6 +602,7 @@ class TurnoController extends Controller
 
         $turnos = Turno::delUsuario($user)
             ->where('estado', 'completado')
+            ->where('fecha_hora', '>=', Carbon::now()->subDays(self::DIAS_VENTANA_PENDIENTES_DE_COBRO))
             ->with(['cliente', 'servicios'])
             ->get()
             ->filter(fn (Turno $t) => $t->servicios->contains(fn ($s) => is_null($s->pivot->precio)))
