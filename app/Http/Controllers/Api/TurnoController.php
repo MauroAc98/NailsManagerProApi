@@ -490,12 +490,36 @@ class TurnoController extends Controller
         $turno->update(['estado' => 'completado']);
 
         if (!empty($data['servicios'])) {
+            $error = $this->validarServiciosDeLaCuenta($user, $data['servicios']);
+            if ($error) {
+                return $error;
+            }
+
             $turno->servicios()->sync(
                 collect($data['servicios'])->mapWithKeys(fn ($s) => [$s['servicio_id'] => ['precio' => $s['precio']]])
             );
         }
 
         return response()->json($turno->load(['cliente', 'servicios']));
+    }
+
+    // ── Mismo criterio que la "Regla -0.5" de store()/update(): un
+    // servicio_id que exista en la tabla pero pertenezca a otra cuenta no
+    // puede terminar en el pivot de un turno propio. exists:servicios,id
+    // por sí solo no alcanza a resolver esto (valida existencia global,
+    // no tenencia). ──
+    private function validarServiciosDeLaCuenta(User $user, array $servicios): ?JsonResponse
+    {
+        $servicioIds = collect($servicios)->pluck('servicio_id')->unique();
+        $validos = Servicio::delUsuario($user)->whereIn('id', $servicioIds)->pluck('id');
+
+        if ($servicioIds->diff($validos)->isNotEmpty()) {
+            return response()->json([
+                'message' => 'Alguno de los servicios seleccionados no pertenece a esta cuenta.',
+            ], 422);
+        }
+
+        return null;
     }
 
     // ─────────────────────────────────────────────
@@ -521,6 +545,11 @@ class TurnoController extends Controller
             'servicios.*.servicio_id' => 'required|integer|exists:servicios,id',
             'servicios.*.precio' => 'required|numeric|min:0',
         ]);
+
+        $error = $this->validarServiciosDeLaCuenta($user, $data['servicios']);
+        if ($error) {
+            return $error;
+        }
 
         $turno->servicios()->sync(
             collect($data['servicios'])->mapWithKeys(fn ($s) => [$s['servicio_id'] => ['precio' => $s['precio']]])
