@@ -95,6 +95,6 @@ class Turno extends Model
 
     public function servicios()
     {
-        return $this->belongsToMany(Servicio::class, 'turno_servicio');
+        return $this->belongsToMany(Servicio::class, 'turno_servicio')->withPivot('precio');
     }
 }

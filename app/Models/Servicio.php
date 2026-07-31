@@ -37,7 +37,7 @@ class Servicio extends Model
 
     public function turnos()
     {
-        return $this->belongsToMany(Turno::class, 'turno_servicio');
+        return $this->belongsToMany(Turno::class, 'turno_servicio')->withPivot('precio');
     }
 
     public function profesionales()

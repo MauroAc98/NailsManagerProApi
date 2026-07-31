@@ -82,14 +82,16 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
 
     // Turnos
     Route::prefix('turnos')->group(function () {
-        Route::get('marcas',           [TurnoController::class, 'marcas']);
-        Route::get('disponibilidad',   [TurnoController::class, 'disponibilidad']);
-        Route::get('/',                [TurnoController::class, 'index']);
-        Route::get('/{id}',            [TurnoController::class, 'show']);
-        Route::post('/',               [TurnoController::class, 'store']);
-        Route::put('/{id}',            [TurnoController::class, 'update']);
-        Route::patch('{id}/completar', [TurnoController::class, 'completar']);
-        Route::delete('/{id}',         [TurnoController::class, 'destroy']);
+        Route::get('marcas',               [TurnoController::class, 'marcas']);
+        Route::get('disponibilidad',       [TurnoController::class, 'disponibilidad']);
+        Route::get('pendientes-de-cobro',  [TurnoController::class, 'pendientesDeCobro']);
+        Route::get('/',                    [TurnoController::class, 'index']);
+        Route::get('/{id}',                [TurnoController::class, 'show']);
+        Route::post('/',                   [TurnoController::class, 'store']);
+        Route::put('/{id}',                [TurnoController::class, 'update']);
+        Route::patch('{id}/completar',     [TurnoController::class, 'completar']);
+        Route::patch('{id}/precios',       [TurnoController::class, 'actualizarPrecios']);
+        Route::delete('/{id}',             [TurnoController::class, 'destroy']);
     });
 
     // Reservas web — panel de aceptación

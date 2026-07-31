@@ -35,16 +35,18 @@ class StatsController extends Controller
         // "reales" (no cancelados) — un turno cancelado no representa ni un
         // servicio prestado ni una visita de la cliente.
         $turnosValidos = $todos->whereIn('estado', ['confirmado', 'completado']);
+        $turnosCompletados = $todos->where('estado', 'completado');
 
         return response()->json([
             'total_turnos' => $turnosValidos->count(),
             'turnos_por_estado' => [
-                'completados' => $todos->where('estado', 'completado')->count(),
+                'completados' => $turnosCompletados->count(),
                 'confirmados' => $todos->where('estado', 'confirmado')->count(),
                 'cancelados' => $todos->where('estado', 'cancelado')->count(),
             ],
             'servicios_mas_pedidos' => $this->serviciosMasPedidos($turnosValidos),
             'clientes' => $this->clientesNuevasVsRecurrentes($user, $turnosValidos, $request->desde, $request->hasta),
+            'ganancias' => $turnosCompletados->flatMap(fn (Turno $t) => $t->servicios)->sum('pivot.precio'),
         ]);
     }
 

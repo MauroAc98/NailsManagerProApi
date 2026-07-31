@@ -481,9 +481,70 @@ class TurnoController extends Controller
             ], 422);
         }
 
+        $data = $request->validate([
+            'servicios' => 'required|array|min:1',
+            'servicios.*.servicio_id' => 'required|integer|exists:servicios,id',
+            'servicios.*.precio' => 'required|numeric|min:0',
+        ]);
+
         $turno->update(['estado' => 'completado']);
 
+        $turno->servicios()->sync(
+            collect($data['servicios'])->mapWithKeys(fn ($s) => [$s['servicio_id'] => ['precio' => $s['precio']]])
+        );
+
         return response()->json($turno->load(['cliente', 'servicios']));
+    }
+
+    // ─────────────────────────────────────────────
+    // PATCH /api/turnos/{id}/precios
+    // Permite cargar/corregir los precios de un turno que ya está
+    // completado — típicamente uno marcado automáticamente por el cron
+    // CompletarTurnosVencidos, que queda "pendiente de cobro" (servicios
+    // sin precio en el pivot) hasta que la profesional los carga acá.
+    // ─────────────────────────────────────────────
+    public function actualizarPrecios(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $turno = Turno::delUsuario($user)->findOrFail($id);
+
+        if ($turno->estado !== 'completado') {
+            return response()->json([
+                'message' => 'Este turno no está completado.',
+            ], 422);
+        }
+
+        $data = $request->validate([
+            'servicios' => 'required|array|min:1',
+            'servicios.*.servicio_id' => 'required|integer|exists:servicios,id',
+            'servicios.*.precio' => 'required|numeric|min:0',
+        ]);
+
+        $turno->servicios()->sync(
+            collect($data['servicios'])->mapWithKeys(fn ($s) => [$s['servicio_id'] => ['precio' => $s['precio']]])
+        );
+
+        return response()->json($turno->load(['cliente', 'servicios']));
+    }
+
+    // ─────────────────────────────────────────────
+    // GET /api/turnos/pendientes-de-cobro
+    // Turnos completados (típicamente por el cron CompletarTurnosVencidos,
+    // que no pide precio) que tienen al menos un servicio sin precio
+    // cargado en el pivot. No hay estado/columna nueva: se detectan así.
+    // ─────────────────────────────────────────────
+    public function pendientesDeCobro(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        $turnos = Turno::delUsuario($user)
+            ->where('estado', 'completado')
+            ->with(['cliente', 'servicios'])
+            ->get()
+            ->filter(fn (Turno $t) => $t->servicios->contains(fn ($s) => is_null($s->pivot->precio)))
+            ->values();
+
+        return response()->json($turnos);
     }
 
     // ─────────────────────────────────────────────
