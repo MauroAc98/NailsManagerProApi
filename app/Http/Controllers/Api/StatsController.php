@@ -59,12 +59,18 @@ class StatsController extends Controller
     // ─────────────────────────────────────────────
     // GET /api/stats/ganancias-por-periodo
     // Con desde/hasta explícitos (modo "Rango personalizado" del frontend):
-    // bucketiza EXACTAMENTE ese rango, sin acolcharlo a una cantidad fija —
-    // así "Semana"/"Mes" respetan el mismo rango que el usuario eligió a
-    // mano, en vez de ignorarlo. Sin desde/hasta (modo "Mes" normal del
-    // navegador de arriba, que no aplica acá): últimos 12 buckets terminando
-    // hoy, para dar un vistazo de tendencia reciente sin importar qué mes
-    // calendario se esté navegando en el resto de la pantalla.
+    // la CONSULTA se recorta exacto a ese rango — nunca trae datos de fuera
+    // de lo que el usuario eligió, aunque el rango no empiece justo en un
+    // lunes (semana) o día 1 (mes). Como consecuencia, el primer y/o último
+    // bucket pueden representar un período CALENDARIO incompleto (ej. medio
+    // mes) — cada punto devuelve `completo: bool` para que el frontend lo
+    // pueda comunicar en vez de mezclarlo en silencio con los completos.
+    // Sin desde/hasta (modo "Mes" normal del navegador de arriba, que no
+    // aplica acá): últimos 12 buckets terminando hoy, para dar un vistazo de
+    // tendencia reciente sin importar qué mes calendario se esté navegando
+    // en el resto de la pantalla — ahí sí quedan siempre alineados a bucket
+    // completo, salvo el último (la semana/mes en curso, genuinamente sin
+    // terminar todavía).
     // ─────────────────────────────────────────────
     public function gananciasPorPeriodo(Request $request): JsonResponse
     {
@@ -80,22 +86,18 @@ class StatsController extends Controller
         $tieneRangoExplicito = $request->filled('desde') && $request->filled('hasta');
 
         if ($tieneRangoExplicito) {
-            $desdeSolicitado = Carbon::parse($request->desde)->startOfDay();
+            $desdeLimite = Carbon::parse($request->desde)->startOfDay();
             $hastaLimite = Carbon::parse($request->hasta)->endOfDay();
         } else {
             $hastaLimite = Carbon::now();
-            $desdeSolicitado = $granularidad === 'semana'
+            $desdeLimite = $granularidad === 'semana'
                 ? $hastaLimite->copy()->subWeeks(11)->startOfWeek()
                 : $hastaLimite->copy()->subMonths(11)->startOfMonth();
         }
 
-        $inicioPrimerBucket = $granularidad === 'semana'
-            ? $desdeSolicitado->copy()->startOfWeek()
-            : $desdeSolicitado->copy()->startOfMonth();
-
         $query = Turno::delUsuario($user)
             ->where('estado', 'completado')
-            ->where('fecha_hora', '>=', $inicioPrimerBucket)
+            ->where('fecha_hora', '>=', $desdeLimite)
             ->where('fecha_hora', '<=', $hastaLimite);
 
         if ($request->filled('profesional_id')) {
@@ -112,11 +114,21 @@ class StatsController extends Controller
                 : Carbon::parse($item['fecha'])->startOfMonth()->format('Y-m-d'))
             ->map(fn ($grupo) => $grupo->sum('precio'));
 
+        $inicioPrimerBucket = $granularidad === 'semana'
+            ? $desdeLimite->copy()->startOfWeek()
+            : $desdeLimite->copy()->startOfMonth();
+
         $puntos = [];
         $cursor = $inicioPrimerBucket->copy();
         while ($cursor <= $hastaLimite && count($puntos) < self::MAX_BUCKETS_PERIODO) {
-            $fecha = $cursor->format('Y-m-d');
-            $puntos[] = ['fecha' => $fecha, 'monto' => $montosPorBucket[$fecha] ?? 0];
+            $finBucket = $granularidad === 'semana' ? $cursor->copy()->endOfWeek() : $cursor->copy()->endOfMonth();
+            $completo = $cursor >= $desdeLimite && $finBucket <= $hastaLimite;
+
+            $puntos[] = [
+                'fecha' => $cursor->format('Y-m-d'),
+                'monto' => $montosPorBucket[$cursor->format('Y-m-d')] ?? 0,
+                'completo' => $completo,
+            ];
             $cursor = $granularidad === 'semana' ? $cursor->addWeek() : $cursor->addMonth();
         }
 
