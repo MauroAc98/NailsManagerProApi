@@ -52,32 +52,51 @@ class StatsController extends Controller
         ]);
     }
 
+    // Tope defensivo de buckets — evita respuestas enormes si alguien manda
+    // un rango desde/hasta absurdamente largo con granularidad semana/mes.
+    private const MAX_BUCKETS_PERIODO = 120;
+
     // ─────────────────────────────────────────────
     // GET /api/stats/ganancias-por-periodo
-    // Independiente del rango desde/hasta del dashboard a propósito: el
-    // gráfico de semana/mes en el frontend tiene su propio selector, no
-    // sigue al navegador de mes de la pantalla de estadísticas — siempre
-    // muestra los últimos N buckets terminando hoy.
+    // Con desde/hasta explícitos (modo "Rango personalizado" del frontend):
+    // bucketiza EXACTAMENTE ese rango, sin acolcharlo a una cantidad fija —
+    // así "Semana"/"Mes" respetan el mismo rango que el usuario eligió a
+    // mano, en vez de ignorarlo. Sin desde/hasta (modo "Mes" normal del
+    // navegador de arriba, que no aplica acá): últimos 12 buckets terminando
+    // hoy, para dar un vistazo de tendencia reciente sin importar qué mes
+    // calendario se esté navegando en el resto de la pantalla.
     // ─────────────────────────────────────────────
     public function gananciasPorPeriodo(Request $request): JsonResponse
     {
         $request->validate([
             'granularidad' => 'required|in:semana,mes',
             'profesional_id' => 'sometimes|nullable|integer|exists:profesionales,id',
+            'desde' => 'sometimes|nullable|date',
+            'hasta' => 'sometimes|nullable|date|after_or_equal:desde',
         ]);
 
         $user = $request->user();
         $granularidad = $request->granularidad;
-        $cantidadBuckets = 12;
-        $hoy = Carbon::now();
+        $tieneRangoExplicito = $request->filled('desde') && $request->filled('hasta');
 
-        $desde = $granularidad === 'semana'
-            ? $hoy->copy()->subWeeks($cantidadBuckets - 1)->startOfWeek()
-            : $hoy->copy()->subMonths($cantidadBuckets - 1)->startOfMonth();
+        if ($tieneRangoExplicito) {
+            $desdeSolicitado = Carbon::parse($request->desde)->startOfDay();
+            $hastaLimite = Carbon::parse($request->hasta)->endOfDay();
+        } else {
+            $hastaLimite = Carbon::now();
+            $desdeSolicitado = $granularidad === 'semana'
+                ? $hastaLimite->copy()->subWeeks(11)->startOfWeek()
+                : $hastaLimite->copy()->subMonths(11)->startOfMonth();
+        }
+
+        $inicioPrimerBucket = $granularidad === 'semana'
+            ? $desdeSolicitado->copy()->startOfWeek()
+            : $desdeSolicitado->copy()->startOfMonth();
 
         $query = Turno::delUsuario($user)
             ->where('estado', 'completado')
-            ->where('fecha_hora', '>=', $desde);
+            ->where('fecha_hora', '>=', $inicioPrimerBucket)
+            ->where('fecha_hora', '<=', $hastaLimite);
 
         if ($request->filled('profesional_id')) {
             $query->where('profesional_id', (int) $request->profesional_id);
@@ -94,15 +113,14 @@ class StatsController extends Controller
             ->map(fn ($grupo) => $grupo->sum('precio'));
 
         $puntos = [];
-        for ($i = 0; $i < $cantidadBuckets; $i++) {
-            $bucketStart = $granularidad === 'semana'
-                ? $desde->copy()->addWeeks($i)
-                : $desde->copy()->addMonths($i);
-            $fecha = $bucketStart->format('Y-m-d');
+        $cursor = $inicioPrimerBucket->copy();
+        while ($cursor <= $hastaLimite && count($puntos) < self::MAX_BUCKETS_PERIODO) {
+            $fecha = $cursor->format('Y-m-d');
             $puntos[] = ['fecha' => $fecha, 'monto' => $montosPorBucket[$fecha] ?? 0];
+            $cursor = $granularidad === 'semana' ? $cursor->addWeek() : $cursor->addMonth();
         }
 
-        return response()->json(['puntos' => $puntos]);
+        return response()->json(['puntos' => $puntos, 'truncado' => $cursor <= $hastaLimite]);
     }
 
     private function gananciasPorDia($turnosCompletados)
