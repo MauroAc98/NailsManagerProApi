@@ -52,6 +52,59 @@ class StatsController extends Controller
         ]);
     }
 
+    // ─────────────────────────────────────────────
+    // GET /api/stats/ganancias-por-periodo
+    // Independiente del rango desde/hasta del dashboard a propósito: el
+    // gráfico de semana/mes en el frontend tiene su propio selector, no
+    // sigue al navegador de mes de la pantalla de estadísticas — siempre
+    // muestra los últimos N buckets terminando hoy.
+    // ─────────────────────────────────────────────
+    public function gananciasPorPeriodo(Request $request): JsonResponse
+    {
+        $request->validate([
+            'granularidad' => 'required|in:semana,mes',
+            'profesional_id' => 'sometimes|nullable|integer|exists:profesionales,id',
+        ]);
+
+        $user = $request->user();
+        $granularidad = $request->granularidad;
+        $cantidadBuckets = 12;
+        $hoy = Carbon::now();
+
+        $desde = $granularidad === 'semana'
+            ? $hoy->copy()->subWeeks($cantidadBuckets - 1)->startOfWeek()
+            : $hoy->copy()->subMonths($cantidadBuckets - 1)->startOfMonth();
+
+        $query = Turno::delUsuario($user)
+            ->where('estado', 'completado')
+            ->where('fecha_hora', '>=', $desde);
+
+        if ($request->filled('profesional_id')) {
+            $query->where('profesional_id', (int) $request->profesional_id);
+        }
+
+        $montosPorBucket = $query->with('servicios')->get()
+            ->flatMap(fn (Turno $t) => $t->servicios->map(fn ($s) => [
+                'fecha' => $t->fecha_hora,
+                'precio' => $s->pivot->precio,
+            ]))
+            ->groupBy(fn ($item) => $granularidad === 'semana'
+                ? Carbon::parse($item['fecha'])->startOfWeek()->format('Y-m-d')
+                : Carbon::parse($item['fecha'])->startOfMonth()->format('Y-m-d'))
+            ->map(fn ($grupo) => $grupo->sum('precio'));
+
+        $puntos = [];
+        for ($i = 0; $i < $cantidadBuckets; $i++) {
+            $bucketStart = $granularidad === 'semana'
+                ? $desde->copy()->addWeeks($i)
+                : $desde->copy()->addMonths($i);
+            $fecha = $bucketStart->format('Y-m-d');
+            $puntos[] = ['fecha' => $fecha, 'monto' => $montosPorBucket[$fecha] ?? 0];
+        }
+
+        return response()->json(['puntos' => $puntos]);
+    }
+
     private function gananciasPorDia($turnosCompletados)
     {
         return $turnosCompletados

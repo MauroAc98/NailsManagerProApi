@@ -79,6 +79,7 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
 
     // Estadísticas
     Route::get('stats/dashboard', [StatsController::class, 'dashboard']);
+    Route::get('stats/ganancias-por-periodo', [StatsController::class, 'gananciasPorPeriodo']);
 
     // Turnos
     Route::prefix('turnos')->group(function () {
