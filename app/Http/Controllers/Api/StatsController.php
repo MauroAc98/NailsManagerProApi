@@ -48,7 +48,20 @@ class StatsController extends Controller
             'clientes' => $this->clientesNuevasVsRecurrentes($user, $turnosValidos, $request->desde, $request->hasta),
             'ganancias' => $turnosCompletados->flatMap(fn (Turno $t) => $t->servicios)->sum('pivot.precio'),
             'ganancias_por_servicio' => $this->gananciasPorServicio($turnosCompletados),
+            'ganancias_por_dia' => $this->gananciasPorDia($turnosCompletados),
         ]);
+    }
+
+    private function gananciasPorDia($turnosCompletados)
+    {
+        return $turnosCompletados
+            ->groupBy(fn (Turno $t) => Carbon::parse($t->fecha_hora)->format('Y-m-d'))
+            ->map(fn ($grupo, $fecha) => [
+                'fecha' => $fecha,
+                'monto' => $grupo->flatMap(fn (Turno $t) => $t->servicios)->sum('pivot.precio'),
+            ])
+            ->sortBy('fecha')
+            ->values();
     }
 
     private function gananciasPorServicio($turnosCompletados)
