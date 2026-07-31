@@ -47,7 +47,22 @@ class StatsController extends Controller
             'servicios_mas_pedidos' => $this->serviciosMasPedidos($turnosValidos),
             'clientes' => $this->clientesNuevasVsRecurrentes($user, $turnosValidos, $request->desde, $request->hasta),
             'ganancias' => $turnosCompletados->flatMap(fn (Turno $t) => $t->servicios)->sum('pivot.precio'),
+            'ganancias_por_servicio' => $this->gananciasPorServicio($turnosCompletados),
         ]);
+    }
+
+    private function gananciasPorServicio($turnosCompletados)
+    {
+        return $turnosCompletados
+            ->flatMap(fn (Turno $t) => $t->servicios)
+            ->groupBy('id')
+            ->map(fn ($grupo) => [
+                'servicio_id' => $grupo->first()->id,
+                'nombre' => $grupo->first()->nombre,
+                'monto' => $grupo->sum('pivot.precio'),
+            ])
+            ->sortByDesc('monto')
+            ->values();
     }
 
     private function serviciosMasPedidos($turnos)
