@@ -603,6 +603,7 @@ class TurnoController extends Controller
         $turnos = Turno::delUsuario($user)
             ->where('estado', 'completado')
             ->where('fecha_hora', '>=', Carbon::now()->subDays(self::DIAS_VENTANA_PENDIENTES_DE_COBRO))
+            ->orderBy('fecha_hora')
             ->with(['cliente', 'servicios'])
             ->get()
             ->filter(fn (Turno $t) => $t->servicios->contains(fn ($s) => is_null($s->pivot->precio)))
