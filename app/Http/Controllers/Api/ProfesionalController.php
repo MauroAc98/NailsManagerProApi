@@ -178,9 +178,16 @@ class ProfesionalController extends Controller
 
         $path = $request->file('imagen')->store('historia_precios_fotos', 'public');
 
+        // El próximo 'orden' se calcula desde el máximo existente, no desde
+        // el conteo de filas: si hubo un borrado antes de esta subida (el
+        // flujo de "reemplazar una foto" es delete + re-upload), el conteo
+        // ya no coincide con el próximo hueco libre y puede repetir el
+        // 'orden' de una foto que sigue existiendo.
+        $siguienteOrden = ($profesional->historiaPreciosFotos()->max('orden') ?? -1) + 1;
+
         $profesional->historiaPreciosFotos()->create([
             'path'  => $path,
-            'orden' => $cantidadActual,
+            'orden' => $siguienteOrden,
         ]);
 
         return response()->json($profesional->load(['servicios', 'historiaPreciosFotos']));

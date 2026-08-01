@@ -176,6 +176,40 @@ class ProfesionalHistoriaPreciosTest extends TestCase
         Storage::disk('public')->assertMissing($path);
     }
 
+    public function test_resubir_despues_de_borrar_no_repite_el_orden_de_una_foto_existente(): void
+    {
+        Storage::fake('public');
+
+        $user = User::factory()->create(['is_exempt' => true]);
+        $profesional = Profesional::create(['user_id' => $user->id, 'nombre' => 'Jefa', 'activo' => true]);
+
+        // 4 fotos: orden 0,1,2,3
+        for ($i = 0; $i < 4; $i++) {
+            $this->actingAs($user, 'sanctum')
+                ->postJson("/api/profesionales/{$profesional->id}/historia-precios-fotos", [
+                    'imagen' => $this->fakeImagen("foto-{$i}.jpg"),
+                ])->assertOk();
+        }
+
+        // Borra la de orden 1 (flujo de "reemplazar" = delete + re-upload)
+        $fotoOrden1 = HistoriaPrecioFoto::where('profesional_id', $profesional->id)
+            ->where('orden', 1)->firstOrFail();
+        $this->actingAs($user, 'sanctum')
+            ->deleteJson("/api/profesionales/{$profesional->id}/historia-precios-fotos/{$fotoOrden1->id}")
+            ->assertOk();
+
+        // Sube una nueva — antes del fix, esto repetía 'orden' = 3 (el
+        // conteo post-borrado) en vez de continuar desde el máximo real.
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson("/api/profesionales/{$profesional->id}/historia-precios-fotos", [
+                'imagen' => $this->fakeImagen('nueva.jpg'),
+            ])->assertOk();
+
+        $ordenes = collect($response->json('historia_precios_fotos'))->pluck('orden')->all();
+        $this->assertSame([0, 2, 3, 4], $ordenes);
+        $this->assertSame(4, count(array_unique($ordenes)));
+    }
+
     public function test_no_permite_borrar_una_foto_de_otro_usuario(): void
     {
         Storage::fake('public');
