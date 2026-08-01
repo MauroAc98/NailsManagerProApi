@@ -12,6 +12,7 @@ class Servicio extends Model
         'duracion_minutos',
         'precio',
         'activo',
+        'es_promo',
     ];
 
     protected function casts(): array
@@ -20,6 +21,7 @@ class Servicio extends Model
             'activo'           => 'boolean',
             'duracion_minutos' => 'integer',
             'precio'           => 'decimal:2',
+            'es_promo'         => 'boolean',
         ];
     }
 

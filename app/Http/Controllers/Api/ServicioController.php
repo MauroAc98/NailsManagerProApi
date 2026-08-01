@@ -39,7 +39,13 @@ class ServicioController extends Controller
             ],
             'duracion_minutos' => 'required|integer|min:1|max:480',
             'precio'           => 'nullable|numeric|min:0',
+            'es_promo'         => 'sometimes|boolean',
         ]);
+
+        // Se fija explícito (en vez de confiar en el default de columna)
+        // para que el JSON de respuesta del create ya lo refleje sin
+        // necesitar un refresh — mismo criterio que 'activo' en Profesional.
+        $data['es_promo'] = $data['es_promo'] ?? false;
 
         $servicio = $request->user()->servicios()->create($data);
 
@@ -81,6 +87,7 @@ class ServicioController extends Controller
             'duracion_minutos' => 'sometimes|integer|min:1|max:480',
             'precio'           => 'nullable|numeric|min:0',
             'activo'           => 'sometimes|boolean',
+            'es_promo'         => 'sometimes|boolean',
         ]);
 
         $servicio = Servicio::delUsuario($request->user())->findOrFail($id);
