@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Servicio;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class ServicioController extends Controller
@@ -16,7 +17,7 @@ class ServicioController extends Controller
     public function index(Request $request): JsonResponse
     {
         $servicios = Servicio::delUsuario($request->user())
-            ->orderBy('nombre')
+            ->orderBy('orden')
             ->get();
 
         return response()->json($servicios);
@@ -46,6 +47,10 @@ class ServicioController extends Controller
         // para que el JSON de respuesta del create ya lo refleje sin
         // necesitar un refresh — mismo criterio que 'activo' en Profesional.
         $data['es_promo'] = $data['es_promo'] ?? false;
+
+        // El próximo 'orden' se calcula desde el máximo existente, no desde
+        // el conteo de filas, mismo criterio que 'orden' en HistoriaPrecioFoto.
+        $data['orden'] = ($request->user()->servicios()->max('orden') ?? -1) + 1;
 
         $servicio = $request->user()->servicios()->create($data);
 
@@ -107,5 +112,32 @@ class ServicioController extends Controller
         return response()->json([
             'message' => 'Servicio desactivado correctamente.',
         ]);
+    }
+
+    // ─────────────────────────────────────────────
+    // PATCH /api/servicios/reordenar
+    // ─────────────────────────────────────────────
+    public function reordenar(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'ids'   => 'required|array|min:1',
+            'ids.*' => [
+                'integer',
+                Rule::exists('servicios', 'id')->where(
+                    fn($q) =>
+                    $q->where('user_id', $request->user()->id)
+                ),
+            ],
+        ]);
+
+        DB::transaction(function () use ($request, $data) {
+            foreach ($data['ids'] as $index => $id) {
+                Servicio::delUsuario($request->user())
+                    ->where('id', $id)
+                    ->update(['orden' => $index]);
+            }
+        });
+
+        return response()->json(Servicio::delUsuario($request->user())->orderBy('orden')->get());
     }
 }

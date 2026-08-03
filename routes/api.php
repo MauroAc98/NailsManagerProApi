@@ -62,6 +62,7 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
     Route::put('perfil', [AuthController::class, 'updatePerfil']);
 
     // Servicios
+    Route::patch('servicios/reordenar', [ServicioController::class, 'reordenar']);
     Route::apiResource('servicios', ServicioController::class);
 
     // Clientes
