@@ -107,10 +107,19 @@ class ServicioController extends Controller
     public function destroy(Request $request, int $id): JsonResponse
     {
         $servicio = Servicio::delUsuario($request->user())->findOrFail($id);
-        $servicio->update(['activo' => false]);
+
+        if ($servicio->turnos()->exists()) {
+            return response()->json([
+                'message' => 'Este servicio tiene turnos asociados, no se puede eliminar. Desactivalo en su lugar.',
+            ], 409);
+        }
+
+        // Hard delete es seguro: profesional_servicio tiene cascadeOnDelete
+        // sobre servicio_id, así que ese pivot se limpia solo.
+        $servicio->delete();
 
         return response()->json([
-            'message' => 'Servicio desactivado correctamente.',
+            'message' => 'Servicio eliminado correctamente.',
         ]);
     }
 
