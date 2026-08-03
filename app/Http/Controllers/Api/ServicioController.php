@@ -98,6 +98,15 @@ class ServicioController extends Controller
         $servicio = Servicio::delUsuario($request->user())->findOrFail($id);
         $servicio->update($data);
 
+        // Mismo default "lo ofrece todo el mundo" que store(), para servicios
+        // huérfanos (creados antes del auto-attach en store, o antes de que
+        // la cuenta corriera el backfill). Si ya tiene alguna profesional
+        // asignada, se respeta esa restricción explícita — no se toca.
+        if ($servicio->profesionales()->count() === 0) {
+            $profesionalIds = $request->user()->profesionales()->where('activo', true)->pluck('id');
+            $servicio->profesionales()->sync($profesionalIds);
+        }
+
         return response()->json($servicio);
     }
 
