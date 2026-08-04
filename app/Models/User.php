@@ -121,6 +121,11 @@ class User extends Authenticatable
         return $this->hasMany(Profesional::class);
     }
 
+    public function gastos()
+    {
+        return $this->hasMany(Gasto::class);
+    }
+
     public function reservasWeb()
     {
         return $this->hasMany(ReservaWeb::class);
