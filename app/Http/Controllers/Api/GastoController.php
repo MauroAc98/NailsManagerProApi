@@ -15,7 +15,22 @@ class GastoController extends Controller
     // ─────────────────────────────────────────────
     public function index(Request $request): JsonResponse
     {
-        $gastos = Gasto::delUsuario($request->user())
+        $request->validate([
+            'desde' => 'sometimes|nullable|date',
+            'hasta' => 'sometimes|nullable|date|after_or_equal:desde',
+        ]);
+
+        $query = Gasto::delUsuario($request->user());
+
+        if ($request->filled('desde') && $request->filled('hasta')) {
+            $query->whereBetween('fecha', [$request->desde, $request->hasta]);
+        } elseif ($request->filled('desde')) {
+            $query->where('fecha', '>=', $request->desde);
+        } elseif ($request->filled('hasta')) {
+            $query->where('fecha', '<=', $request->hasta);
+        }
+
+        $gastos = $query
             ->orderByDesc('fecha')
             ->orderByDesc('id')
             ->get();
