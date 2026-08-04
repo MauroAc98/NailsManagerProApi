@@ -150,6 +150,43 @@ class GastoCrudTest extends TestCase
         $response->assertJsonMissing(['monto' => '300.00']);
     }
 
+    public function test_rechaza_hasta_anterior_a_desde(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/gastos?desde=2026-08-15&hasta=2026-08-01');
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['hasta']);
+    }
+
+    public function test_rechaza_fecha_malformada_en_filtro(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/gastos?desde=no-es-una-fecha');
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['desde']);
+    }
+
+    public function test_lista_gastos_filtrados_por_rango_de_un_solo_dia(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+
+        $user->gastos()->create(['fecha' => '2026-08-01', 'monto' => 100, 'categoria' => 'insumos']);
+        $user->gastos()->create(['fecha' => '2026-08-02', 'monto' => 200, 'categoria' => 'marketing']);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/gastos?desde=2026-08-02&hasta=2026-08-02');
+
+        $response->assertOk();
+        $response->assertJsonCount(1);
+        $response->assertJsonFragment(['monto' => '200.00']);
+    }
+
     public function test_lista_gastos_sin_filtros_devuelve_todos_ordenados(): void
     {
         $user = User::factory()->create(['is_exempt' => true]);
