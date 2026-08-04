@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Gasto;
 use App\Models\Turno;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -37,6 +38,9 @@ class StatsController extends Controller
         $turnosValidos = $todos->whereIn('estado', ['confirmado', 'completado']);
         $turnosCompletados = $todos->where('estado', 'completado');
 
+        $ganancias = $turnosCompletados->flatMap(fn (Turno $t) => $t->servicios)->sum('pivot.precio');
+        $gastos = $this->gastosDelRango($user, $request);
+
         return response()->json([
             'total_turnos' => $turnosValidos->count(),
             'turnos_por_estado' => [
@@ -46,10 +50,26 @@ class StatsController extends Controller
             ],
             'servicios_mas_pedidos' => $this->serviciosMasPedidos($turnosValidos),
             'clientes' => $this->clientesNuevasVsRecurrentes($user, $turnosValidos, $request->desde, $request->hasta),
-            'ganancias' => $turnosCompletados->flatMap(fn (Turno $t) => $t->servicios)->sum('pivot.precio'),
+            'ganancias' => $ganancias,
+            'gastos' => $gastos,
+            'ganancia_neta' => $ganancias - $gastos,
             'ganancias_por_servicio' => $this->gananciasPorServicio($turnosCompletados),
             'ganancias_por_dia' => $this->gananciasPorDia($turnosCompletados),
         ]);
+    }
+
+    // Consulta separada de la de turnos: los gastos no tienen turno asociado
+    // (grano distinto), así que se agregan aparte en vez de un JOIN/UNION.
+    // sum() de Laravel ya normaliza "sin filas" a 0 (nunca null).
+    private function gastosDelRango($user, Request $request): float
+    {
+        $query = Gasto::delUsuario($user)->whereBetween('fecha', [$request->desde, $request->hasta]);
+
+        if ($request->filled('profesional_id')) {
+            $query->where('profesional_id', (int) $request->profesional_id);
+        }
+
+        return (float) $query->sum('monto');
     }
 
     // Tope defensivo de buckets — evita respuestas enormes si alguien manda
