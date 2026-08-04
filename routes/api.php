@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\WhatsappTemplateController;
 use App\Http\Controllers\Api\EvolutionWebhookController;
 use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\StatsController;
+use App\Http\Controllers\Api\GastoController;
 use Illuminate\Support\Facades\Route;
 
 // ─────────────────────────────────────────────
@@ -64,6 +65,9 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
     // Servicios
     Route::patch('servicios/reordenar', [ServicioController::class, 'reordenar']);
     Route::apiResource('servicios', ServicioController::class);
+
+    // Gastos
+    Route::apiResource('gastos', GastoController::class);
 
     // Clientes
     Route::apiResource('clientes', ClienteController::class);
