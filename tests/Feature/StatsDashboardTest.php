@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Cliente;
+use App\Models\Gasto;
 use App\Models\Profesional;
 use App\Models\Servicio;
 use App\Models\Turno;
@@ -140,5 +141,83 @@ class StatsDashboardTest extends TestCase
         $servicios = $response->json('servicios_mas_pedidos');
         $this->assertCount(1, $servicios);
         $this->assertSame(2, $servicios[0]['cantidad']);
+    }
+
+    public function test_incluye_gastos_y_ganancia_neta_en_dashboard(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $profesional = Profesional::create(['user_id' => $user->id, 'nombre' => 'Jefa', 'activo' => true]);
+        $cliente = Cliente::create(['user_id' => $user->id, 'nombre' => 'Cliente Test', 'telefono' => '3765252395']);
+        $servicio = Servicio::create(['user_id' => $user->id, 'nombre' => 'Manicura', 'duracion_minutos' => 30, 'activo' => true]);
+
+        $turno = $this->crearTurno($user, $profesional, $cliente, [$servicio], '2026-07-10 10:00:00');
+        $turno->servicios()->updateExistingPivot($servicio->id, ['precio' => 1000]);
+
+        Gasto::create([
+            'user_id' => $user->id,
+            'fecha' => '2026-07-15',
+            'monto' => 300,
+            'categoria' => 'insumos',
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/stats/dashboard?desde=2026-07-01&hasta=2026-07-31')
+            ->assertOk();
+
+        $this->assertSame(1000, (int) $response->json('ganancias'));
+        $this->assertSame(300, (int) $response->json('gastos'));
+        $this->assertSame(700, (int) $response->json('ganancia_neta'));
+    }
+
+    public function test_gastos_y_ganancia_neta_en_cero_sin_gastos(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $profesional = Profesional::create(['user_id' => $user->id, 'nombre' => 'Jefa', 'activo' => true]);
+        $cliente = Cliente::create(['user_id' => $user->id, 'nombre' => 'Cliente Test', 'telefono' => '3765252395']);
+        $servicio = Servicio::create(['user_id' => $user->id, 'nombre' => 'Manicura', 'duracion_minutos' => 30, 'activo' => true]);
+
+        $turno = $this->crearTurno($user, $profesional, $cliente, [$servicio], '2026-07-10 10:00:00');
+        $turno->servicios()->updateExistingPivot($servicio->id, ['precio' => 500]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/stats/dashboard?desde=2026-07-01&hasta=2026-07-31')
+            ->assertOk();
+
+        $this->assertSame(0, (int) $response->json('gastos'));
+        $this->assertSame(500, (int) $response->json('ganancia_neta'));
+        $this->assertSame($response->json('ganancias'), $response->json('ganancia_neta'));
+    }
+
+    public function test_gastos_respeta_los_bordes_del_rango_de_fechas(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+
+        Gasto::create(['user_id' => $user->id, 'fecha' => '2026-07-01', 'monto' => 100, 'categoria' => 'insumos']);
+        Gasto::create(['user_id' => $user->id, 'fecha' => '2026-07-31', 'monto' => 200, 'categoria' => 'alquiler']);
+        Gasto::create(['user_id' => $user->id, 'fecha' => '2026-06-30', 'monto' => 999, 'categoria' => 'marketing']);
+        Gasto::create(['user_id' => $user->id, 'fecha' => '2026-08-01', 'monto' => 999, 'categoria' => 'marketing']);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/stats/dashboard?desde=2026-07-01&hasta=2026-07-31')
+            ->assertOk();
+
+        $this->assertSame(300, (int) $response->json('gastos'));
+    }
+
+    public function test_filtra_gastos_por_profesional_puntual(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $jefa = Profesional::create(['user_id' => $user->id, 'nombre' => 'Jefa', 'activo' => true]);
+        $empleada = Profesional::create(['user_id' => $user->id, 'nombre' => 'Empleada', 'activo' => true]);
+
+        Gasto::create(['user_id' => $user->id, 'profesional_id' => $jefa->id, 'fecha' => '2026-07-05', 'monto' => 100, 'categoria' => 'insumos']);
+        Gasto::create(['user_id' => $user->id, 'profesional_id' => $empleada->id, 'fecha' => '2026-07-06', 'monto' => 250, 'categoria' => 'insumos']);
+        Gasto::create(['user_id' => $user->id, 'fecha' => '2026-07-07', 'monto' => 50, 'categoria' => 'otros']);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson("/api/stats/dashboard?desde=2026-07-01&hasta=2026-07-31&profesional_id={$empleada->id}")
+            ->assertOk();
+
+        $this->assertSame(250, (int) $response->json('gastos'));
     }
 }
