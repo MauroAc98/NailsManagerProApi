@@ -76,6 +76,23 @@ class GastoCrudTest extends TestCase
         $this->assertDatabaseCount('gastos', 0);
     }
 
+    public function test_rechaza_monto_cero(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/gastos', [
+                'fecha' => '2026-08-01',
+                'monto' => 0,
+                'categoria' => 'insumos',
+            ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['monto']);
+
+        $this->assertDatabaseCount('gastos', 0);
+    }
+
     public function test_lista_solo_los_gastos_propios(): void
     {
         $user = User::factory()->create(['is_exempt' => true]);

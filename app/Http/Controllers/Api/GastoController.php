@@ -104,7 +104,7 @@ class GastoController extends Controller
 
         return [
             'fecha'          => "{$required}|date",
-            'monto'          => "{$required}|numeric|min:0",
+            'monto'          => "{$required}|numeric|gt:0",
             'categoria'      => [$required, Rule::in(Gasto::CATEGORIAS)],
             'descripcion'    => 'nullable|string|max:255',
             'profesional_id' => [
