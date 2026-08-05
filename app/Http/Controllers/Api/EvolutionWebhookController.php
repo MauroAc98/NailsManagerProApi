@@ -129,7 +129,12 @@ class EvolutionWebhookController extends Controller
             $messageId = $update['keyId'] ?? $update['key']['id'] ?? null;
             $status = $update['status'] ?? $update['update']['status'] ?? null;
 
-            if (! $messageId || ! $status) {
+            // Comparación estricta contra null: el status 0 (ERROR de
+            // Baileys) es un valor real y "falsy" en PHP — con "! $status"
+            // se descartaba junto con los updates realmente vacíos, y un
+            // mensaje que WhatsApp rechazó de verdad quedaba "pending"
+            // para siempre, sin log ni forma de detectarlo.
+            if ($messageId === null || $status === null) {
                 continue;
             }
 
@@ -141,11 +146,12 @@ class EvolutionWebhookController extends Controller
             } // no es nuestro, ignorar sin loguear
 
             // Evolution API manda status como string o numérico (Baileys)
-            // Numeric: 3=DELIVERY_ACK, 4=READ, 5=PLAYED (implica leído)
+            // Numeric: 0=ERROR, 3=DELIVERY_ACK, 4=READ, 5=PLAYED (implica leído)
             $nuevoStatus = match (true) {
                 $status === 'DELIVERY_ACK' || $status === 3 => 'delivered',
                 $status === 'READ' || $status === 4 => 'read',
                 $status === 'PLAYED' || $status === 5 => 'read',
+                $status === 'ERROR' || $status === 0 => 'failed',
                 default => null,
             };
 
@@ -153,10 +159,18 @@ class EvolutionWebhookController extends Controller
                 $registro->update(['status' => $nuevoStatus]);
 
                 try {
-                    Log::info('WhatsApp mensaje entregado', [
+                    $contexto = [
                         'message_id' => $messageId,
+                        'turno_id' => $registro->turno_id,
                         'status' => $nuevoStatus,
-                    ]);
+                    ];
+
+                    if ($nuevoStatus === 'failed') {
+                        $contexto['stub_parameters'] = $update['update']['messageStubParameters'] ?? $update['messageStubParameters'] ?? null;
+                        Log::error('WhatsApp mensaje con error de entrega', $contexto);
+                    } else {
+                        Log::info('WhatsApp mensaje entregado', $contexto);
+                    }
                 } catch (\Throwable $e) {
                     // no-op: el estado ya se guardó, el log es best-effort
                 }
