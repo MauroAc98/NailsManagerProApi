@@ -52,6 +52,10 @@ class EnviarMensajeConfirmacion implements ShouldQueue
             return;
         }
 
+        if ($user->whatsapp_requiere_envio_manual) {
+            return;
+        }
+
         // Evitar duplicar el mensaje si el job se reintenta (timeout de worker,
         // etc.) después de haber enviado y registrado exitosamente.
         $yaEnviado = WhatsappMensaje::where('turno_id', $turno->id)

@@ -46,6 +46,12 @@ class EnviarRecordatorios extends Command
         $totalFallidos = 0;
 
         foreach ($usuarios as $user) {
+            if ($user->whatsapp_requiere_envio_manual) {
+                $this->info("  → {$user->name}: requiere envío manual, recordatorios automáticos omitidos");
+
+                continue;
+            }
+
             // Validar estado real contra Evolution, no confiar en whatsapp_estado
             // de la DB: puede quedar desincronizado si algún webhook se perdió.
             $estadoReal = $this->evolutionService->consultarEstado($user);

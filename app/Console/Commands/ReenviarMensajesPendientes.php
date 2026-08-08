@@ -37,6 +37,11 @@ class ReenviarMensajesPendientes extends Command
                 continue;
             }
 
+            if ($user->whatsapp_requiere_envio_manual) {
+                $this->warn("  ⚠ {$user->name}: requiere envío manual, reintento omitido — {$registro->numero}");
+                continue;
+            }
+
             if ($registro->turno?->cliente?->whatsapp_opt_out) {
                 $registro->update(['status' => 'failed']);
                 $this->info("  → {$user->name}: destinatario dio de baja los mensajes, omitido — {$registro->numero}");
