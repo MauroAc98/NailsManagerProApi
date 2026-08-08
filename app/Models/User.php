@@ -36,6 +36,10 @@ class User extends Authenticatable
         'fcm_token',
     ];
 
+    protected $appends = [
+        'whatsapp_requiere_envio_manual',
+    ];
+
     protected $attributes = [
         'whatsapp_estado'         => 'desconectado',
         'recordatorio_automatico' => false,
@@ -139,5 +143,70 @@ class User extends Authenticatable
     public function whatsappEstadoHistoriales()
     {
         return $this->hasMany(WhatsappEstadoHistorial::class);
+    }
+
+    public function whatsappMensajes()
+    {
+        return $this->hasMany(WhatsappMensaje::class);
+    }
+
+    // ── Envío manual de confirmación (fallback) ────────────────────
+    // "conectado" solo dice que el socket de WhatsApp está vivo, no que
+    // WhatsApp vaya a entregar lo que se manda por ahí. Este flag es true
+    // por cualquiera de estas razones: (a) la profesional nunca vinculó
+    // ninguna instancia de WhatsApp (evolution_instance_name vacío — el
+    // caso más común, no un edge case), (b) hay instancia vinculada pero
+    // tuvo una desconexión terminal reciente sin una reconexión posterior,
+    // o (c) el ratio de mensajes fallidos es alto. En cualquiera de los
+    // tres casos, el frontend ofrece mandar la confirmación a mano por
+    // wa.me en vez de depender del envío automático.
+    public function getWhatsappRequiereEnvioManualAttribute(): bool
+    {
+        return $this->criterioRequiereEnvioManualWhatsapp();
+    }
+
+    protected function criterioRequiereEnvioManualWhatsapp(): bool
+    {
+        if (empty($this->evolution_instance_name)) {
+            return true;
+        }
+
+        $desde = now()->subDays(30);
+
+        // No alcanza con "hubo una desconexión terminal en la ventana": si
+        // ya se reconectó después de esa desconexión, el blip quedó curado
+        // y no debe dejar el flag pegado en true por los 30 días restantes.
+        $ultimaDesconexionTerminal = $this->whatsappEstadoHistoriales()
+            ->where('estado', 'desconectado')
+            ->whereIn('status_reason', [401, 408, 428, 440, 515])
+            ->where('created_at', '>=', $desde)
+            ->latest('created_at')
+            ->first();
+
+        if ($ultimaDesconexionTerminal) {
+            $seReconectoDespues = $this->whatsappEstadoHistoriales()
+                ->where('estado', 'conectado')
+                ->where('created_at', '>', $ultimaDesconexionTerminal->created_at)
+                ->exists();
+
+            if (! $seReconectoDespues) {
+                return true;
+            }
+        }
+
+        $total = $this->whatsappMensajes()
+            ->where('created_at', '>=', $desde)
+            ->count();
+
+        if ($total < 5) {
+            return false;
+        }
+
+        $fallidos = $this->whatsappMensajes()
+            ->where('created_at', '>=', $desde)
+            ->where('status', 'failed')
+            ->count();
+
+        return ($fallidos / $total) >= 0.03;
     }
 }
