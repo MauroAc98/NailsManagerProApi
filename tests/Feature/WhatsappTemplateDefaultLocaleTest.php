@@ -51,13 +51,13 @@ class WhatsappTemplateDefaultLocaleTest extends TestCase
         $this->assertStringContainsString('Hola {nombre}', $recordatorio['contenido']);
     }
 
-    public function test_palabra_clave_de_opt_out_BAJA_se_mantiene_igual_en_todos_los_locales(): void
+    public function test_plantilla_default_de_recordatorio_ya_no_menciona_opt_out_por_baja(): void
     {
-        // El webhook de Evolution (EvolutionWebhookController::MENSAJE_OPT_OUT)
-        // solo reconoce el literal "BAJA" para dar de baja a una clienta — la
-        // plantilla en portugués debe seguir instruyendo a responder "BAJA" tal
-        // cual (no "SAIR" ni ninguna variante), porque traducir esa palabra
-        // rompería la detección de opt-out sin tocar el webhook.
+        // La mención a "respondé BAJA" se sacó de la plantilla default: en
+        // toda la base de producción, ninguna clienta la usó nunca. El
+        // webhook (EvolutionWebhookController::MENSAJE_OPT_OUT) se deja
+        // intacto por si alguien la escribe espontáneamente, pero ya no se
+        // la sugiere en el mensaje.
         $userEs = User::factory()->create(['is_exempt' => true, 'locale' => 'es']);
         $userPt = User::factory()->create(['is_exempt' => true, 'locale' => 'pt-BR']);
 
@@ -69,7 +69,7 @@ class WhatsappTemplateDefaultLocaleTest extends TestCase
             $this->actingAs($userPt, 'sanctum')->getJson('/api/whatsapp-templates')->json()
         )->firstWhere('tipo', 'recordatorio');
 
-        $this->assertStringContainsString('BAJA', $recordatorioEs['contenido']);
-        $this->assertStringContainsString('BAJA', $recordatorioPt['contenido']);
+        $this->assertStringNotContainsString('BAJA', $recordatorioEs['contenido']);
+        $this->assertStringNotContainsString('BAJA', $recordatorioPt['contenido']);
     }
 }
