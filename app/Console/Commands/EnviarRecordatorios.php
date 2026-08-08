@@ -54,6 +54,7 @@ class EnviarRecordatorios extends Command
                 $turnosManana = Turno::delUsuario($user)
                     ->confirmados()
                     ->delaFecha($manana)
+                    ->whereDoesntHave('whatsappMensajes', fn ($q) => $q->where('tipo', 'recordatorio'))
                     ->with('cliente')
                     ->get()
                     ->filter(fn ($turno) => ! empty($turno->cliente?->telefono));
@@ -92,6 +93,7 @@ class EnviarRecordatorios extends Command
                 ->with(['cliente', 'servicios', 'profesional'])
                 ->confirmados()
                 ->delaFecha($manana)
+                ->whereDoesntHave('whatsappMensajes', fn ($q) => $q->where('tipo', 'recordatorio'))
                 ->get();
 
             if ($turnos->isEmpty()) {

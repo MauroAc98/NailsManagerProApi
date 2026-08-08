@@ -156,4 +156,69 @@ class WhatsappRequiereEnvioManualTest extends TestCase
             ->assertOk()
             ->assertJson(['whatsapp_requiere_envio_manual' => false]);
     }
+
+    public function test_false_con_solo_mensajes_manuales_sin_fallos_automaticos(): void
+    {
+        $user = User::factory()->create([
+            'evolution_instance_name' => 'user_1',
+            'whatsapp_estado' => 'conectado',
+        ]);
+
+        for ($i = 0; $i < 8; $i++) {
+            WhatsappMensaje::create([
+                'user_id' => $user->id,
+                'numero' => '5491100000000',
+                'mensaje' => '',
+                'tipo' => 'recordatorio',
+                'status' => 'manual',
+                'intentos' => 1,
+            ]);
+        }
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJson(['whatsapp_requiere_envio_manual' => false]);
+    }
+
+    // Los envíos manuales no dicen nada sobre si el envío AUTOMÁTICO
+    // funciona: mezclarlos en el denominador diluye el ratio real y puede
+    // "curar" el flag antes de tiempo. Acá el ratio automático real es
+    // 1/5 = 20% (por encima del umbral, con muestra suficiente), pero
+    // mezclado con 60 mensajes manuales queda en 1/65 ≈ 1.5% — sin el fix
+    // el flag daría false pese a que el WhatsApp automático sigue fallando.
+    public function test_true_con_ratio_automatico_real_por_encima_del_umbral_pese_a_diluirse_con_manuales(): void
+    {
+        $user = User::factory()->create([
+            'evolution_instance_name' => 'user_1',
+            'whatsapp_estado' => 'conectado',
+        ]);
+
+        for ($i = 0; $i < 5; $i++) {
+            WhatsappMensaje::create([
+                'user_id' => $user->id,
+                'numero' => '5491100000000',
+                'mensaje' => 'test',
+                'tipo' => 'confirmacion',
+                'status' => $i === 0 ? 'failed' : 'delivered',
+                'intentos' => 1,
+            ]);
+        }
+
+        for ($i = 0; $i < 60; $i++) {
+            WhatsappMensaje::create([
+                'user_id' => $user->id,
+                'numero' => '5491100000000',
+                'mensaje' => '',
+                'tipo' => 'recordatorio',
+                'status' => 'manual',
+                'intentos' => 1,
+            ]);
+        }
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJson(['whatsapp_requiere_envio_manual' => true]);
+    }
 }

@@ -194,8 +194,14 @@ class User extends Authenticatable
             }
         }
 
+        // Los envíos manuales (fallback wa.me, ver marcarRecordatorioManual)
+        // no dicen nada sobre si el envío AUTOMÁTICO funciona — mezclarlos
+        // acá diluiría el ratio real y podría "curar" el flag antes de
+        // tiempo solo porque la profesional usó el fallback, sin que el
+        // WhatsApp automático haya mejorado en nada.
         $total = $this->whatsappMensajes()
             ->where('created_at', '>=', $desde)
+            ->where('status', '!=', 'manual')
             ->count();
 
         if ($total < 5) {
