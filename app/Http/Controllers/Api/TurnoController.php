@@ -613,6 +613,78 @@ class TurnoController extends Controller
     }
 
     // ─────────────────────────────────────────────
+    // GET /api/turnos/recordatorios-pendientes
+    // Turnos confirmados de mañana, con cliente con teléfono, que todavía
+    // no tienen un recordatorio gestionado (ni automático ni manual) — ver
+    // marcarRecordatorioManual() y EnviarRecordatorios, que son las dos
+    // formas en que un WhatsappMensaje tipo='recordatorio' puede existir.
+    // ─────────────────────────────────────────────
+    public function recordatoriosPendientes(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $manana = Carbon::tomorrow()->toDateString();
+
+        $turnos = Turno::delUsuario($user)
+            ->confirmados()
+            ->delaFecha($manana)
+            ->whereDoesntHave('whatsappMensajes', fn ($q) => $q->where('tipo', 'recordatorio'))
+            ->with(['cliente', 'servicios'])
+            ->orderBy('fecha_hora')
+            ->get()
+            ->filter(fn (Turno $t) => ! empty($t->cliente?->telefono))
+            ->values();
+
+        return response()->json($turnos);
+    }
+
+    // ─────────────────────────────────────────────
+    // POST /api/turnos/{id}/recordatorio-manual
+    // La profesional mandó el recordatorio a mano por wa.me (ver botón en
+    // /agenda/recordatorios) — se registra igual que un envío automático
+    // para que el turno deje de aparecer en recordatoriosPendientes().
+    // Idempotente: un segundo llamado sobre el mismo turno no duplica el
+    // registro (el botón puede tocarse más de una vez sin problema).
+    // ─────────────────────────────────────────────
+    public function marcarRecordatorioManual(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $turno = Turno::delUsuario($user)->with('cliente')->findOrFail($id);
+
+        $yaExiste = WhatsappMensaje::where('turno_id', $turno->id)
+            ->where('tipo', 'recordatorio')
+            ->exists();
+
+        if (! $yaExiste) {
+            try {
+                WhatsappMensaje::create([
+                    'user_id' => $user->id,
+                    'turno_id' => $turno->id,
+                    'numero' => $turno->cliente?->telefono ?? '',
+                    'mensaje' => '', // enviado manualmente por wa.me, no tenemos el texto final acá
+                    'tipo' => 'recordatorio',
+                    'message_id' => null,
+                    'status' => 'manual',
+                    'intentos' => 1,
+                    'ultimo_intento' => now(),
+                ]);
+            } catch (\Illuminate\Database\QueryException $e) {
+                // exists()+create() no es atómico: si dos requests casi
+                // simultáneos (doble tap) pasan el exists() antes de que el
+                // primer create() confirme, el segundo choca acá contra el
+                // unique constraint (turno_id, tipo) — ver migración
+                // 2026_07_02_123237. Ya quedó creado por la otra request,
+                // que es exactamente el resultado que queríamos, así que se
+                // trata como éxito en vez de 500.
+                if (! str_contains(strtolower($e->getMessage()), 'unique')) {
+                    throw $e;
+                }
+            }
+        }
+
+        return response()->json(['ok' => true]);
+    }
+
+    // ─────────────────────────────────────────────
     // Helper — valida rango horario de atención
     // ─────────────────────────────────────────────
     private function validarHorarioAtencion(int $profesionalId, Carbon $fechaHora): ?string

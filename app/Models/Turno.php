@@ -97,4 +97,9 @@ class Turno extends Model
     {
         return $this->belongsToMany(Servicio::class, 'turno_servicio')->withPivot('precio');
     }
+
+    public function whatsappMensajes()
+    {
+        return $this->hasMany(WhatsappMensaje::class);
+    }
 }
