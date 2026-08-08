@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Mail\RecordatoriosPendientesMail;
 use App\Models\Turno;
 use App\Models\User;
 use App\Models\WhatsappMensaje;
@@ -10,6 +11,7 @@ use App\Services\EvolutionService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 class EnviarRecordatorios extends Command
 {
@@ -48,6 +50,21 @@ class EnviarRecordatorios extends Command
         foreach ($usuarios as $user) {
             if ($user->whatsapp_requiere_envio_manual) {
                 $this->info("  → {$user->name}: requiere envío manual, recordatorios automáticos omitidos");
+
+                $turnosManana = Turno::delUsuario($user)
+                    ->confirmados()
+                    ->delaFecha($manana)
+                    ->with('cliente')
+                    ->get()
+                    ->filter(fn ($turno) => ! empty($turno->cliente?->telefono));
+
+                if ($turnosManana->isNotEmpty()) {
+                    Mail::to($user->email)->send(new RecordatoriosPendientesMail(
+                        $user->name,
+                        $turnosManana->count(),
+                        rtrim(config('services.frontend_url'), '/').'/agenda/recordatorios',
+                    ));
+                }
 
                 continue;
             }

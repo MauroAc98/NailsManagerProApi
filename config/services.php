@@ -41,4 +41,6 @@ return [
         'webhook_secret' => env('EVOLUTION_WEBHOOK_SECRET'),
     ],
 
+    'frontend_url' => env('FRONTEND_URL'),
+
 ];
