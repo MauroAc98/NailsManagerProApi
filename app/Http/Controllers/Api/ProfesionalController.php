@@ -117,21 +117,29 @@ class ProfesionalController extends Controller
     // ─────────────────────────────────────────────
     public function subirFondoHistoria(Request $request, int $id): JsonResponse
     {
+        // mimes explícito (no solo 'image'): la regla 'image' de Laravel
+        // acepta SVG, que puede traer <script> embebido — mismo riesgo que
+        // AuthController::subirLogo, ver comentario ahí.
         $request->validate([
-            'imagen' => 'required|image|max:5120', // 5MB
+            'imagen' => 'required|image|mimes:jpeg,png,jpg,webp|max:5120', // 5MB
         ]);
 
         $profesional = Profesional::delUsuario($request->user())->findOrFail($id);
+        $pathAnterior = $profesional->getRawOriginal('fondo_historia_path');
 
-        // Borrar el archivo anterior antes de guardar el nuevo — evita
-        // acumular imágenes huérfanas en el disco cada vez que la
-        // profesional cambia el fondo fijo.
-        if ($profesional->getRawOriginal('fondo_historia_path')) {
-            Storage::disk('public')->delete($profesional->getRawOriginal('fondo_historia_path'));
+        // Subir y confirmar ANTES de borrar el archivo anterior — si
+        // store() falla, el fondo previo tiene que seguir sirviendo en vez
+        // de quedar huérfano sin haberse reemplazado.
+        $path = $request->file('imagen')->store('fondos_historia', 'public');
+        if (!$path) {
+            return response()->json(['message' => 'No se pudo guardar el fondo. Intentá de nuevo.'], 500);
         }
 
-        $path = $request->file('imagen')->store('fondos_historia', 'public');
         $profesional->update(['fondo_historia_path' => $path]);
+
+        if ($pathAnterior) {
+            Storage::disk('public')->delete($pathAnterior);
+        }
 
         return response()->json($profesional);
     }
@@ -162,8 +170,11 @@ class ProfesionalController extends Controller
     // ─────────────────────────────────────────────
     public function subirHistoriaPreciosFoto(Request $request, int $id): JsonResponse
     {
+        // mimes explícito (no solo 'image'): la regla 'image' de Laravel
+        // acepta SVG, que puede traer <script> embebido — mismo riesgo que
+        // AuthController::subirLogo, ver comentario ahí.
         $request->validate([
-            'imagen' => 'required|image|max:5120', // 5MB
+            'imagen' => 'required|image|mimes:jpeg,png,jpg,webp|max:5120', // 5MB
         ]);
 
         $profesional = Profesional::delUsuario($request->user())->findOrFail($id);

@@ -210,18 +210,31 @@ class AuthController extends Controller
     // ─────────────────────────────────────────────
     public function subirLogo(Request $request): JsonResponse
     {
+        // mimes explícito (no solo 'image'): la regla 'image' de Laravel
+        // acepta SVG, que puede traer <script> embebido — el logo se sirve
+        // público y sin auth en GET /public/{slug}/branding, así que un SVG
+        // malicioso ahí es XSS servido directo a cualquier visitante.
         $request->validate([
-            'imagen' => 'required|image|max:5120', // 5MB
+            'imagen' => 'required|image|mimes:jpeg,png,jpg,webp|max:5120', // 5MB
         ]);
 
         $user = $request->user();
+        $pathAnterior = $user->getRawOriginal('logo_path');
 
-        if ($user->getRawOriginal('logo_path')) {
-            Storage::disk('public')->delete($user->getRawOriginal('logo_path'));
+        // Subir y confirmar ANTES de tocar el archivo viejo: si store()
+        // falla (disco lleno, permisos), el logo anterior tiene que seguir
+        // sirviendo en vez de quedar el usuario sin logo y sin forma de
+        // saber que la subida no se completó.
+        $path = $request->file('imagen')->store('logos', 'public');
+        if (!$path) {
+            return response()->json(['message' => 'No se pudo guardar el logo. Intentá de nuevo.'], 500);
         }
 
-        $path = $request->file('imagen')->store('logos', 'public');
         $user->update(['logo_path' => $path]);
+
+        if ($pathAnterior) {
+            Storage::disk('public')->delete($pathAnterior);
+        }
 
         return response()->json($user);
     }
