@@ -26,7 +26,7 @@ class AuthController extends Controller
     private function noAutorizado(Request $request): ?JsonResponse
     {
         $secreto = config('app.admin_secret');
-        if (!$secreto || $request->header('X-Admin-Secret') !== $secreto) {
+        if ($secreto === null || $secreto === '' || $request->header('X-Admin-Secret') !== $secreto) {
             return response()->json(['error' => 'No autorizado'], 401);
         }
 
@@ -221,7 +221,7 @@ class AuthController extends Controller
         // público y sin auth en GET /public/{slug}/branding, así que un SVG
         // malicioso ahí es XSS servido directo a cualquier visitante.
         $request->validate([
-            'imagen' => 'required|image|mimes:jpeg,png,jpg,webp|max:5120', // 5MB
+            'imagen' => 'required|image|mimes:jpeg,png,jpg,webp,gif,bmp|max:5120', // 5MB
         ]);
 
         $user = $request->user();

@@ -121,7 +121,7 @@ class ProfesionalController extends Controller
         // acepta SVG, que puede traer <script> embebido — mismo riesgo que
         // AuthController::subirLogo, ver comentario ahí.
         $request->validate([
-            'imagen' => 'required|image|mimes:jpeg,png,jpg,webp|max:5120', // 5MB
+            'imagen' => 'required|image|mimes:jpeg,png,jpg,webp,gif,bmp|max:5120', // 5MB
         ]);
 
         $profesional = Profesional::delUsuario($request->user())->findOrFail($id);
@@ -174,7 +174,7 @@ class ProfesionalController extends Controller
         // acepta SVG, que puede traer <script> embebido — mismo riesgo que
         // AuthController::subirLogo, ver comentario ahí.
         $request->validate([
-            'imagen' => 'required|image|mimes:jpeg,png,jpg,webp|max:5120', // 5MB
+            'imagen' => 'required|image|mimes:jpeg,png,jpg,webp,gif,bmp|max:5120', // 5MB
         ]);
 
         $profesional = Profesional::delUsuario($request->user())->findOrFail($id);

@@ -15,7 +15,7 @@ class AdminController extends Controller
     private function noAutorizado(Request $request): ?JsonResponse
     {
         $secreto = config('app.admin_secret');
-        if (!$secreto || $request->header('X-Admin-Secret') !== $secreto) {
+        if ($secreto === null || $secreto === '' || $request->header('X-Admin-Secret') !== $secreto) {
             return response()->json(['error' => 'No autorizado'], 401);
         }
 
