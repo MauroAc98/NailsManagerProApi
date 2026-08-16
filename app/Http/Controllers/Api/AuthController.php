@@ -12,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -196,6 +197,31 @@ class AuthController extends Controller
         }
 
         $user->update($data);
+
+        return response()->json($user);
+    }
+
+    // ─────────────────────────────────────────────
+    // POST /api/perfil/logo
+    // Sube (o reemplaza) el logo del negocio, usado en el login
+    // personalizado por slug. Mismo mecanismo de storage que
+    // ProfesionalController::subirFondoHistoria: disco 'public', borra el
+    // archivo anterior antes de guardar el nuevo para no dejar huérfanos.
+    // ─────────────────────────────────────────────
+    public function subirLogo(Request $request): JsonResponse
+    {
+        $request->validate([
+            'imagen' => 'required|image|max:5120', // 5MB
+        ]);
+
+        $user = $request->user();
+
+        if ($user->getRawOriginal('logo_path')) {
+            Storage::disk('public')->delete($user->getRawOriginal('logo_path'));
+        }
+
+        $path = $request->file('imagen')->store('logos', 'public');
+        $user->update(['logo_path' => $path]);
 
         return response()->json($user);
     }

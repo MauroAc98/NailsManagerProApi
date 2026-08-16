@@ -47,6 +47,26 @@ class PublicController extends Controller
     }
 
     // ─────────────────────────────────────────────
+    // GET /api/public/{slug}/branding
+    // Datos mínimos para el login personalizado por negocio (logo +
+    // nombre). A diferencia de getProfesional(), NO valida "activo": ese
+    // campo se eliminó de la tabla users (ver migración
+    // 2026_06_22_170728_remove_activo_fecha_vencimiento_from_users_table)
+    // y hoy getProfesional() siempre aborta con 403 por leerlo igual —
+    // bug preexistente fuera del alcance de este cambio. El login debe
+    // poder mostrar el branding del negocio aunque esté inactivo/vencido.
+    // ─────────────────────────────────────────────
+    public function branding(string $slug): JsonResponse
+    {
+        $user = User::where('slug', $slug)->firstOrFail();
+
+        return response()->json([
+            'nombre'   => $user->name,
+            'logo_url' => $user->logo_url,
+        ]);
+    }
+
+    // ─────────────────────────────────────────────
     // GET /api/public/{slug}/servicios
     // Lista de servicios activos del estudio
     // ─────────────────────────────────────────────

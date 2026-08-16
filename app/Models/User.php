@@ -2,9 +2,11 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\HasApiTokens;
 
@@ -19,6 +21,7 @@ class User extends Authenticatable
         'password',
         'telefono',
         'direccion',
+        'logo_path',
         'is_exempt',
         'recordatorio_automatico',
         'hora_recordatorio',
@@ -34,10 +37,12 @@ class User extends Authenticatable
         'password',
         'remember_token',
         'fcm_token',
+        'logo_path',
     ];
 
     protected $appends = [
         'whatsapp_requiere_envio_manual',
+        'logo_url',
     ];
 
     protected $attributes = [
@@ -80,6 +85,18 @@ class User extends Authenticatable
         }
 
         return $slug;
+    }
+
+    // URL pública del logo del negocio, o null si todavía no subió uno.
+    // logo_path nunca se expone directo (es una ruta relativa del disco
+    // 'public'), mismo criterio que Profesional::fondoHistoriaUrl.
+    protected function logoUrl(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => $this->logo_path
+                ? Storage::disk('public')->url($this->logo_path)
+                : null,
+        );
     }
 
     // ── Helpers ──────────────────────────────────────────────────

@@ -21,6 +21,7 @@ use Illuminate\Support\Facades\Route;
 // ─────────────────────────────────────────────
 Route::prefix('public/{slug}')->group(function () {
     Route::get('info',           [PublicController::class, 'info']);
+    Route::get('branding',       [PublicController::class, 'branding']);
     Route::get('servicios',      [PublicController::class, 'servicios']);
     Route::get('disponibilidad', [PublicController::class, 'disponibilidad']);
     Route::post('reservas',      [PublicController::class, 'store'])->middleware('throttle:10,1');
@@ -60,7 +61,8 @@ Route::get('admin/whatsapp/instancias/{user}/historial', [AdminController::class
 Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
 
     // Perfil
-    Route::put('perfil', [AuthController::class, 'updatePerfil']);
+    Route::put('perfil',       [AuthController::class, 'updatePerfil']);
+    Route::post('perfil/logo', [AuthController::class, 'subirLogo']);
 
     // Servicios
     Route::patch('servicios/reordenar', [ServicioController::class, 'reordenar']);
