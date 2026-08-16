@@ -96,6 +96,7 @@ class PublicController extends Controller
         $fecha = $request->fecha;
         $ahora = Carbon::now();
         $esHoy = $fecha === $ahora->toDateString();
+        $ahoraMinutos = $ahora->hour * 60 + $ahora->minute;
 
         // Slots configurados por la profesional
         $slots = $user->slotsDisponibles()->activos()->orderBy('hora')->get();
@@ -112,12 +113,13 @@ class PublicController extends Controller
             ->where('fecha', $fecha)
             ->get(['slot_hora', 'duracion_total_minutos']);
 
-        $resultado = $slots->map(function ($slot) use ($turnos, $reservas, $esHoy, $ahora) {
+        $resultado = $slots->map(function ($slot) use ($turnos, $reservas, $esHoy, $ahoraMinutos) {
             $slotCarbon  = Carbon::parse($slot->hora);
             $slotMinutos = $slotCarbon->hour * 60 + $slotCarbon->minute;
 
-            // Bloqueo por hora pasada
-            if ($esHoy && $slotCarbon->hour <= $ahora->hour) {
+            // Bloqueo por hora pasada — comparación en minutos, no solo
+            // ->hour (ver mismo fix en TurnoController::disponibilidad).
+            if ($esHoy && $slotMinutos <= $ahoraMinutos) {
                 return ['hora' => $slotCarbon->format('H:i'), 'libre' => false];
             }
 

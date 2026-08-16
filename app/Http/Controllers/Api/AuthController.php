@@ -18,9 +18,15 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
+    // Falla cerrado si ADMIN_SECRET no está seteado en el entorno: sin este
+    // chequeo explícito, config('app.admin_secret') y un header ausente
+    // terminan siendo ambos null, la comparación estricta da false, y la
+    // request pasa sin ninguna credencial — este endpoint no tiene
+    // auth:sanctum de respaldo.
     private function noAutorizado(Request $request): ?JsonResponse
     {
-        if ($request->header('X-Admin-Secret') !== config('app.admin_secret')) {
+        $secreto = config('app.admin_secret');
+        if (!$secreto || $request->header('X-Admin-Secret') !== $secreto) {
             return response()->json(['error' => 'No autorizado'], 401);
         }
 

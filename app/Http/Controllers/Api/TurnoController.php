@@ -13,6 +13,7 @@ use App\Models\WhatsappMensaje;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class TurnoController extends Controller
 {
@@ -128,10 +129,16 @@ class TurnoController extends Controller
         $inicio = max($request->desde, $manana);
 
         // Si hoy ya pasó el último horario de atención, no tiene sentido
-        // incluirlo en la imagen — excluimos hoy del periodo.
+        // incluirlo en la imagen — excluimos hoy del periodo. Comparación
+        // en minutos (no solo ->hour): con ->hour un slot de 19:30 se
+        // consideraba "pasado" ya a las 19:00, excluyendo el día completo
+        // mientras el salón seguía atendiendo.
         if ($inicio === Carbon::today()->toDateString() && $slots->isNotEmpty()) {
-            $ultimaHoraAtencion = Carbon::parse($slots->last()->hora)->hour;
-            if (Carbon::now()->hour >= $ultimaHoraAtencion) {
+            $ultimoSlot = Carbon::parse($slots->last()->hora);
+            $ultimaAtencionMinutos = $ultimoSlot->hour * 60 + $ultimoSlot->minute;
+            $ahoraParaCorte = Carbon::now();
+            $ahoraMinutosCorte = $ahoraParaCorte->hour * 60 + $ahoraParaCorte->minute;
+            if ($ahoraMinutosCorte >= $ultimaAtencionMinutos) {
                 $inicio = Carbon::tomorrow()->toDateString();
             }
         }
@@ -152,12 +159,12 @@ class TurnoController extends Controller
             $fecha = $dia->format('Y-m-d');
             $ahora = Carbon::now();
             $esHoy = $fecha === $ahora->toDateString();
-            $horaActual = $ahora->hour;
+            $horaActualMinutos = $ahora->hour * 60 + $ahora->minute;
 
             $turnosDia = $turnos->filter(fn ($t) => Carbon::parse($t->fecha_hora)->toDateString() === $fecha);
             $reservasDia = $reservas->filter(fn ($r) => $r->fecha->toDateString() === $fecha);
 
-            $slotsDelDia = $slots->map(function ($slot) use ($turnosDia, $reservasDia, $esHoy, $horaActual) {
+            $slotsDelDia = $slots->map(function ($slot) use ($turnosDia, $reservasDia, $esHoy, $horaActualMinutos) {
                 $slotMinutos = (int) Carbon::parse($slot->hora)->format('H') * 60
                     + (int) Carbon::parse($slot->hora)->format('i');
 
@@ -165,7 +172,10 @@ class TurnoController extends Controller
                     ? Carbon::parse($slot->hora)->format('H:i').'hs'
                     : Carbon::parse($slot->hora)->format('H').'hs';
 
-                if ($esHoy && (int) Carbon::parse($slot->hora)->format('H') <= $horaActual) {
+                // Comparación en minutos, no solo ->hour: un slot de 10:30
+                // se marcaba pasado ya a las 10:00, perdiendo 30 min reales
+                // de disponibilidad.
+                if ($esHoy && $slotMinutos <= $horaActualMinutos) {
                     return ['hora' => $horaFormateada, 'libre' => false];
                 }
 
@@ -495,13 +505,18 @@ class TurnoController extends Controller
             }
         }
 
-        $turno->update(['estado' => 'completado']);
+        // Transacción: si el sync() de servicios/precios falla después del
+        // update de estado, sin esto el turno queda "completado" con los
+        // precios viejos (o sin precios), sin forma de saberlo desde afuera.
+        DB::transaction(function () use ($turno, $data) {
+            $turno->update(['estado' => 'completado']);
 
-        if (!empty($data['servicios'])) {
-            $turno->servicios()->sync(
-                collect($data['servicios'])->mapWithKeys(fn ($s) => [$s['servicio_id'] => ['precio' => $s['precio']]])
-            );
-        }
+            if (!empty($data['servicios'])) {
+                $turno->servicios()->sync(
+                    collect($data['servicios'])->mapWithKeys(fn ($s) => [$s['servicio_id'] => ['precio' => $s['precio']]])
+                );
+            }
+        });
 
         return response()->json($turno->load(['cliente', 'servicios']));
     }
@@ -575,9 +590,14 @@ class TurnoController extends Controller
             return $error;
         }
 
-        $turno->servicios()->sync(
-            collect($data['servicios'])->mapWithKeys(fn ($s) => [$s['servicio_id'] => ['precio' => $s['precio']]])
-        );
+        // sync() corre como delete+insert del pivot por debajo — sin
+        // transacción, una falla a mitad de camino puede dejar el pivot
+        // con menos servicios de los que tenía antes de intentar el cambio.
+        DB::transaction(function () use ($turno, $data) {
+            $turno->servicios()->sync(
+                collect($data['servicios'])->mapWithKeys(fn ($s) => [$s['servicio_id'] => ['precio' => $s['precio']]])
+            );
+        });
 
         return response()->json($turno->load(['cliente', 'servicios']));
     }

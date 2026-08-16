@@ -10,9 +10,12 @@ use Illuminate\Http\Request;
 
 class AdminController extends Controller
 {
+    // Falla cerrado si ADMIN_SECRET no está seteado en el entorno — ver
+    // mismo comentario en AuthController::noAutorizado().
     private function noAutorizado(Request $request): ?JsonResponse
     {
-        if ($request->header('X-Admin-Secret') !== config('app.admin_secret')) {
+        $secreto = config('app.admin_secret');
+        if (!$secreto || $request->header('X-Admin-Secret') !== $secreto) {
             return response()->json(['error' => 'No autorizado'], 401);
         }
 
