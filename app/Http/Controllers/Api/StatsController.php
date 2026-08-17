@@ -55,7 +55,80 @@ class StatsController extends Controller
             'ganancia_neta' => $ganancias - $gastos,
             'ganancias_por_servicio' => $this->gananciasPorServicio($turnosCompletados),
             'ganancias_por_dia' => $this->gananciasPorDia($turnosCompletados),
+            'turnos_por_estado_por_dia_semana' => $this->turnosPorEstadoPorDiaSemana($todos),
         ]);
+    }
+
+    // ─────────────────────────────────────────────
+    // GET /api/stats/ocupacion
+    // Heatmap hora × día de la semana: cuenta de turnos por combinación,
+    // agregados sobre TODO el rango pedido (no un día calendario puntual) —
+    // misma idea que turnosPorEstadoPorDiaSemana pero con la hora como
+    // segunda dimensión. Solo turnos "reales" (confirmado/completado), mismo
+    // criterio que $turnosValidos en dashboard(): un cancelado no ocupó la
+    // agenda de verdad. Devuelve solo los buckets con al menos un turno (lista
+    // rala) — el frontend rellena con 0 los que falten, mismo patrón que
+    // ganancias_por_dia.
+    // ─────────────────────────────────────────────
+    public function ocupacion(Request $request): JsonResponse
+    {
+        $request->validate([
+            'desde' => 'required|date',
+            'hasta' => 'required|date|after_or_equal:desde',
+            'profesional_id' => 'sometimes|nullable|integer|exists:profesionales,id',
+        ]);
+
+        $user = $request->user();
+
+        $query = Turno::delUsuario($user)
+            ->delRango($request->desde, $request->hasta)
+            ->whereIn('estado', ['confirmado', 'completado']);
+
+        if ($request->filled('profesional_id')) {
+            $query->where('profesional_id', (int) $request->profesional_id);
+        }
+
+        $turnos = $query->get(['fecha_hora']);
+
+        // dia_semana en formato ISO (1 = lunes ... 7 = domingo), igual orden
+        // que la semana del calendario del frontend (L M M J V S D).
+        $porBucket = $turnos->groupBy(
+            fn (Turno $t) => Carbon::parse($t->fecha_hora)->isoWeekday().'-'.Carbon::parse($t->fecha_hora)->hour
+        );
+
+        $resultado = $porBucket->map(function ($grupo, $clave) {
+            [$diaSemana, $hora] = explode('-', $clave);
+
+            return [
+                'dia_semana' => (int) $diaSemana,
+                'hora' => (int) $hora,
+                'cantidad' => $grupo->count(),
+            ];
+        })->values();
+
+        return response()->json($resultado);
+    }
+
+    // dia_semana en formato ISO (1 = lunes ... 7 = domingo). Siempre devuelve
+    // las 7 entradas (incluso en 0) — a diferencia de ocupacion() de arriba,
+    // acá conviene que el frontend no tenga que rellenar huecos para dibujar
+    // un eje fijo de 7 barras.
+    private function turnosPorEstadoPorDiaSemana($todos)
+    {
+        $porDia = $todos->groupBy(fn (Turno $t) => Carbon::parse($t->fecha_hora)->isoWeekday());
+
+        $resultado = [];
+        for ($dia = 1; $dia <= 7; $dia++) {
+            $grupo = $porDia->get($dia, collect());
+            $resultado[] = [
+                'dia_semana' => $dia,
+                'completados' => $grupo->where('estado', 'completado')->count(),
+                'confirmados' => $grupo->where('estado', 'confirmado')->count(),
+                'cancelados' => $grupo->where('estado', 'cancelado')->count(),
+            ];
+        }
+
+        return $resultado;
     }
 
     // Consulta separada de la de turnos: los gastos no tienen turno asociado

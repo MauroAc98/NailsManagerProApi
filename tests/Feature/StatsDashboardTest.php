@@ -100,6 +100,42 @@ class StatsDashboardTest extends TestCase
         );
     }
 
+    public function test_desglosa_turnos_por_dia_semana(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $profesional = Profesional::create(['user_id' => $user->id, 'nombre' => 'Jefa', 'activo' => true]);
+        $cliente = Cliente::create(['user_id' => $user->id, 'nombre' => 'Cliente Test', 'telefono' => '3765252395']);
+        $servicio = Servicio::create(['user_id' => $user->id, 'nombre' => 'Manicura', 'duracion_minutos' => 30, 'activo' => true]);
+
+        $this->crearTurno($user, $profesional, $cliente, [$servicio], '2026-07-06 10:00:00', 'completado');
+        $this->crearTurno($user, $profesional, $cliente, [$servicio], '2026-07-06 11:00:00', 'completado');
+        $this->crearTurno($user, $profesional, $cliente, [$servicio], '2026-07-06 12:00:00', 'cancelado');
+        $this->crearTurno($user, $profesional, $cliente, [$servicio], '2026-07-07 10:00:00', 'confirmado');
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/stats/dashboard?desde=2026-07-01&hasta=2026-07-31')
+            ->assertOk();
+
+        $porDia = collect($response->json('turnos_por_estado_por_dia_semana'));
+        // Siempre las 7 entradas — el frontend dibuja un eje fijo, no rellena huecos.
+        $this->assertCount(7, $porDia);
+
+        $lunesIso = Carbon::parse('2026-07-06')->isoWeekday();
+        $martesIso = Carbon::parse('2026-07-07')->isoWeekday();
+
+        $this->assertSame(
+            ['dia_semana' => $lunesIso, 'completados' => 2, 'confirmados' => 0, 'cancelados' => 1],
+            $porDia->firstWhere('dia_semana', $lunesIso)
+        );
+        $this->assertSame(
+            ['dia_semana' => $martesIso, 'completados' => 0, 'confirmados' => 1, 'cancelados' => 0],
+            $porDia->firstWhere('dia_semana', $martesIso)
+        );
+
+        $otro = $porDia->first(fn ($d) => ! in_array($d['dia_semana'], [$lunesIso, $martesIso]));
+        $this->assertSame(0, $otro['completados'] + $otro['confirmados'] + $otro['cancelados']);
+    }
+
     public function test_clasifica_cliente_nueva_vs_recurrente_segun_su_primer_turno_historico(): void
     {
         $user = User::factory()->create(['is_exempt' => true]);
