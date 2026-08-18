@@ -57,7 +57,7 @@ class ProfesionalHistoriaPreciosTest extends TestCase
             'user_id' => $user->id,
             'nombre' => 'Jefa',
             'activo' => true,
-            'historia_precios_template_id' => 'bold',
+            'historia_precios_template_id' => 'fullbleed',
         ]);
 
         $this->actingAs($user, 'sanctum')

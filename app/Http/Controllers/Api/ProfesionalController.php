@@ -41,7 +41,7 @@ class ProfesionalController extends Controller
         $data = $request->validate([
             'nombre'                        => 'required|string|max:255',
             'color'                         => 'nullable|string|max:50',
-            'historia_precios_template_id'  => ['nullable', Rule::in(['editorial', 'minimal', 'rose', 'modern', 'split', 'bold', 'collage', 'polaroid', 'type', 'grid'])],
+            'historia_precios_template_id'  => ['nullable', Rule::in(['editorial', 'minimal', 'modern', 'split', 'collage', 'fullbleed', 'type', 'grid'])],
             'servicio_ids'    => 'sometimes|array',
             'servicio_ids.*'  => [
                 'integer',
@@ -74,7 +74,7 @@ class ProfesionalController extends Controller
             'nombre'                        => 'sometimes|string|max:255',
             'color'                         => 'sometimes|nullable|string|max:50',
             'activo'                        => 'sometimes|boolean',
-            'historia_precios_template_id'  => ['sometimes', 'nullable', Rule::in(['editorial', 'minimal', 'rose', 'modern', 'split', 'bold', 'collage', 'polaroid', 'type', 'grid'])],
+            'historia_precios_template_id'  => ['sometimes', 'nullable', Rule::in(['editorial', 'minimal', 'modern', 'split', 'collage', 'fullbleed', 'type', 'grid'])],
             'servicio_ids'    => 'sometimes|array',
             'servicio_ids.*'  => [
                 'integer',
