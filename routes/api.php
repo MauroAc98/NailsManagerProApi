@@ -85,6 +85,7 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
     Route::delete('profesionales/{id}/fondo-historia', [ProfesionalController::class, 'borrarFondoHistoria']);
     Route::post('profesionales/{id}/historia-precios-fotos', [ProfesionalController::class, 'subirHistoriaPreciosFoto']);
     Route::delete('profesionales/{id}/historia-precios-fotos/{fotoId}', [ProfesionalController::class, 'borrarHistoriaPreciosFoto']);
+    Route::patch('profesionales/{id}/historia-precios-fotos/reordenar', [ProfesionalController::class, 'reordenarHistoriaPreciosFotos']);
 
     // Estadísticas
     Route::get('stats/dashboard', [StatsController::class, 'dashboard']);

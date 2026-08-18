@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Profesional;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -38,10 +39,9 @@ class ProfesionalController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'nombre'                      => 'required|string|max:255',
-            'color'                       => 'nullable|string|max:50',
-            'historia_precios_layout_id'  => ['nullable', Rule::in(['grid4', 'single', 'split2'])],
-            'historia_precios_estilo_id'  => ['nullable', Rule::in(['classic', 'modern', 'bold'])],
+            'nombre'                        => 'required|string|max:255',
+            'color'                         => 'nullable|string|max:50',
+            'historia_precios_template_id'  => ['nullable', Rule::in(['editorial', 'minimal', 'rose', 'modern', 'split', 'bold', 'collage', 'polaroid', 'type', 'grid'])],
             'servicio_ids'    => 'sometimes|array',
             'servicio_ids.*'  => [
                 'integer',
@@ -52,11 +52,10 @@ class ProfesionalController extends Controller
         ]);
 
         $profesional = $request->user()->profesionales()->create([
-            'nombre'                     => $data['nombre'],
-            'color'                      => $data['color'] ?? null,
-            'activo'                     => true,
-            'historia_precios_layout_id' => $data['historia_precios_layout_id'] ?? null,
-            'historia_precios_estilo_id' => $data['historia_precios_estilo_id'] ?? null,
+            'nombre'                        => $data['nombre'],
+            'color'                         => $data['color'] ?? null,
+            'activo'                        => true,
+            'historia_precios_template_id'  => $data['historia_precios_template_id'] ?? null,
         ]);
 
         if (array_key_exists('servicio_ids', $data)) {
@@ -72,11 +71,10 @@ class ProfesionalController extends Controller
     public function update(Request $request, int $id): JsonResponse
     {
         $data = $request->validate([
-            'nombre'                      => 'sometimes|string|max:255',
-            'color'                       => 'sometimes|nullable|string|max:50',
-            'activo'                      => 'sometimes|boolean',
-            'historia_precios_layout_id'  => ['sometimes', 'nullable', Rule::in(['grid4', 'single', 'split2'])],
-            'historia_precios_estilo_id'  => ['sometimes', 'nullable', Rule::in(['classic', 'modern', 'bold'])],
+            'nombre'                        => 'sometimes|string|max:255',
+            'color'                         => 'sometimes|nullable|string|max:50',
+            'activo'                        => 'sometimes|boolean',
+            'historia_precios_template_id'  => ['sometimes', 'nullable', Rule::in(['editorial', 'minimal', 'rose', 'modern', 'split', 'bold', 'collage', 'polaroid', 'type', 'grid'])],
             'servicio_ids'    => 'sometimes|array',
             'servicio_ids.*'  => [
                 'integer',
@@ -217,6 +215,34 @@ class ProfesionalController extends Controller
 
         Storage::disk('public')->delete($foto->getRawOriginal('path'));
         $foto->delete();
+
+        return response()->json($profesional->load(['servicios', 'historiaPreciosFotos']));
+    }
+
+    // ─────────────────────────────────────────────
+    // PATCH /api/profesionales/{id}/historia-precios-fotos/reordenar
+    // ─────────────────────────────────────────────
+    public function reordenarHistoriaPreciosFotos(Request $request, int $id): JsonResponse
+    {
+        $profesional = Profesional::delUsuario($request->user())->findOrFail($id);
+
+        $data = $request->validate([
+            'ids'   => 'required|array|min:1',
+            'ids.*' => [
+                'integer',
+                Rule::exists('historia_precios_fotos', 'id')->where(
+                    fn($q) => $q->where('profesional_id', $profesional->id)
+                ),
+            ],
+        ]);
+
+        DB::transaction(function () use ($profesional, $data) {
+            foreach ($data['ids'] as $index => $fotoId) {
+                $profesional->historiaPreciosFotos()
+                    ->where('id', $fotoId)
+                    ->update(['orden' => $index]);
+            }
+        });
 
         return response()->json($profesional->load(['servicios', 'historiaPreciosFotos']));
     }

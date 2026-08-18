@@ -16,8 +16,7 @@ class Profesional extends Model
         'color',
         'activo',
         'fondo_historia_path',
-        'historia_precios_layout_id',
-        'historia_precios_estilo_id',
+        'historia_precios_template_id',
     ];
 
     protected $appends = ['fondo_historia_url'];
@@ -87,8 +86,8 @@ class Profesional extends Model
     }
 
     // Fotos de la "historia de precios" (dynamic price story). Se exponen
-    // ordenadas por 'orden' — el frontend arma el layout (grid4/single/
-    // split2) respetando ese orden tal cual llega.
+    // ordenadas por 'orden' — el frontend arma la plantilla elegida
+    // (historia_precios_template_id) respetando ese orden tal cual llega.
     public function historiaPreciosFotos()
     {
         return $this->hasMany(HistoriaPrecioFoto::class)->orderBy('orden');

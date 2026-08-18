@@ -22,56 +22,50 @@ class ProfesionalHistoriaPreciosTest extends TestCase
         return UploadedFile::fake()->create($nombre, 100, 'image/jpeg');
     }
 
-    public function test_patchea_layout_y_estilo_via_el_endpoint_de_update_existente(): void
+    public function test_patchea_template_id_via_el_endpoint_de_update_existente(): void
     {
         $user = User::factory()->create(['is_exempt' => true]);
         $profesional = Profesional::create(['user_id' => $user->id, 'nombre' => 'Jefa', 'activo' => true]);
 
         $response = $this->actingAs($user, 'sanctum')
             ->putJson("/api/profesionales/{$profesional->id}", [
-                'historia_precios_layout_id' => 'grid4',
-                'historia_precios_estilo_id' => 'modern',
+                'historia_precios_template_id' => 'grid',
             ])
             ->assertOk();
 
-        $response->assertJsonPath('historia_precios_layout_id', 'grid4');
-        $response->assertJsonPath('historia_precios_estilo_id', 'modern');
+        $response->assertJsonPath('historia_precios_template_id', 'grid');
 
-        $this->assertSame('grid4', $profesional->fresh()->historia_precios_layout_id);
-        $this->assertSame('modern', $profesional->fresh()->historia_precios_estilo_id);
+        $this->assertSame('grid', $profesional->fresh()->historia_precios_template_id);
     }
 
-    public function test_rechaza_un_valor_de_layout_que_no_esta_en_el_enum(): void
+    public function test_rechaza_un_valor_de_template_que_no_esta_en_el_enum(): void
     {
         $user = User::factory()->create(['is_exempt' => true]);
         $profesional = Profesional::create(['user_id' => $user->id, 'nombre' => 'Jefa', 'activo' => true]);
 
         $this->actingAs($user, 'sanctum')
             ->putJson("/api/profesionales/{$profesional->id}", [
-                'historia_precios_layout_id' => 'no-existe',
+                'historia_precios_template_id' => 'no-existe',
             ])
             ->assertStatus(422);
     }
 
-    public function test_permite_volver_a_null_los_campos_de_historia_precios(): void
+    public function test_permite_volver_a_null_el_campo_de_historia_precios(): void
     {
         $user = User::factory()->create(['is_exempt' => true]);
         $profesional = Profesional::create([
             'user_id' => $user->id,
             'nombre' => 'Jefa',
             'activo' => true,
-            'historia_precios_layout_id' => 'single',
-            'historia_precios_estilo_id' => 'bold',
+            'historia_precios_template_id' => 'bold',
         ]);
 
         $this->actingAs($user, 'sanctum')
             ->putJson("/api/profesionales/{$profesional->id}", [
-                'historia_precios_layout_id' => null,
-                'historia_precios_estilo_id' => null,
+                'historia_precios_template_id' => null,
             ])
             ->assertOk()
-            ->assertJsonPath('historia_precios_layout_id', null)
-            ->assertJsonPath('historia_precios_estilo_id', null);
+            ->assertJsonPath('historia_precios_template_id', null);
     }
 
     public function test_sube_una_foto_y_devuelve_el_profesional_completo(): void
@@ -208,6 +202,65 @@ class ProfesionalHistoriaPreciosTest extends TestCase
         $ordenes = collect($response->json('historia_precios_fotos'))->pluck('orden')->all();
         $this->assertSame([0, 2, 3, 4], $ordenes);
         $this->assertSame(4, count(array_unique($ordenes)));
+    }
+
+    public function test_reordena_las_fotos_via_el_endpoint_de_reordenar(): void
+    {
+        Storage::fake('public');
+
+        $user = User::factory()->create(['is_exempt' => true]);
+        $profesional = Profesional::create(['user_id' => $user->id, 'nombre' => 'Jefa', 'activo' => true]);
+
+        // 3 fotos: orden 0,1,2
+        for ($i = 0; $i < 3; $i++) {
+            $this->actingAs($user, 'sanctum')
+                ->postJson("/api/profesionales/{$profesional->id}/historia-precios-fotos", [
+                    'imagen' => $this->fakeImagen("foto-{$i}.jpg"),
+                ])->assertOk();
+        }
+
+        $idsOriginal = HistoriaPrecioFoto::where('profesional_id', $profesional->id)
+            ->orderBy('orden')->pluck('id')->all();
+        $idsInvertidos = array_reverse($idsOriginal);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->patchJson("/api/profesionales/{$profesional->id}/historia-precios-fotos/reordenar", [
+                'ids' => $idsInvertidos,
+            ])
+            ->assertOk();
+
+        $fotos = collect($response->json('historia_precios_fotos'))->sortBy('orden')->values();
+        $this->assertSame($idsInvertidos, $fotos->pluck('id')->all());
+        $this->assertSame([0, 1, 2], $fotos->pluck('orden')->all());
+    }
+
+    public function test_rechaza_reordenar_con_una_foto_de_otro_profesional(): void
+    {
+        Storage::fake('public');
+
+        $dueno = User::factory()->create(['is_exempt' => true]);
+        $intruso = User::factory()->create(['is_exempt' => true]);
+
+        $profesional = Profesional::create(['user_id' => $dueno->id, 'nombre' => 'Jefa', 'activo' => true]);
+        $profesionalIntruso = Profesional::create(['user_id' => $intruso->id, 'nombre' => 'Otra', 'activo' => true]);
+
+        $subida = $this->actingAs($dueno, 'sanctum')
+            ->postJson("/api/profesionales/{$profesional->id}/historia-precios-fotos", [
+                'imagen' => $this->fakeImagen('a.jpg'),
+            ])->assertOk();
+        $fotoIdDueno = $subida->json('historia_precios_fotos.0.id');
+
+        $subidaIntruso = $this->actingAs($intruso, 'sanctum')
+            ->postJson("/api/profesionales/{$profesionalIntruso->id}/historia-precios-fotos", [
+                'imagen' => $this->fakeImagen('b.jpg'),
+            ])->assertOk();
+        $fotoIdIntruso = $subidaIntruso->json('historia_precios_fotos.0.id');
+
+        $this->actingAs($dueno, 'sanctum')
+            ->patchJson("/api/profesionales/{$profesional->id}/historia-precios-fotos/reordenar", [
+                'ids' => [$fotoIdDueno, $fotoIdIntruso],
+            ])
+            ->assertStatus(422);
     }
 
     public function test_no_permite_borrar_una_foto_de_otro_usuario(): void
