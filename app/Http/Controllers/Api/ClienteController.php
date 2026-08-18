@@ -12,7 +12,12 @@ class ClienteController extends Controller
 {
     // ─────────────────────────────────────────────
     // GET /api/clientes
-    // Soporta: ?buscar=
+    // Soporta: ?buscar= (siempre) y, opcionalmente, ?page=&per_page= — sin
+    // `page`, se comporta EXACTAMENTE igual que antes (array plano, sin
+    // paginar): el picker de cliente en Agenda (nuevo/editar turno) depende de
+    // ese shape y nunca manda `page`. Con `page`, devuelve el shape paginado
+    // estándar de Laravel ({data, current_page, last_page, total, ...}) — usado
+    // por la lista de clientes con scroll infinito virtualizado.
     // ─────────────────────────────────────────────
     public function index(Request $request): JsonResponse
     {
@@ -27,9 +32,14 @@ class ClienteController extends Controller
             });
         }
 
-        $clientes = $query->orderBy('apellido')->orderBy('nombre')->get();
+        $query->orderBy('apellido')->orderBy('nombre');
 
-        return response()->json($clientes);
+        if ($request->has('page')) {
+            $perPage = min((int) $request->input('per_page', 30), 100);
+            return response()->json($query->paginate($perPage));
+        }
+
+        return response()->json($query->get());
     }
 
     // ─────────────────────────────────────────────
