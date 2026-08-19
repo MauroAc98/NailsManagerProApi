@@ -20,6 +20,32 @@ class ProfesionalController extends Controller
     // límite en el disco.
     private const MAX_FOTOS_HISTORIA_PRECIOS = 4;
 
+    // Reglas de validación para 'historia_precios_nota', usadas en update()
+    // — store() no acepta este campo al crear (una profesional nueva
+    // siempre arranca sin nota, igual que sin fotos). Objeto por modo
+    // (precios/promociones), cada uno con su propio texto/activa/alineacion.
+    // `sometimes` en cada hoja porque el frontend PUEDE mandar solo el modo
+    // que cambió — ver update(): el valor validado se mergea con el
+    // historia_precios_nota existente en vez de reemplazarlo entero, así un
+    // payload parcial nunca borra el modo que no vino en este request. 180
+    // de tope server-side, mismo límite que ya aplica el textarea del
+    // frontend — defensa en profundidad, no confiar en el cliente (mismo
+    // criterio que MAX_FOTOS_HISTORIA_PRECIOS).
+    private function reglasHistoriaPreciosNota(): array
+    {
+        return [
+            'historia_precios_nota'                       => 'sometimes|nullable|array',
+            'historia_precios_nota.precios'                => 'sometimes|array',
+            'historia_precios_nota.precios.texto'          => 'sometimes|nullable|string|max:180',
+            'historia_precios_nota.precios.activa'         => 'sometimes|boolean',
+            'historia_precios_nota.precios.alineacion'     => ['sometimes', Rule::in(['left', 'center', 'right', 'justify'])],
+            'historia_precios_nota.promociones'            => 'sometimes|array',
+            'historia_precios_nota.promociones.texto'      => 'sometimes|nullable|string|max:180',
+            'historia_precios_nota.promociones.activa'     => 'sometimes|boolean',
+            'historia_precios_nota.promociones.alineacion' => ['sometimes', Rule::in(['left', 'center', 'right', 'justify'])],
+        ];
+    }
+
     // ─────────────────────────────────────────────
     // GET /api/profesionales
     // ─────────────────────────────────────────────
@@ -82,9 +108,26 @@ class ProfesionalController extends Controller
                     fn($q) => $q->where('user_id', $request->user()->id)
                 ),
             ],
+            ...$this->reglasHistoriaPreciosNota(),
         ]);
 
         $profesional = Profesional::delUsuario($request->user())->findOrFail($id);
+
+        // Merge por modo, NO reemplazo entero de la columna — un payload
+        // que solo trae 'precios' (la validación de arriba lo permite,
+        // 'sometimes' en cada hoja) no debe borrar 'promociones' ya
+        // guardado. array_merge alcanza porque el merge es a nivel de las
+        // claves de modo (precios/promociones): cada una llega completa
+        // desde el frontend, nunca un modo parcial dentro de sí mismo (ver
+        // useHistoriaPrecios, siempre manda notaState entero). Si el
+        // request manda `historia_precios_nota: null` explícito (borrar
+        // todo), se respeta tal cual, sin mergear.
+        if (array_key_exists('historia_precios_nota', $data) && $data['historia_precios_nota'] !== null) {
+            $data['historia_precios_nota'] = array_merge(
+                $profesional->historia_precios_nota ?? [],
+                $data['historia_precios_nota']
+            );
+        }
 
         $profesional->update(collect($data)->except('servicio_ids')->all());
 

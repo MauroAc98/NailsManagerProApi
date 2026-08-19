@@ -78,9 +78,16 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
     Route::apiResource('slots', SlotDisponibleController::class);
 
     // Profesionales (multi-agenda)
-    Route::apiResource('profesionales', ProfesionalController::class)->only([
-        'index', 'store', 'update', 'destroy',
-    ]);
+    // throttle en 'update' — desde el autosave debounced (700ms) de la nota
+    // adicional de historia de precios (ver ProfesionalController::update,
+    // guardarNotaHistoriaPrecios en el frontend), este endpoint se golpea
+    // mucho más seguido que antes. 60/min da margen generoso a uso legítimo
+    // (varios campos, tipeo rápido) mientras acota abuso scripteado. Solo en
+    // 'update', no en todo el resource — index/store/destroy no tienen ese
+    // patrón de uso.
+    Route::apiResource('profesionales', ProfesionalController::class)
+        ->only(['index', 'store', 'update', 'destroy'])
+        ->middlewareFor('update', 'throttle:60,1');
     Route::post('profesionales/{id}/fondo-historia', [ProfesionalController::class, 'subirFondoHistoria']);
     Route::delete('profesionales/{id}/fondo-historia', [ProfesionalController::class, 'borrarFondoHistoria']);
     Route::post('profesionales/{id}/historia-precios-fotos', [ProfesionalController::class, 'subirHistoriaPreciosFoto']);

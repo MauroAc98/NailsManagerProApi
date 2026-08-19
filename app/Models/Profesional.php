@@ -17,6 +17,7 @@ class Profesional extends Model
         'activo',
         'fondo_historia_path',
         'historia_precios_template_id',
+        'historia_precios_nota',
     ];
 
     protected $appends = ['fondo_historia_url'];
@@ -25,7 +26,11 @@ class Profesional extends Model
     protected function casts(): array
     {
         return [
-            'activo' => 'boolean',
+            'activo'                 => 'boolean',
+            // Shape: {precios: {texto, activa, alineacion}, promociones: {...}}
+            // — validado en ProfesionalController (store/update), la
+            // estructura interna la define el frontend (useHistoriaPrecios).
+            'historia_precios_nota'  => 'array',
         ];
     }
 

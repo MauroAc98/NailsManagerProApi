@@ -68,6 +68,111 @@ class ProfesionalHistoriaPreciosTest extends TestCase
             ->assertJsonPath('historia_precios_template_id', null);
     }
 
+    public function test_patchea_la_nota_adicional_via_el_endpoint_de_update_existente(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $profesional = Profesional::create(['user_id' => $user->id, 'nombre' => 'Jefa', 'activo' => true]);
+
+        $nota = [
+            'precios' => ['texto' => 'Seña del 50%', 'activa' => true, 'alineacion' => 'left'],
+            'promociones' => ['texto' => '', 'activa' => true, 'alineacion' => 'center'],
+        ];
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/profesionales/{$profesional->id}", [
+                'historia_precios_nota' => $nota,
+            ])
+            ->assertOk();
+
+        $response->assertJsonPath('historia_precios_nota.precios.texto', 'Seña del 50%');
+        $response->assertJsonPath('historia_precios_nota.precios.alineacion', 'left');
+
+        // ConvertEmptyStringsToNull (middleware global de Laravel) normaliza
+        // '' -> null en el request ANTES de la validación — el frontend
+        // nunca ve la diferencia (useHistoriaPrecios ya trata null como
+        // texto vacío al hidratar), pero el round-trip real guarda null,
+        // no ''.
+        $nota['promociones']['texto'] = null;
+        $this->assertSame($nota, $profesional->fresh()->historia_precios_nota);
+    }
+
+    public function test_rechaza_una_alineacion_de_nota_que_no_esta_en_el_enum(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $profesional = Profesional::create(['user_id' => $user->id, 'nombre' => 'Jefa', 'activo' => true]);
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson("/api/profesionales/{$profesional->id}", [
+                'historia_precios_nota' => [
+                    'precios' => ['texto' => 'x', 'activa' => true, 'alineacion' => 'diagonal'],
+                ],
+            ])
+            ->assertStatus(422);
+    }
+
+    public function test_rechaza_un_texto_de_nota_mas_largo_que_180_caracteres(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $profesional = Profesional::create(['user_id' => $user->id, 'nombre' => 'Jefa', 'activo' => true]);
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson("/api/profesionales/{$profesional->id}", [
+                'historia_precios_nota' => [
+                    'precios' => ['texto' => str_repeat('a', 181), 'activa' => true, 'alineacion' => 'center'],
+                ],
+            ])
+            ->assertStatus(422);
+    }
+
+    public function test_un_payload_parcial_de_nota_mergea_en_vez_de_borrar_el_otro_modo(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $profesional = Profesional::create([
+            'user_id' => $user->id,
+            'nombre' => 'Jefa',
+            'activo' => true,
+            'historia_precios_nota' => [
+                'precios' => ['texto' => 'Seña 50%', 'activa' => true, 'alineacion' => 'left'],
+                'promociones' => ['texto' => 'Válido hasta fin de mes', 'activa' => true, 'alineacion' => 'center'],
+            ],
+        ]);
+
+        // Manda SOLO 'precios' — la validación lo permite ('sometimes' en
+        // cada hoja), 'promociones' no debe desaparecer.
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/profesionales/{$profesional->id}", [
+                'historia_precios_nota' => [
+                    'precios' => ['texto' => 'Seña 60%', 'activa' => false, 'alineacion' => 'right'],
+                ],
+            ])
+            ->assertOk();
+
+        $response->assertJsonPath('historia_precios_nota.precios.texto', 'Seña 60%');
+        $response->assertJsonPath('historia_precios_nota.promociones.texto', 'Válido hasta fin de mes');
+
+        $guardado = $profesional->fresh()->historia_precios_nota;
+        $this->assertSame('Seña 60%', $guardado['precios']['texto']);
+        $this->assertSame('Válido hasta fin de mes', $guardado['promociones']['texto']);
+    }
+
+    public function test_permite_volver_a_null_la_nota_adicional(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $profesional = Profesional::create([
+            'user_id' => $user->id,
+            'nombre' => 'Jefa',
+            'activo' => true,
+            'historia_precios_nota' => ['precios' => ['texto' => 'algo', 'activa' => true, 'alineacion' => 'center']],
+        ]);
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson("/api/profesionales/{$profesional->id}", [
+                'historia_precios_nota' => null,
+            ])
+            ->assertOk()
+            ->assertJsonPath('historia_precios_nota', null);
+    }
+
     public function test_sube_una_foto_y_devuelve_el_profesional_completo(): void
     {
         Storage::fake('public');
