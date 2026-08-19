@@ -61,6 +61,8 @@ class ClienteController extends Controller
             'telefono.unique' => 'Ya existe una cliente registrada con ese teléfono.',
         ]);
 
+        $data['activo'] = true;
+
         $cliente = $request->user()->clientes()->create($data);
 
         return response()->json($cliente, 201);
