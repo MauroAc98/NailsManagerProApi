@@ -31,10 +31,9 @@ class CloudApiService
     /**
      * Deja solo dígitos. A diferencia de EvolutionService::normalizarNumero,
      * NO inserta el "9" de celulares argentinos — ese ajuste es un requisito
-     * del protocolo WhatsApp Web/Baileys, no de la Cloud API oficial. Falta
-     * confirmar con un envío de prueba real si Meta lo espera igual;
-     * mientras tanto se manda tal cual viene (con el "9" ya incluido, que es
-     * como se guarda `telefono` en la tabla `clientes`).
+     * del protocolo WhatsApp Web/Baileys, no de la Cloud API oficial.
+     * Confirmado con un envío de prueba real (piloto Testeo Dev, 2026-08-20):
+     * un número guardado sin el "9" (+543764794897) entregó correctamente.
      */
     public function normalizarNumero(string $numero): string
     {
