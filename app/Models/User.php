@@ -28,9 +28,6 @@ class User extends Authenticatable
         'sena_monto',
         'fcm_token',
         'debe_cambiar_password',
-        'evolution_instance_name',
-        'whatsapp_estado',
-        'whatsapp_provider',
         'locale',
     ];
 
@@ -47,7 +44,6 @@ class User extends Authenticatable
     ];
 
     protected $attributes = [
-        'whatsapp_estado'         => 'desconectado',
         'recordatorio_automatico' => false,
         'hora_recordatorio'       => '20:00',
     ];
@@ -100,18 +96,6 @@ class User extends Authenticatable
         );
     }
 
-    // ── Helpers ──────────────────────────────────────────────────
-    public function tieneWhatsappConectado(): bool
-    {
-        return $this->whatsapp_estado === 'conectado'
-            && !empty($this->evolution_instance_name);
-    }
-
-    public function tieneRecordatorioAutomatico(): bool
-    {
-        return $this->recordatorio_automatico && $this->tieneWhatsappConectado();
-    }
-
     // ── Relaciones ───────────────────────────────────────────────
     public function subscription()
     {
@@ -158,26 +142,19 @@ class User extends Authenticatable
         return $this->hasOne(UserMpCredential::class);
     }
 
-    public function whatsappEstadoHistoriales()
-    {
-        return $this->hasMany(WhatsappEstadoHistorial::class);
-    }
-
     public function whatsappMensajes()
     {
         return $this->hasMany(WhatsappMensaje::class);
     }
 
     // ── Envío manual de confirmación (fallback) ────────────────────
-    // "conectado" solo dice que el socket de WhatsApp está vivo, no que
-    // WhatsApp vaya a entregar lo que se manda por ahí. Este flag es true
-    // por cualquiera de estas razones: (a) la profesional nunca vinculó
-    // ninguna instancia de WhatsApp (evolution_instance_name vacío — el
-    // caso más común, no un edge case), (b) hay instancia vinculada pero
-    // tuvo una desconexión terminal reciente sin una reconexión posterior,
-    // o (c) el ratio de mensajes fallidos es alto. En cualquiera de los
-    // tres casos, el frontend ofrece mandar la confirmación a mano por
-    // wa.me en vez de depender del envío automático.
+    // Cloud API no tiene concepto de "conexión" — el flag es true por
+    // cualquiera de estas razones: (a) falta el teléfono de contacto de la
+    // profesional (no se puede armar la variable {{6}} de la plantilla),
+    // (b) el locale es pt-BR (no hay plantilla aprobada en portugués
+    // todavía), o (c) el ratio de mensajes fallidos de Cloud API es alto.
+    // En cualquiera de los tres casos, el frontend ofrece mandar el
+    // mensaje a mano por wa.me en vez de depender del envío automático.
     public function getWhatsappRequiereEnvioManualAttribute(): bool
     {
         return $this->criterioRequiereEnvioManualWhatsapp();
@@ -185,39 +162,22 @@ class User extends Authenticatable
 
     protected function criterioRequiereEnvioManualWhatsapp(): bool
     {
-        if (empty($this->evolution_instance_name)) {
+        if (empty($this->telefono)) {
+            return true;
+        }
+
+        if ($this->locale === 'pt-BR') {
             return true;
         }
 
         $desde = now()->subDays(30);
 
-        // No alcanza con "hubo una desconexión terminal en la ventana": si
-        // ya se reconectó después de esa desconexión, el blip quedó curado
-        // y no debe dejar el flag pegado en true por los 30 días restantes.
-        $ultimaDesconexionTerminal = $this->whatsappEstadoHistoriales()
-            ->where('estado', 'desconectado')
-            ->whereIn('status_reason', [401, 408, 428, 440, 515])
-            ->where('created_at', '>=', $desde)
-            ->latest('created_at')
-            ->first();
-
-        if ($ultimaDesconexionTerminal) {
-            $seReconectoDespues = $this->whatsappEstadoHistoriales()
-                ->where('estado', 'conectado')
-                ->where('created_at', '>', $ultimaDesconexionTerminal->created_at)
-                ->exists();
-
-            if (! $seReconectoDespues) {
-                return true;
-            }
-        }
-
-        // Los envíos manuales (fallback wa.me, ver marcarRecordatorioManual)
-        // no dicen nada sobre si el envío AUTOMÁTICO funciona — mezclarlos
-        // acá diluiría el ratio real y podría "curar" el flag antes de
-        // tiempo solo porque la profesional usó el fallback, sin que el
-        // WhatsApp automático haya mejorado en nada.
+        // Filtrado por provider='cloud_api': la ventana de 30 días todavía
+        // puede contener mensajes históricos de Evolution del corte
+        // reciente — sin este filtro, fallos viejos de un proveedor que ya
+        // no existe diluirían (o inflarían) el ratio real de Cloud API.
         $total = $this->whatsappMensajes()
+            ->where('provider', 'cloud_api')
             ->where('created_at', '>=', $desde)
             ->where('status', '!=', 'manual')
             ->count();
@@ -227,6 +187,7 @@ class User extends Authenticatable
         }
 
         $fallidos = $this->whatsappMensajes()
+            ->where('provider', 'cloud_api')
             ->where('created_at', '>=', $desde)
             ->where('status', 'failed')
             ->count();

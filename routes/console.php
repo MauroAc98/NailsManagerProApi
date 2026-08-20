@@ -13,7 +13,3 @@ Schedule::command('turnos:completar-vencidos')->everyFifteenMinutes();
 Schedule::command('recordatorios:enviar')
     ->hourly()
     ->appendOutputTo(storage_path('logs/recordatorios.log'));
-
-Schedule::command('whatsapp:reenviar-pendientes')
-    ->everyTenMinutes()
-    ->appendOutputTo(storage_path('logs/whatsapp_reenvios.log'));

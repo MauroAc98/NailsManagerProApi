@@ -25,17 +25,13 @@ class EnviarRecordatoriosDeduplicacionTest extends TestCase
     // que en realidad ya estaba resuelto.
     public function test_no_reenvia_recordatorio_automatico_para_un_turno_ya_gestionado(): void
     {
-        Http::fake([
-            '*/instance/connectionState/*' => Http::response(['instance' => ['state' => 'open']], 200),
-            '*/message/sendText/*' => Http::response(['key' => ['id' => 'ABC123']], 200),
-        ]);
+        Http::fake();
 
         $user = User::factory()->create([
             'is_exempt' => true,
             'recordatorio_automatico' => true,
             'hora_recordatorio' => now()->format('H:00'),
-            'evolution_instance_name' => 'user_1',
-            'whatsapp_estado' => 'conectado',
+            'telefono' => '3765000000',
         ]);
 
         $cliente = Cliente::create([

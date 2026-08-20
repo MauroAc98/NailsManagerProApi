@@ -35,12 +35,6 @@ return [
         ],
     ],
 
-    'evolution' => [
-        'url' => env('EVOLUTION_API_URL', 'http://localhost:8080'),
-        'key' => env('EVOLUTION_API_KEY'),
-        'webhook_secret' => env('EVOLUTION_WEBHOOK_SECRET'),
-    ],
-
     'whatsapp_cloud' => [
         'token' => env('WHATSAPP_CLOUD_TOKEN'),
         'phone_number_id' => env('WHATSAPP_CLOUD_PHONE_NUMBER_ID'),

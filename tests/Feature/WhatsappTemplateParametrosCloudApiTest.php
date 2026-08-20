@@ -103,18 +103,18 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
         $this->assertSame('confirmacion_turno', WhatsappTemplate::nombrePlantillaMeta('confirmacion'));
     }
 
-    public function test_procesar_plantilla_reemplaza_telefono(): void
+    public function test_mensaje_legible_incluye_los_valores_reales(): void
     {
         $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'telefono' => '3765000000']);
         $turno = $this->crearTurnoDeMuestra($user);
 
-        $resultado = WhatsappTemplate::procesarPlantilla(
-            'Dudas o consultas: {telefono}',
-            $turno->cliente,
-            $turno,
-            $user,
-        );
+        $resultado = WhatsappTemplate::mensajeLegible('confirmacion', $turno->cliente, $turno, $user);
 
-        $this->assertSame('Dudas o consultas: 3765000000', $resultado);
+        $this->assertStringContainsString('Martina', $resultado);
+        $this->assertStringContainsString('Nails Studio', $resultado);
+        $this->assertStringContainsString('20/08', $resultado);
+        $this->assertStringContainsString('15:30', $resultado);
+        $this->assertStringContainsString('Manicura semipermanente', $resultado);
+        $this->assertStringContainsString('3765000000', $resultado);
     }
 }

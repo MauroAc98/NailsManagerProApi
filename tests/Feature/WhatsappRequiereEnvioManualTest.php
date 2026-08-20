@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Models\User;
-use App\Models\WhatsappEstadoHistorial;
 use App\Models\WhatsappMensaje;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -12,11 +11,9 @@ class WhatsappRequiereEnvioManualTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_true_sin_instancia_de_whatsapp_vinculada(): void
+    public function test_true_sin_telefono_cargado(): void
     {
-        $user = User::factory()->create([
-            'evolution_instance_name' => null,
-        ]);
+        $user = User::factory()->create(['telefono' => null]);
 
         $this->actingAs($user, 'sanctum')
             ->getJson('/api/auth/me')
@@ -24,33 +21,9 @@ class WhatsappRequiereEnvioManualTest extends TestCase
             ->assertJson(['whatsapp_requiere_envio_manual' => true]);
     }
 
-    public function test_false_sin_historial_malo_ni_mensajes_fallidos(): void
+    public function test_true_con_locale_pt_br(): void
     {
-        $user = User::factory()->create([
-            'evolution_instance_name' => 'user_1',
-            'whatsapp_estado' => 'conectado',
-        ]);
-
-        $this->actingAs($user, 'sanctum')
-            ->getJson('/api/auth/me')
-            ->assertOk()
-            ->assertJson(['whatsapp_requiere_envio_manual' => false]);
-    }
-
-    public function test_true_con_desconexion_terminal_reciente(): void
-    {
-        $user = User::factory()->create([
-            'evolution_instance_name' => 'user_1',
-            'whatsapp_estado' => 'conectado',
-        ]);
-
-        WhatsappEstadoHistorial::create([
-            'user_id' => $user->id,
-            'estado' => 'desconectado',
-            'status_reason' => 401,
-            'created_at' => now()->subDays(2),
-            'updated_at' => now()->subDays(2),
-        ]);
+        $user = User::factory()->create(['telefono' => '3765000000', 'locale' => 'pt-BR']);
 
         $this->actingAs($user, 'sanctum')
             ->getJson('/api/auth/me')
@@ -58,48 +31,9 @@ class WhatsappRequiereEnvioManualTest extends TestCase
             ->assertJson(['whatsapp_requiere_envio_manual' => true]);
     }
 
-    public function test_false_con_desconexion_terminal_pero_reconexion_posterior(): void
+    public function test_false_con_telefono_y_sin_mensajes_fallidos(): void
     {
-        $user = User::factory()->create([
-            'evolution_instance_name' => 'user_1',
-            'whatsapp_estado' => 'conectado',
-        ]);
-
-        $desconexion = WhatsappEstadoHistorial::create([
-            'user_id' => $user->id,
-            'estado' => 'desconectado',
-            'status_reason' => 401,
-        ]);
-        $desconexion->created_at = now()->subDays(5);
-        $desconexion->save();
-
-        $reconexion = WhatsappEstadoHistorial::create([
-            'user_id' => $user->id,
-            'estado' => 'conectado',
-        ]);
-        $reconexion->created_at = now()->subDays(4);
-        $reconexion->save();
-
-        $this->actingAs($user, 'sanctum')
-            ->getJson('/api/auth/me')
-            ->assertOk()
-            ->assertJson(['whatsapp_requiere_envio_manual' => false]);
-    }
-
-    public function test_false_con_desconexion_terminal_fuera_de_ventana(): void
-    {
-        $user = User::factory()->create([
-            'evolution_instance_name' => 'user_1',
-            'whatsapp_estado' => 'conectado',
-        ]);
-
-        $historial = WhatsappEstadoHistorial::create([
-            'user_id' => $user->id,
-            'estado' => 'desconectado',
-            'status_reason' => 401,
-        ]);
-        $historial->created_at = now()->subDays(31);
-        $historial->save();
+        $user = User::factory()->create(['telefono' => '3765000000', 'locale' => 'es']);
 
         $this->actingAs($user, 'sanctum')
             ->getJson('/api/auth/me')
@@ -109,15 +43,13 @@ class WhatsappRequiereEnvioManualTest extends TestCase
 
     public function test_true_con_ratio_de_fallos_alto_y_muestra_suficiente(): void
     {
-        $user = User::factory()->create([
-            'evolution_instance_name' => 'user_1',
-            'whatsapp_estado' => 'conectado',
-        ]);
+        $user = User::factory()->create(['telefono' => '3765000000']);
 
         for ($i = 0; $i < 5; $i++) {
             WhatsappMensaje::create([
                 'user_id' => $user->id,
                 'numero' => '5491100000000',
+                'provider' => 'cloud_api',
                 'mensaje' => 'test',
                 'tipo' => 'confirmacion',
                 'status' => $i < 3 ? 'failed' : 'delivered',
@@ -135,14 +67,12 @@ class WhatsappRequiereEnvioManualTest extends TestCase
 
     public function test_false_con_muestra_chica_aunque_todo_haya_fallado(): void
     {
-        $user = User::factory()->create([
-            'evolution_instance_name' => 'user_1',
-            'whatsapp_estado' => 'conectado',
-        ]);
+        $user = User::factory()->create(['telefono' => '3765000000']);
 
         WhatsappMensaje::create([
             'user_id' => $user->id,
             'numero' => '5491100000000',
+            'provider' => 'cloud_api',
             'mensaje' => 'test',
             'tipo' => 'confirmacion',
             'status' => 'failed',
@@ -159,15 +89,13 @@ class WhatsappRequiereEnvioManualTest extends TestCase
 
     public function test_false_con_solo_mensajes_manuales_sin_fallos_automaticos(): void
     {
-        $user = User::factory()->create([
-            'evolution_instance_name' => 'user_1',
-            'whatsapp_estado' => 'conectado',
-        ]);
+        $user = User::factory()->create(['telefono' => '3765000000']);
 
         for ($i = 0; $i < 8; $i++) {
             WhatsappMensaje::create([
                 'user_id' => $user->id,
                 'numero' => '5491100000000',
+                'provider' => 'cloud_api',
                 'mensaje' => '',
                 'tipo' => 'recordatorio',
                 'status' => 'manual',
@@ -189,15 +117,13 @@ class WhatsappRequiereEnvioManualTest extends TestCase
     // el flag daría false pese a que el WhatsApp automático sigue fallando.
     public function test_true_con_ratio_automatico_real_por_encima_del_umbral_pese_a_diluirse_con_manuales(): void
     {
-        $user = User::factory()->create([
-            'evolution_instance_name' => 'user_1',
-            'whatsapp_estado' => 'conectado',
-        ]);
+        $user = User::factory()->create(['telefono' => '3765000000']);
 
         for ($i = 0; $i < 5; $i++) {
             WhatsappMensaje::create([
                 'user_id' => $user->id,
                 'numero' => '5491100000000',
+                'provider' => 'cloud_api',
                 'mensaje' => 'test',
                 'tipo' => 'confirmacion',
                 'status' => $i === 0 ? 'failed' : 'delivered',
@@ -209,6 +135,7 @@ class WhatsappRequiereEnvioManualTest extends TestCase
             WhatsappMensaje::create([
                 'user_id' => $user->id,
                 'numero' => '5491100000000',
+                'provider' => 'cloud_api',
                 'mensaje' => '',
                 'tipo' => 'recordatorio',
                 'status' => 'manual',
@@ -220,5 +147,32 @@ class WhatsappRequiereEnvioManualTest extends TestCase
             ->getJson('/api/auth/me')
             ->assertOk()
             ->assertJson(['whatsapp_requiere_envio_manual' => true]);
+    }
+
+    // Los fallos históricos de Evolution (provider='evolution') no deben
+    // contarse en el ratio de Cloud API — sin este filtro, el cutover
+    // reciente arrastraría fallos de un proveedor que ya no existe.
+    public function test_fallos_de_evolution_no_cuentan_para_el_ratio_de_cloud_api(): void
+    {
+        $user = User::factory()->create(['telefono' => '3765000000']);
+
+        for ($i = 0; $i < 5; $i++) {
+            WhatsappMensaje::create([
+                'user_id' => $user->id,
+                'numero' => '5491100000000',
+                'provider' => 'evolution',
+                'mensaje' => 'test',
+                'tipo' => 'confirmacion',
+                'status' => 'failed',
+                'intentos' => 1,
+                'created_at' => now()->subDays(1),
+                'updated_at' => now()->subDays(1),
+            ]);
+        }
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJson(['whatsapp_requiere_envio_manual' => false]);
     }
 }

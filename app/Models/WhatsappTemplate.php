@@ -2,73 +2,14 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Model;
-
-class WhatsappTemplate extends Model
+// No es un Eloquent Model: la tabla whatsapp_templates (texto
+// personalizable por profesional, de la era Evolution) se dropeó — Cloud
+// API usa un texto fijo aprobado por Meta, no hay nada que personalizar.
+// Esta clase solo agrupa los helpers estáticos que arman el envío real y
+// el registro legible de lo que se mandó.
+final class WhatsappTemplate
 {
-    protected $fillable = [
-        'user_id',
-        'tipo',
-        'contenido',
-    ];
-
-    protected $casts = [
-        'tipo' => 'string',
-    ];
-
-    // ── Scope de seguridad ──────────────────────────────────────
-    public function scopeDelUsuario($query, User $user)
-    {
-        return $query->where('user_id', $user->id);
-    }
-
-    public function scopeDelTipo($query, string $tipo)
-    {
-        return $query->where('tipo', $tipo);
-    }
-
-    // ── Relación ────────────────────────────────────────────────
-    public function user()
-    {
-        return $this->belongsTo(User::class);
-    }
-
-    // ── Helper para obtener plantilla con valores por defecto ──
-    public static function obtenerPlantilla(User $user, string $tipo): string
-    {
-        $template = static::delUsuario($user)
-            ->delTipo($tipo)
-            ->first();
-
-        if ($template) {
-            return $template->contenido;
-        }
-
-        // Valores por defecto según el tipo, en el idioma de la profesional
-        return static::plantillaDefault($tipo, $user->locale);
-    }
-
-    // ── Plantillas por defecto ──────────────────────────────────
-    public static function plantillaDefault(string $tipo, ?string $locale = null): string
-    {
-        if ($locale === 'pt-BR') {
-            return match ($tipo) {
-                'recordatorio' => 'Oi {nombre} 💅 Passando para lembrar do seu horário em {fecha} às {hora} para {servicios}. Te espero!',
-                'confirmacion' => 'Oi {nombre} 💅 Seu horário de {servicios} está confirmado para {fecha} às {hora}. Te espero!',
-                default => '',
-            };
-        }
-
-        return match ($tipo) {
-            'recordatorio' => 'Hola {nombre} 💅 Te recuerdo tu turno el {fecha} a las {hora} para {servicios}. ¡Te espero!',
-            'confirmacion' => 'Hola {nombre} 💅 Tu turno de {servicios} está confirmado para el {fecha} a las {hora}. ¡Te espero!',
-            default => '',
-        };
-    }
-
     // ── Cloud API: nombre de plantilla Meta por tipo ──────────────
-    // Solo existen versiones en español (es_AR) aprobadas — los callers
-    // deben mantener el fallback a Evolution para locale pt-BR.
     public static function nombrePlantillaMeta(string $tipo): string
     {
         return match ($tipo) {
@@ -79,12 +20,8 @@ class WhatsappTemplate extends Model
     }
 
     // ── Cloud API: parámetros ordenados {{1}}..{{6}} ───────────────
-    // Orden UNIFICADO para ambos tipos (antes recordatorio y confirmacion
-    // tenían órdenes distintos; ahora las dos plantillas de Meta comparten
-    // el mismo layout con la línea de contacto al final):
-    // [nombre, negocio, fecha, hora, servicios, telefono].
-    // Mismo formato que procesarPlantilla() usa para Evolution (servicios
-    // unidos con " + ", fecha d/m, hora H:i).
+    // Orden UNIFICADO para ambos tipos: [nombre, negocio, fecha, hora,
+    // servicios, telefono].
     //
     // {{6}} (telefono) puede llegar como string vacío si la profesional no
     // cargó su teléfono — a propósito, sin fallback: Meta rechaza el envío
@@ -108,26 +45,24 @@ class WhatsappTemplate extends Model
         };
     }
 
-    // ── Reemplazar placeholders ─────────────────────────────────
-    public static function procesarPlantilla(
-        string $plantilla,
+    // ── Texto legible para el log (WhatsappMensaje.mensaje) ────────
+    // Refleja el texto REAL y fijo de la plantilla aprobada en Meta (no
+    // hay más texto personalizable) — mismos 6 valores que
+    // parametrosCloudApi(), mismo orden, interpolados en el cuerpo real.
+    public static function mensajeLegible(
+        string $tipo,
         Cliente $cliente,
         Turno $turno,
         User $user,
     ): string {
-        $servicios = $turno->servicios->pluck('nombre')->join(' + ');
-        $fecha = $turno->fecha_hora->format('d/m');
-        $hora = $turno->fecha_hora->format('H:i');
+        [$nombre, $negocio, $fecha, $hora, $servicios, $telefono] = static::parametrosCloudApi($tipo, $cliente, $turno, $user);
 
-        return strtr($plantilla, [
-            '{nombre}'   => $cliente->nombre,
-            '{apellido}' => $cliente->apellido ?? '',
-            '{servicios}' => $servicios,
-            '{fecha}' => $fecha,
-            '{hora}' => $hora,
-            '{negocio}' => $user->name,
-            '{profesional}' => $turno->profesional?->nombre ?? $user->name,
-            '{telefono}' => $user->telefono ?? '',
-        ]);
+        $cuerpo = match ($tipo) {
+            'recordatorio' => "Hola {$nombre} ✨\n\n⏰ Recordatorio: tu turno es *mañana* en {$negocio}\n🗓️ {$fecha} · 🕒 {$hora} hs\n✨ {$servicios}\n\n*¡Te esperamos!*\n\n📞 Ante cualquier duda, escribí al {$telefono}. ¡Gracias!",
+            'confirmacion' => "Hola {$nombre} ✨\n\n✅ Turno confirmado en {$negocio}\n🗓️ {$fecha} · 🕒 {$hora} hs\n✨ {$servicios}\n\n*¡Te esperamos!*\n\n📞 Ante cualquier duda, escribí al {$telefono}. ¡Gracias!",
+            default => '',
+        };
+
+        return $cuerpo;
     }
 }

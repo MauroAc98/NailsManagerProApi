@@ -6,7 +6,6 @@ use App\Models\Turno;
 use App\Models\WhatsappMensaje;
 use App\Models\WhatsappTemplate;
 use App\Services\CloudApiService;
-use App\Services\EvolutionService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -22,11 +21,17 @@ class EnviarMensajeConfirmacion implements ShouldQueue
 
     public int $backoff = 15;
 
+    // Mismo regex que valida el teléfono al cargar el cliente
+    // (ClienteController@store/update) — una verificación extra acá antes
+    // de gastar un llamado a la API, para datos que puedan haber quedado
+    // mal cargados por otra vía.
+    private const REGEX_TELEFONO = '/^\+[1-9]\d{7,14}$/';
+
     public function __construct(
         public int $turnoId,
     ) {}
 
-    public function handle(EvolutionService $evolutionService, CloudApiService $cloudApiService): void
+    public function handle(CloudApiService $cloudApiService): void
     {
         $turno = Turno::with(['cliente', 'servicios', 'user', 'profesional'])->find($this->turnoId);
 
@@ -59,61 +64,28 @@ class EnviarMensajeConfirmacion implements ShouldQueue
             return;
         }
 
-        // La plantilla aprobada en Meta solo tiene versión es_AR — sin eso,
-        // una profesional en pt-BR con provider cloud_api cae a Evolution.
-        $usaCloudApi = $user->whatsapp_provider === 'cloud_api' && $user->locale !== 'pt-BR';
-
-        if ($usaCloudApi) {
-            $mensaje = WhatsappTemplate::procesarPlantilla(
-                WhatsappTemplate::obtenerPlantilla($user, 'confirmacion'),
-                $cliente,
-                $turno,
-                $user,
-            );
-            $numero = $cloudApiService->normalizarNumero($cliente->telefono);
-
-            $messageId = $cloudApiService->enviarPlantilla(
-                $numero,
-                WhatsappTemplate::nombrePlantillaMeta('confirmacion'),
-                'es_AR',
-                WhatsappTemplate::parametrosCloudApi('confirmacion', $cliente, $turno, $user),
-            );
-        } else {
-            if ($user->whatsapp_provider === 'cloud_api') {
-                Log::info('EnviarMensajeConfirmacion: provider cloud_api sin plantilla en el locale, usando Evolution', [
-                    'turno_id' => $this->turnoId,
-                    'user_id' => $user->id,
-                    'locale' => $user->locale,
-                ]);
-            }
-
-            if (! $user->tieneWhatsappConectado()) {
-                return;
-            }
-
-            if ($user->whatsapp_requiere_envio_manual) {
-                return;
-            }
-
-            // ── Verificar que la conexión esté estable en Evolution API ──
-            $estadoReal = $evolutionService->consultarEstado($user);
-
-            if ($estadoReal !== 'open') {
-                Log::info('EnviarMensajeConfirmacion: conexión no estable, reintentando', [
-                    'turno_id' => $this->turnoId,
-                    'estado' => $estadoReal,
-                ]);
-                $this->release(30);
-
-                return;
-            }
-
-            $plantilla = WhatsappTemplate::obtenerPlantilla($user, 'confirmacion');
-            $mensaje = WhatsappTemplate::procesarPlantilla($plantilla, $cliente, $turno, $user);
-            $numero = $evolutionService->normalizarNumero($cliente->telefono);
-
-            $messageId = $evolutionService->enviarMensaje($user, $numero, $mensaje);
+        if ($user->whatsapp_requiere_envio_manual) {
+            return;
         }
+
+        if (! preg_match(self::REGEX_TELEFONO, $cliente->telefono)) {
+            Log::warning('EnviarMensajeConfirmacion: teléfono de cliente con formato inválido, omitido', [
+                'turno_id' => $this->turnoId,
+                'user_id' => $user->id,
+            ]);
+
+            return;
+        }
+
+        $mensaje = WhatsappTemplate::mensajeLegible('confirmacion', $cliente, $turno, $user);
+        $numero = $cloudApiService->normalizarNumero($cliente->telefono);
+
+        $messageId = $cloudApiService->enviarPlantilla(
+            $numero,
+            WhatsappTemplate::nombrePlantillaMeta('confirmacion'),
+            'es_AR',
+            WhatsappTemplate::parametrosCloudApi('confirmacion', $cliente, $turno, $user),
+        );
 
         // ── Guardar registro para tracking ──
         try {
@@ -121,7 +93,7 @@ class EnviarMensajeConfirmacion implements ShouldQueue
                 'user_id' => $user->id,
                 'turno_id' => $turno->id,
                 'numero' => $numero,
-                'provider' => $usaCloudApi ? 'cloud_api' : 'evolution',
+                'provider' => 'cloud_api',
                 'mensaje' => $mensaje,
                 'tipo' => 'confirmacion',
                 'message_id' => $messageId,
@@ -133,7 +105,7 @@ class EnviarMensajeConfirmacion implements ShouldQueue
             if ($messageId) {
                 // El mensaje ya salió por WhatsApp. No dejamos que la
                 // excepción tire el job a retry: un reintento acá volvería
-                // a llamar a enviarMensaje() y mandaría un duplicado real
+                // a llamar a enviarPlantilla() y mandaría un duplicado real
                 // al cliente solo porque se perdió el registro de tracking.
                 Log::error('EnviarMensajeConfirmacion: mensaje enviado pero falló el guardado del registro — no se reintenta para evitar duplicado', [
                     'turno_id' => $this->turnoId,

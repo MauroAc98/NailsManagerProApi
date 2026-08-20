@@ -6,7 +6,6 @@ use App\Mail\RecordatoriosPendientesMail;
 use App\Models\Cliente;
 use App\Models\Turno;
 use App\Models\User;
-use App\Models\WhatsappEstadoHistorial;
 use App\Models\WhatsappMensaje;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -19,23 +18,13 @@ class EnviarRecordatoriosRequiereEnvioManualTest extends TestCase
 
     private function crearUsuarioConEnvioManual(): User
     {
-        $user = User::factory()->create([
+        // Sin teléfono cargado -> whatsapp_requiere_envio_manual = true.
+        return User::factory()->create([
             'is_exempt' => true,
             'recordatorio_automatico' => true,
             'hora_recordatorio' => now()->format('H:00'),
-            'evolution_instance_name' => 'user_1',
-            'whatsapp_estado' => 'conectado',
+            'telefono' => null,
         ]);
-
-        $historial = WhatsappEstadoHistorial::create([
-            'user_id' => $user->id,
-            'estado' => 'desconectado',
-            'status_reason' => 401,
-        ]);
-        $historial->created_at = now()->subDay();
-        $historial->save();
-
-        return $user;
     }
 
     public function test_omite_recordatorios_automaticos_cuando_requiere_envio_manual(): void

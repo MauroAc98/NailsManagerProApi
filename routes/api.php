@@ -8,9 +8,6 @@ use App\Http\Controllers\Api\TurnoController;
 use App\Http\Controllers\Api\ProfesionalController;
 use App\Http\Controllers\Api\ReservaWebController;
 use App\Http\Controllers\Api\PublicController;
-use App\Http\Controllers\Api\WhatsappController;
-use App\Http\Controllers\Api\WhatsappTemplateController;
-use App\Http\Controllers\Api\EvolutionWebhookController;
 use App\Http\Controllers\Api\CloudApiWebhookController;
 use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\StatsController;
@@ -53,8 +50,6 @@ Route::prefix('auth')->group(function () {
 // Admin
 // ─────────────────────────────────────────────
 Route::post('admin/subscriptions/{user}/renew', [AdminController::class, 'renewSubscription']);
-Route::get('admin/whatsapp/instancias', [AdminController::class, 'whatsappInstancias']);
-Route::get('admin/whatsapp/instancias/{user}/historial', [AdminController::class, 'whatsappHistorial']);
 // Uso de Cloud API por salón (mensajes + conversaciones de 24hs estimadas) para cotejar costo real de Meta.
 Route::get('admin/whatsapp/uso-por-salon', [AdminController::class, 'usoWhatsappPorSalon']);
 
@@ -125,38 +120,12 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
         Route::post('{id}/rechazar', [ReservaWebController::class, 'rechazar']);
     });
 
-    // Plantillas de mensajes WhatsApp
-    Route::prefix('whatsapp-templates')->group(function () {
-        Route::get('/',                 [WhatsappTemplateController::class, 'index']);
-        Route::put('/{tipo}',           [WhatsappTemplateController::class, 'update']);
-        Route::post('/{tipo}/resetear', [WhatsappTemplateController::class, 'resetear']);
-    });
-
-    // Límites por endpoint según su patrón de uso real: "estado" se
-    // pollea cada 3s durante la espera de escaneo (~20/min legítimos),
-    // "conectar" se refresca cada 25s (~3/min legítimos) más el click
-    // inicial, "desconectar" es una acción manual esporádica. Los topes
-    // dan margen holgado sobre el uso normal pero cortan cualquier loop
-    // fuera de control antes de que le pegue sin límite a Evolution.
-    Route::prefix('whatsapp')->group(function () {
-        Route::post('conectar',      [WhatsappController::class, 'conectar'])->middleware('throttle:12,1');
-        Route::get('estado',         [WhatsappController::class, 'estado'])->middleware('throttle:40,1');
-        Route::delete('desconectar', [WhatsappController::class, 'desconectar'])->middleware('throttle:6,1');
-    });
 });
 
 // ─────────────────────────────────────────────
 // Webhook Mercado Pago — sin auth, con firma HMAC
 // ─────────────────────────────────────────────
 Route::post('webhooks/mercadopago', [ReservaWebController::class, 'webhookMercadoPago']);
-
-// ─────────────────────────────────────────────
-// Webhook Evolution API — la URL incluye un secreto como path param.
-// Evolution no firma sus payloads, así que el control de acceso es la URL
-// misma: solo quien conoce el secreto (nosotros, vía WEBHOOK_GLOBAL_URL en
-// el docker-compose de Evolution) puede pegarle a esta ruta.
-// ─────────────────────────────────────────────
-Route::post('webhooks/evolution/{secret}', [EvolutionWebhookController::class, 'handle']);
 
 // ─────────────────────────────────────────────
 // Webhook WhatsApp Cloud API — sin secreto en la URL: Meta firma cada
