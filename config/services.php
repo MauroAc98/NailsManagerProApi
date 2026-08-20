@@ -41,6 +41,12 @@ return [
         'webhook_secret' => env('EVOLUTION_WEBHOOK_SECRET'),
     ],
 
+    'whatsapp_cloud' => [
+        'token' => env('WHATSAPP_CLOUD_TOKEN'),
+        'phone_number_id' => env('WHATSAPP_CLOUD_PHONE_NUMBER_ID'),
+        'api_version' => env('WHATSAPP_CLOUD_API_VERSION', 'v25.0'),
+    ],
+
     'frontend_url' => env('FRONTEND_URL'),
 
 ];

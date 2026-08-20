@@ -1,0 +1,83 @@
+<?php
+
+namespace App\Services;
+
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+
+class CloudApiService
+{
+    private string $token = '';
+
+    private string $phoneNumberId = '';
+
+    private string $apiVersion = '';
+
+    public function __construct()
+    {
+        $this->token = config('services.whatsapp_cloud.token') ?? '';
+        $this->phoneNumberId = config('services.whatsapp_cloud.phone_number_id') ?? '';
+        $this->apiVersion = config('services.whatsapp_cloud.api_version') ?? '';
+    }
+
+    private function headers(): array
+    {
+        return [
+            'Authorization' => "Bearer {$this->token}",
+            'Content-Type' => 'application/json',
+        ];
+    }
+
+    /**
+     * Deja solo dígitos. A diferencia de EvolutionService::normalizarNumero,
+     * NO inserta el "9" de celulares argentinos — ese ajuste es un requisito
+     * del protocolo WhatsApp Web/Baileys, no de la Cloud API oficial. Falta
+     * confirmar con un envío de prueba real si Meta lo espera igual;
+     * mientras tanto se manda tal cual viene (con el "9" ya incluido, que es
+     * como se guarda `telefono` en la tabla `clientes`).
+     */
+    public function normalizarNumero(string $numero): string
+    {
+        return preg_replace('/\D/', '', $numero);
+    }
+
+    /**
+     * Envía un mensaje de plantilla aprobada por Meta.
+     * $parametros va en el mismo orden que las variables {{1}}, {{2}}... del cuerpo.
+     * Devuelve el message_id si fue exitoso, null si falló.
+     */
+    public function enviarPlantilla(string $numero, string $template, string $idioma, array $parametros): ?string
+    {
+        $numero = $this->normalizarNumero($numero);
+
+        $response = Http::withHeaders($this->headers())
+            ->post("https://graph.facebook.com/{$this->apiVersion}/{$this->phoneNumberId}/messages", [
+                'messaging_product' => 'whatsapp',
+                'to' => $numero,
+                'type' => 'template',
+                'template' => [
+                    'name' => $template,
+                    'language' => ['code' => $idioma],
+                    'components' => [[
+                        'type' => 'body',
+                        'parameters' => array_map(
+                            fn (string $valor) => ['type' => 'text', 'text' => $valor],
+                            $parametros
+                        ),
+                    ]],
+                ],
+            ]);
+
+        if (! $response->successful()) {
+            Log::error('CloudApiService::enviarPlantilla falló', [
+                'numero' => $numero,
+                'template' => $template,
+                'body' => $response->body(),
+            ]);
+
+            return null;
+        }
+
+        return $response->json('messages.0.id');
+    }
+}
