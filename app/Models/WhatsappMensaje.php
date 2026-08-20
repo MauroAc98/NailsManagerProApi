@@ -13,6 +13,7 @@ class WhatsappMensaje extends Model
         'user_id',
         'turno_id',
         'numero',
+        'provider',
         'mensaje',
         'tipo',
         'message_id',

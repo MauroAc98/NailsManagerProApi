@@ -121,6 +121,7 @@ class EnviarMensajeConfirmacion implements ShouldQueue
                 'user_id' => $user->id,
                 'turno_id' => $turno->id,
                 'numero' => $numero,
+                'provider' => $usaCloudApi ? 'cloud_api' : 'evolution',
                 'mensaje' => $mensaje,
                 'tipo' => 'confirmacion',
                 'message_id' => $messageId,

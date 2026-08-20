@@ -155,6 +155,7 @@ class EnviarRecordatorios extends Command
                         'user_id' => $user->id,
                         'turno_id' => $turno->id,
                         'numero' => $numero,
+                        'provider' => $usaCloudApi ? 'cloud_api' : 'evolution',
                         'mensaje' => $mensaje,
                         'tipo' => 'recordatorio',
                         'message_id' => $messageId,

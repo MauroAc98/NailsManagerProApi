@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\WhatsappEstadoHistorial;
+use App\Models\WhatsappMensaje;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 
 class AdminController extends Controller
 {
@@ -100,5 +102,69 @@ class AdminController extends Controller
             ->paginate(50);
 
         return response()->json($historial);
+    }
+
+    /**
+     * GET /api/admin/whatsapp/uso-por-salon?desde=&hasta=
+     * Uso de WhatsApp Cloud API por salón (Evolution es gratis, no se
+     * cuenta) — mensajes crudos y una aproximación de conversaciones de
+     * 24hs (Meta cobra por conversación, no por mensaje individual), para
+     * poder cotejar cuánto le está costando cada profesional.
+     */
+    public function usoWhatsappPorSalon(Request $request): JsonResponse
+    {
+        if ($response = $this->noAutorizado($request)) {
+            return $response;
+        }
+
+        $desde = $request->filled('desde')
+            ? Carbon::parse($request->query('desde'))->startOfDay()
+            : now()->startOfMonth();
+        $hasta = $request->filled('hasta')
+            ? Carbon::parse($request->query('hasta'))->endOfDay()
+            : now()->endOfDay();
+
+        $mensajes = WhatsappMensaje::where('provider', 'cloud_api')
+            ->whereBetween('created_at', [$desde, $hasta])
+            ->orderBy('created_at')
+            ->get(['user_id', 'numero', 'created_at']);
+
+        $porUsuario = $mensajes->groupBy('user_id');
+
+        $nombres = User::whereIn('id', $porUsuario->keys())->pluck('name', 'id');
+
+        $salones = $porUsuario->map(function ($mensajesDelUsuario, $userId) use ($nombres) {
+            $conversaciones = 0;
+
+            foreach ($mensajesDelUsuario->groupBy('numero') as $mensajesDelNumero) {
+                $inicioVentana = null;
+
+                foreach ($mensajesDelNumero as $mensaje) {
+                    // diffInHours() en Carbon 3 devuelve el valor CON SIGNO por
+                    // default (a diferencia de Carbon 2) — sin absolute:true acá
+                    // daba negativo y la comparación ">= 24" nunca abría una
+                    // conversación nueva.
+                    if ($inicioVentana === null || $mensaje->created_at->diffInHours($inicioVentana, absolute: true) >= 24) {
+                        $conversaciones++;
+                        $inicioVentana = $mensaje->created_at;
+                    }
+                }
+            }
+
+            return [
+                'user_id' => (int) $userId,
+                'nombre' => $nombres[$userId] ?? null,
+                'mensajes_totales' => $mensajesDelUsuario->count(),
+                'conversaciones_estimadas' => $conversaciones,
+            ];
+        })
+            ->sortByDesc('conversaciones_estimadas')
+            ->values();
+
+        return response()->json([
+            'desde' => $desde->toDateString(),
+            'hasta' => $hasta->toDateString(),
+            'salones' => $salones,
+        ]);
     }
 }

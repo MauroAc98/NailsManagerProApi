@@ -55,6 +55,8 @@ Route::prefix('auth')->group(function () {
 Route::post('admin/subscriptions/{user}/renew', [AdminController::class, 'renewSubscription']);
 Route::get('admin/whatsapp/instancias', [AdminController::class, 'whatsappInstancias']);
 Route::get('admin/whatsapp/instancias/{user}/historial', [AdminController::class, 'whatsappHistorial']);
+// Uso de Cloud API por salón (mensajes + conversaciones de 24hs estimadas) para cotejar costo real de Meta.
+Route::get('admin/whatsapp/uso-por-salon', [AdminController::class, 'usoWhatsappPorSalon']);
 
 // ─────────────────────────────────────────────
 // Rutas privadas — requieren Bearer Token
