@@ -78,11 +78,19 @@ class WhatsappTemplate extends Model
         };
     }
 
-    // ── Cloud API: parámetros ordenados {{1}}..{{5}} por tipo ─────
-    // Mismos valores/formato que procesarPlantilla() usa para Evolution
-    // (servicios unidos con " + ", fecha d/m, hora H:i) — la plantilla
-    // aprobada en Meta espera ese mismo shape, no el formato de ejemplo
-    // que se usó solo para la revisión del template.
+    // ── Cloud API: parámetros ordenados {{1}}..{{6}} ───────────────
+    // Orden UNIFICADO para ambos tipos (antes recordatorio y confirmacion
+    // tenían órdenes distintos; ahora las dos plantillas de Meta comparten
+    // el mismo layout con la línea de contacto al final):
+    // [nombre, negocio, fecha, hora, servicios, telefono].
+    // Mismo formato que procesarPlantilla() usa para Evolution (servicios
+    // unidos con " + ", fecha d/m, hora H:i).
+    //
+    // {{6}} (telefono) puede llegar como string vacío si la profesional no
+    // cargó su teléfono — a propósito, sin fallback: Meta rechaza el envío
+    // completo si un parámetro de plantilla llega vacío, y ese fallo ya
+    // queda cubierto por el manejo de error existente en
+    // CloudApiService::enviarPlantilla() (devuelve null → status=failed).
     public static function parametrosCloudApi(
         string $tipo,
         Cliente $cliente,
@@ -92,10 +100,10 @@ class WhatsappTemplate extends Model
         $servicios = $turno->servicios->pluck('nombre')->join(' + ');
         $fecha = $turno->fecha_hora->format('d/m');
         $hora = $turno->fecha_hora->format('H:i');
+        $telefono = $user->telefono ?? '';
 
         return match ($tipo) {
-            'recordatorio' => [$cliente->nombre, $user->name, $fecha, $hora, $servicios],
-            'confirmacion' => [$cliente->nombre, $user->name, $servicios, $fecha, $hora],
+            'recordatorio', 'confirmacion' => [$cliente->nombre, $user->name, $fecha, $hora, $servicios, $telefono],
             default => [],
         };
     }
@@ -119,6 +127,7 @@ class WhatsappTemplate extends Model
             '{hora}' => $hora,
             '{negocio}' => $user->name,
             '{profesional}' => $turno->profesional?->nombre ?? $user->name,
+            '{telefono}' => $user->telefono ?? '',
         ]);
     }
 }

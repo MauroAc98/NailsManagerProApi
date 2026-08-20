@@ -26,7 +26,7 @@ class CloudApiServiceEnviarPlantillaTest extends TestCase
             '5493765123456',
             'recordatorio_turno',
             'es_AR',
-            ['Martina', 'Nails Studio', '20/08/2026', '15:30', 'manicura semipermanente']
+            ['Martina', 'Nails Studio', '20/08/2026', '15:30', 'manicura semipermanente', '3765000000']
         );
 
         $this->assertSame('wamid.ABC123', $messageId);
@@ -42,7 +42,8 @@ class CloudApiServiceEnviarPlantillaTest extends TestCase
                 && $body['template']['name'] === 'recordatorio_turno'
                 && $body['template']['language']['code'] === 'es_AR'
                 && $body['template']['components'][0]['parameters'][0] === ['type' => 'text', 'text' => 'Martina']
-                && $body['template']['components'][0]['parameters'][4] === ['type' => 'text', 'text' => 'manicura semipermanente'];
+                && $body['template']['components'][0]['parameters'][4] === ['type' => 'text', 'text' => 'manicura semipermanente']
+                && $body['template']['components'][0]['parameters'][5] === ['type' => 'text', 'text' => '3765000000'];
         });
     }
 
