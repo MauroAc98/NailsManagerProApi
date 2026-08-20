@@ -24,7 +24,12 @@ class TurnoController extends Controller
         $user = $request->user();
         $query = Turno::delUsuario($user)
             ->where('estado', '!=', 'cancelado') // ocultos por defecto — no aparecen en la agenda
-            ->with(['cliente', 'servicios', 'reservaWeb']);
+            ->with([
+                'cliente',
+                'servicios',
+                'reservaWeb',
+                'whatsappMensajes' => fn ($q) => $q->where('tipo', 'confirmacion')->latest()->limit(1)->select(['id', 'turno_id', 'status']),
+            ]);
 
         if ($request->filled('fecha')) {
             $query->delaFecha($request->fecha);
@@ -54,6 +59,10 @@ class TurnoController extends Controller
 
         $turnos = $query->orderBy('fecha_hora')->get()->map(function ($turno) {
             $turno->estado_visual = $this->calcularEstadoVisual($turno);
+            // whatsapp_mensajes trae respuesta_api/message_id/numero — datos internos
+            // que no deben llegar al frontend, así que solo exponemos el status derivado.
+            $turno->confirmacion_whatsapp_status = optional($turno->whatsappMensajes->first())->status;
+            $turno->makeHidden('whatsappMensajes');
 
             return $turno;
         });
@@ -65,10 +74,16 @@ class TurnoController extends Controller
     {
         $user = $request->user();
         $turno = Turno::delUsuario($user)
-            ->with(['cliente', 'servicios'])
+            ->with([
+                'cliente',
+                'servicios',
+                'whatsappMensajes' => fn ($q) => $q->where('tipo', 'confirmacion')->latest()->limit(1)->select(['id', 'turno_id', 'status']),
+            ])
             ->findOrFail($id);
 
         $turno->estado_visual = $this->calcularEstadoVisual($turno);
+        $turno->confirmacion_whatsapp_status = optional($turno->whatsappMensajes->first())->status;
+        $turno->makeHidden('whatsappMensajes');
 
         return response()->json($turno);
     }
