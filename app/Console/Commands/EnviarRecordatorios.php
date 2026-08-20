@@ -7,6 +7,7 @@ use App\Models\Turno;
 use App\Models\User;
 use App\Models\WhatsappMensaje;
 use App\Models\WhatsappTemplate;
+use App\Services\CloudApiService;
 use App\Services\EvolutionService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
@@ -19,8 +20,10 @@ class EnviarRecordatorios extends Command
 
     protected $description = 'Envía recordatorios de WhatsApp a las clientes con turno mañana';
 
-    public function __construct(private EvolutionService $evolutionService)
-    {
+    public function __construct(
+        private EvolutionService $evolutionService,
+        private CloudApiService $cloudApiService,
+    ) {
         parent::__construct();
     }
 
@@ -33,7 +36,10 @@ class EnviarRecordatorios extends Command
 
         $usuarios = User::where('recordatorio_automatico', true)
             ->where('hora_recordatorio', $horaActual)
-            ->whereNotNull('evolution_instance_name')
+            ->where(function ($query) {
+                $query->whereNotNull('evolution_instance_name')
+                    ->orWhere('whatsapp_provider', 'cloud_api');
+            })
             ->get();
 
         if ($usuarios->isEmpty()) {
@@ -48,7 +54,13 @@ class EnviarRecordatorios extends Command
         $totalFallidos = 0;
 
         foreach ($usuarios as $user) {
-            if ($user->whatsapp_requiere_envio_manual) {
+            // La plantilla aprobada en Meta solo tiene versión es_AR — sin
+            // eso, una profesional en pt-BR con provider cloud_api sigue el
+            // camino Evolution de siempre (incluye su propio chequeo de
+            // whatsapp_requiere_envio_manual más abajo).
+            $usaCloudApi = $user->whatsapp_provider === 'cloud_api' && $user->locale !== 'pt-BR';
+
+            if (! $usaCloudApi && $user->whatsapp_requiere_envio_manual) {
                 $this->info("  → {$user->name}: requiere envío manual, recordatorios automáticos omitidos");
 
                 $turnosManana = Turno::delUsuario($user)
@@ -70,23 +82,25 @@ class EnviarRecordatorios extends Command
                 continue;
             }
 
-            // Validar estado real contra Evolution, no confiar en whatsapp_estado
-            // de la DB: puede quedar desincronizado si algún webhook se perdió.
-            $estadoReal = $this->evolutionService->consultarEstado($user);
-            $estadoSincronizado = match ($estadoReal) {
-                'open' => 'conectado',
-                'close' => 'desconectado',
-                default => 'conectando',
-            };
+            if (! $usaCloudApi) {
+                // Validar estado real contra Evolution, no confiar en whatsapp_estado
+                // de la DB: puede quedar desincronizado si algún webhook se perdió.
+                $estadoReal = $this->evolutionService->consultarEstado($user);
+                $estadoSincronizado = match ($estadoReal) {
+                    'open' => 'conectado',
+                    'close' => 'desconectado',
+                    default => 'conectando',
+                };
 
-            if ($user->whatsapp_estado !== $estadoSincronizado) {
-                $user->update(['whatsapp_estado' => $estadoSincronizado]);
-            }
+                if ($user->whatsapp_estado !== $estadoSincronizado) {
+                    $user->update(['whatsapp_estado' => $estadoSincronizado]);
+                }
 
-            if ($estadoReal !== 'open') {
-                $this->warn("  → {$user->name}: WhatsApp no conectado ({$estadoSincronizado}), omitido");
+                if ($estadoReal !== 'open') {
+                    $this->warn("  → {$user->name}: WhatsApp no conectado ({$estadoSincronizado}), omitido");
 
-                continue;
+                    continue;
+                }
             }
 
             $turnos = Turno::delUsuario($user)
@@ -122,10 +136,19 @@ class EnviarRecordatorios extends Command
                 }
 
                 $mensaje = WhatsappTemplate::procesarPlantilla($plantilla, $cliente, $turno, $user);
-                $numero = $this->evolutionService->normalizarNumero($cliente->telefono);
+                $numero = $usaCloudApi
+                    ? $this->cloudApiService->normalizarNumero($cliente->telefono)
+                    : $this->evolutionService->normalizarNumero($cliente->telefono);
 
                 try {
-                    $messageId = $this->evolutionService->enviarMensaje($user, $numero, $mensaje);
+                    $messageId = $usaCloudApi
+                        ? $this->cloudApiService->enviarPlantilla(
+                            $numero,
+                            WhatsappTemplate::nombrePlantillaMeta('recordatorio'),
+                            'es_AR',
+                            WhatsappTemplate::parametrosCloudApi('recordatorio', $cliente, $turno, $user),
+                        )
+                        : $this->evolutionService->enviarMensaje($user, $numero, $mensaje);
 
                     // ── Guardar registro para tracking ──
                     WhatsappMensaje::create([
@@ -162,7 +185,9 @@ class EnviarRecordatorios extends Command
                     }
                 }
 
-                sleep(3);
+                if (! $usaCloudApi) {
+                    sleep(3);
+                }
             }
         }
 

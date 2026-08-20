@@ -56,7 +56,7 @@ class EnviarMensajeConfirmacionRequiereEnvioManualTest extends TestCase
             'origen' => 'app',
         ]);
 
-        (new EnviarMensajeConfirmacion($turno->id))->handle(app(EvolutionService::class));
+        (new EnviarMensajeConfirmacion($turno->id))->handle(app(EvolutionService::class), app(\App\Services\CloudApiService::class));
 
         Http::assertNothingSent();
 

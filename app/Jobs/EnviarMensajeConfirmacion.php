@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\Turno;
 use App\Models\WhatsappMensaje;
 use App\Models\WhatsappTemplate;
+use App\Services\CloudApiService;
 use App\Services\EvolutionService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -25,7 +26,7 @@ class EnviarMensajeConfirmacion implements ShouldQueue
         public int $turnoId,
     ) {}
 
-    public function handle(EvolutionService $evolutionService): void
+    public function handle(EvolutionService $evolutionService, CloudApiService $cloudApiService): void
     {
         $turno = Turno::with(['cliente', 'servicios', 'user', 'profesional'])->find($this->turnoId);
 
@@ -48,14 +49,6 @@ class EnviarMensajeConfirmacion implements ShouldQueue
             return;
         }
 
-        if (! $user->tieneWhatsappConectado()) {
-            return;
-        }
-
-        if ($user->whatsapp_requiere_envio_manual) {
-            return;
-        }
-
         // Evitar duplicar el mensaje si el job se reintenta (timeout de worker,
         // etc.) después de haber enviado y registrado exitosamente.
         $yaEnviado = WhatsappMensaje::where('turno_id', $turno->id)
@@ -66,24 +59,61 @@ class EnviarMensajeConfirmacion implements ShouldQueue
             return;
         }
 
-        // ── Verificar que la conexión esté estable en Evolution API ──
-        $estadoReal = $evolutionService->consultarEstado($user);
+        // La plantilla aprobada en Meta solo tiene versión es_AR — sin eso,
+        // una profesional en pt-BR con provider cloud_api cae a Evolution.
+        $usaCloudApi = $user->whatsapp_provider === 'cloud_api' && $user->locale !== 'pt-BR';
 
-        if ($estadoReal !== 'open') {
-            Log::info('EnviarMensajeConfirmacion: conexión no estable, reintentando', [
-                'turno_id' => $this->turnoId,
-                'estado' => $estadoReal,
-            ]);
-            $this->release(30);
+        if ($usaCloudApi) {
+            $mensaje = WhatsappTemplate::procesarPlantilla(
+                WhatsappTemplate::obtenerPlantilla($user, 'confirmacion'),
+                $cliente,
+                $turno,
+                $user,
+            );
+            $numero = $cloudApiService->normalizarNumero($cliente->telefono);
 
-            return;
+            $messageId = $cloudApiService->enviarPlantilla(
+                $numero,
+                WhatsappTemplate::nombrePlantillaMeta('confirmacion'),
+                'es_AR',
+                WhatsappTemplate::parametrosCloudApi('confirmacion', $cliente, $turno, $user),
+            );
+        } else {
+            if ($user->whatsapp_provider === 'cloud_api') {
+                Log::info('EnviarMensajeConfirmacion: provider cloud_api sin plantilla en el locale, usando Evolution', [
+                    'turno_id' => $this->turnoId,
+                    'user_id' => $user->id,
+                    'locale' => $user->locale,
+                ]);
+            }
+
+            if (! $user->tieneWhatsappConectado()) {
+                return;
+            }
+
+            if ($user->whatsapp_requiere_envio_manual) {
+                return;
+            }
+
+            // ── Verificar que la conexión esté estable en Evolution API ──
+            $estadoReal = $evolutionService->consultarEstado($user);
+
+            if ($estadoReal !== 'open') {
+                Log::info('EnviarMensajeConfirmacion: conexión no estable, reintentando', [
+                    'turno_id' => $this->turnoId,
+                    'estado' => $estadoReal,
+                ]);
+                $this->release(30);
+
+                return;
+            }
+
+            $plantilla = WhatsappTemplate::obtenerPlantilla($user, 'confirmacion');
+            $mensaje = WhatsappTemplate::procesarPlantilla($plantilla, $cliente, $turno, $user);
+            $numero = $evolutionService->normalizarNumero($cliente->telefono);
+
+            $messageId = $evolutionService->enviarMensaje($user, $numero, $mensaje);
         }
-
-        $plantilla = WhatsappTemplate::obtenerPlantilla($user, 'confirmacion');
-        $mensaje = WhatsappTemplate::procesarPlantilla($plantilla, $cliente, $turno, $user);
-        $numero = $evolutionService->normalizarNumero($cliente->telefono);
-
-        $messageId = $evolutionService->enviarMensaje($user, $numero, $mensaje);
 
         // ── Guardar registro para tracking ──
         try {

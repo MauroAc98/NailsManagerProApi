@@ -30,6 +30,7 @@ class User extends Authenticatable
         'debe_cambiar_password',
         'evolution_instance_name',
         'whatsapp_estado',
+        'whatsapp_provider',
         'locale',
     ];
 

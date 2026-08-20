@@ -66,6 +66,40 @@ class WhatsappTemplate extends Model
         };
     }
 
+    // ── Cloud API: nombre de plantilla Meta por tipo ──────────────
+    // Solo existen versiones en español (es_AR) aprobadas — los callers
+    // deben mantener el fallback a Evolution para locale pt-BR.
+    public static function nombrePlantillaMeta(string $tipo): string
+    {
+        return match ($tipo) {
+            'recordatorio' => 'recordatorio_turno',
+            'confirmacion' => 'confirmacion_turno',
+            default => '',
+        };
+    }
+
+    // ── Cloud API: parámetros ordenados {{1}}..{{5}} por tipo ─────
+    // Mismos valores/formato que procesarPlantilla() usa para Evolution
+    // (servicios unidos con " + ", fecha d/m, hora H:i) — la plantilla
+    // aprobada en Meta espera ese mismo shape, no el formato de ejemplo
+    // que se usó solo para la revisión del template.
+    public static function parametrosCloudApi(
+        string $tipo,
+        Cliente $cliente,
+        Turno $turno,
+        User $user,
+    ): array {
+        $servicios = $turno->servicios->pluck('nombre')->join(' + ');
+        $fecha = $turno->fecha_hora->format('d/m');
+        $hora = $turno->fecha_hora->format('H:i');
+
+        return match ($tipo) {
+            'recordatorio' => [$cliente->nombre, $user->name, $fecha, $hora, $servicios],
+            'confirmacion' => [$cliente->nombre, $user->name, $servicios, $fecha, $hora],
+            default => [],
+        };
+    }
+
     // ── Reemplazar placeholders ─────────────────────────────────
     public static function procesarPlantilla(
         string $plantilla,
