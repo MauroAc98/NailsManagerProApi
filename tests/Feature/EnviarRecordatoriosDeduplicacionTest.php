@@ -57,8 +57,6 @@ class EnviarRecordatoriosDeduplicacionTest extends TestCase
             'mensaje' => '',
             'tipo' => 'recordatorio',
             'status' => 'manual',
-            'intentos' => 1,
-            'ultimo_intento' => now(),
         ]);
 
         $this->artisan('recordatorios:enviar');

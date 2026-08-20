@@ -684,8 +684,6 @@ class TurnoController extends Controller
                     'tipo' => 'recordatorio',
                     'message_id' => null,
                     'status' => 'manual',
-                    'intentos' => 1,
-                    'ultimo_intento' => now(),
                 ]);
             } catch (\Illuminate\Database\QueryException $e) {
                 // exists()+create() no es atómico: si dos requests casi

@@ -18,13 +18,13 @@ class WhatsappMensaje extends Model
         'tipo',
         'message_id',
         'status',
-        'intentos',
-        'ultimo_intento',
+        'respuesta_api',
+        'status_code',
     ];
 
     protected $casts = [
-        'ultimo_intento' => 'datetime',
-        'intentos'       => 'integer',
+        'respuesta_api' => 'array',
+        'status_code'   => 'integer',
     ];
 
     // ── Relaciones ───────────────────────────────────────────────
@@ -36,21 +36,5 @@ class WhatsappMensaje extends Model
     public function turno(): BelongsTo
     {
         return $this->belongsTo(Turno::class);
-    }
-
-    // ── Scopes ───────────────────────────────────────────────────
-
-    // Mensajes cuyo envío falló de verdad (Evolution no devolvió message_id),
-    // hace más de 5 minutos, con menos de 3 intentos. No se incluye 'pending':
-    // ese estado significa que Evolution ya aceptó el mensaje y está esperando
-    // la confirmación de entrega al dispositivo del destinatario, no que el
-    // envío falló — reenviarlo ahí duplica el mensaje cuando el teléfono
-    // simplemente estaba apagado o sin señal.
-    public function scopePendientesParaReenviar($query)
-    {
-        return $query
-            ->where('status', 'failed')
-            ->where('ultimo_intento', '<=', now()->subMinutes(5))
-            ->where('intentos', '<', 3);
     }
 }

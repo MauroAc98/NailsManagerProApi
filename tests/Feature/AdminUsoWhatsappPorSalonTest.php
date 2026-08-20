@@ -27,7 +27,6 @@ class AdminUsoWhatsappPorSalonTest extends TestCase
             'mensaje' => 'contenido de prueba',
             'tipo' => 'confirmacion',
             'status' => 'pending',
-            'intentos' => 1,
         ]);
 
         $mensaje->forceFill(['created_at' => $createdAt])->save();
@@ -190,7 +189,6 @@ class AdminUsoWhatsappPorSalonTest extends TestCase
             'mensaje' => 'contenido de prueba',
             'tipo' => 'confirmacion',
             'status' => 'pending',
-            'intentos' => 1,
         ]);
 
         $this->assertSame('evolution', $mensaje->fresh()->provider);

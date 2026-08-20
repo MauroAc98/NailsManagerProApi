@@ -69,7 +69,6 @@ class CloudApiWebhookHandleTest extends TestCase
             'tipo' => 'confirmacion',
             'message_id' => $messageId,
             'status' => $status,
-            'intentos' => 1,
         ]);
     }
 

@@ -43,9 +43,8 @@ class CloudApiService
     /**
      * Envía un mensaje de plantilla aprobada por Meta.
      * $parametros va en el mismo orden que las variables {{1}}, {{2}}... del cuerpo.
-     * Devuelve el message_id si fue exitoso, null si falló.
      */
-    public function enviarPlantilla(string $numero, string $template, string $idioma, array $parametros): ?string
+    public function enviarPlantilla(string $numero, string $template, string $idioma, array $parametros): CloudApiEnvioResultado
     {
         $numero = $this->normalizarNumero($numero);
 
@@ -67,6 +66,8 @@ class CloudApiService
                 ],
             ]);
 
+        $respuesta = $response->json() ?? [];
+
         if (! $response->successful()) {
             Log::error('CloudApiService::enviarPlantilla falló', [
                 'numero' => $numero,
@@ -74,9 +75,9 @@ class CloudApiService
                 'body' => $response->body(),
             ]);
 
-            return null;
+            return new CloudApiEnvioResultado(null, $response->status(), $respuesta);
         }
 
-        return $response->json('messages.0.id');
+        return new CloudApiEnvioResultado($response->json('messages.0.id'), $response->status(), $respuesta);
     }
 }

@@ -58,7 +58,6 @@ class RecordatoriosPendientesEndpointTest extends TestCase
             'mensaje' => 'Hola',
             'tipo' => 'recordatorio',
             'status' => 'pending',
-            'intentos' => 1,
         ]);
 
         $response = $this->actingAs($user, 'sanctum')
@@ -154,7 +153,6 @@ class RecordatoriosPendientesEndpointTest extends TestCase
             'mensaje' => '',
             'tipo' => 'recordatorio',
             'status' => 'manual',
-            'intentos' => 1,
         ];
 
         WhatsappMensaje::create($datosMensaje);

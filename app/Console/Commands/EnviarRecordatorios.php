@@ -119,12 +119,13 @@ class EnviarRecordatorios extends Command
                 $numero = $this->cloudApiService->normalizarNumero($cliente->telefono);
 
                 try {
-                    $messageId = $this->cloudApiService->enviarPlantilla(
+                    $resultado = $this->cloudApiService->enviarPlantilla(
                         $numero,
                         WhatsappTemplate::nombrePlantillaMeta('recordatorio'),
                         'es_AR',
                         WhatsappTemplate::parametrosCloudApi('recordatorio', $cliente, $turno, $user),
                     );
+                    $messageId = $resultado->messageId;
 
                     // ── Guardar registro para tracking ──
                     WhatsappMensaje::create([
@@ -136,8 +137,8 @@ class EnviarRecordatorios extends Command
                         'tipo' => 'recordatorio',
                         'message_id' => $messageId,
                         'status' => $messageId ? 'pending' : 'failed',
-                        'intentos' => 1,
-                        'ultimo_intento' => now(),
+                        'respuesta_api' => $resultado->respuesta,
+                        'status_code' => $resultado->statusCode,
                     ]);
 
                     if ($messageId) {

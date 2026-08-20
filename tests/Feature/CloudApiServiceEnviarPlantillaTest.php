@@ -22,14 +22,16 @@ class CloudApiServiceEnviarPlantillaTest extends TestCase
             ], 200),
         ]);
 
-        $messageId = app(CloudApiService::class)->enviarPlantilla(
+        $resultado = app(CloudApiService::class)->enviarPlantilla(
             '5493765123456',
             'recordatorio_turno',
             'es_AR',
             ['Martina', 'Nails Studio', '20/08/2026', '15:30', 'manicura semipermanente', '3765000000']
         );
 
-        $this->assertSame('wamid.ABC123', $messageId);
+        $this->assertSame('wamid.ABC123', $resultado->messageId);
+        $this->assertSame(200, $resultado->statusCode);
+        $this->assertSame(['messages' => [['id' => 'wamid.ABC123']]], $resultado->respuesta);
 
         Http::assertSent(function ($request) {
             $body = $request->data();
@@ -53,13 +55,15 @@ class CloudApiServiceEnviarPlantillaTest extends TestCase
             'graph.facebook.com/*' => Http::response(['error' => ['message' => 'Invalid parameter']], 400),
         ]);
 
-        $messageId = app(CloudApiService::class)->enviarPlantilla(
+        $resultado = app(CloudApiService::class)->enviarPlantilla(
             '5493765123456',
             'recordatorio_turno',
             'es_AR',
             ['Martina', 'Nails Studio', '20/08/2026', '15:30', 'manicura semipermanente']
         );
 
-        $this->assertNull($messageId);
+        $this->assertNull($resultado->messageId);
+        $this->assertSame(400, $resultado->statusCode);
+        $this->assertSame(['error' => ['message' => 'Invalid parameter']], $resultado->respuesta);
     }
 }

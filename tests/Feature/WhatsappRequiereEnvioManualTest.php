@@ -53,7 +53,6 @@ class WhatsappRequiereEnvioManualTest extends TestCase
                 'mensaje' => 'test',
                 'tipo' => 'confirmacion',
                 'status' => $i < 3 ? 'failed' : 'delivered',
-                'intentos' => 1,
                 'created_at' => now()->subDays(1),
                 'updated_at' => now()->subDays(1),
             ]);
@@ -76,7 +75,6 @@ class WhatsappRequiereEnvioManualTest extends TestCase
             'mensaje' => 'test',
             'tipo' => 'confirmacion',
             'status' => 'failed',
-            'intentos' => 1,
             'created_at' => now()->subDays(1),
             'updated_at' => now()->subDays(1),
         ]);
@@ -99,7 +97,6 @@ class WhatsappRequiereEnvioManualTest extends TestCase
                 'mensaje' => '',
                 'tipo' => 'recordatorio',
                 'status' => 'manual',
-                'intentos' => 1,
             ]);
         }
 
@@ -127,7 +124,6 @@ class WhatsappRequiereEnvioManualTest extends TestCase
                 'mensaje' => 'test',
                 'tipo' => 'confirmacion',
                 'status' => $i === 0 ? 'failed' : 'delivered',
-                'intentos' => 1,
             ]);
         }
 
@@ -139,7 +135,6 @@ class WhatsappRequiereEnvioManualTest extends TestCase
                 'mensaje' => '',
                 'tipo' => 'recordatorio',
                 'status' => 'manual',
-                'intentos' => 1,
             ]);
         }
 
@@ -164,7 +159,6 @@ class WhatsappRequiereEnvioManualTest extends TestCase
                 'mensaje' => 'test',
                 'tipo' => 'confirmacion',
                 'status' => 'failed',
-                'intentos' => 1,
                 'created_at' => now()->subDays(1),
                 'updated_at' => now()->subDays(1),
             ]);

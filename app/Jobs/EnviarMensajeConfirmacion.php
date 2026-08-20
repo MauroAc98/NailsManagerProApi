@@ -80,12 +80,13 @@ class EnviarMensajeConfirmacion implements ShouldQueue
         $mensaje = WhatsappTemplate::mensajeLegible('confirmacion', $cliente, $turno, $user);
         $numero = $cloudApiService->normalizarNumero($cliente->telefono);
 
-        $messageId = $cloudApiService->enviarPlantilla(
+        $resultado = $cloudApiService->enviarPlantilla(
             $numero,
             WhatsappTemplate::nombrePlantillaMeta('confirmacion'),
             'es_AR',
             WhatsappTemplate::parametrosCloudApi('confirmacion', $cliente, $turno, $user),
         );
+        $messageId = $resultado->messageId;
 
         // ── Guardar registro para tracking ──
         try {
@@ -98,8 +99,8 @@ class EnviarMensajeConfirmacion implements ShouldQueue
                 'tipo' => 'confirmacion',
                 'message_id' => $messageId,
                 'status' => $messageId ? 'pending' : 'failed',
-                'intentos' => 1,
-                'ultimo_intento' => now(),
+                'respuesta_api' => $resultado->respuesta,
+                'status_code' => $resultado->statusCode,
             ]);
         } catch (\Throwable $e) {
             if ($messageId) {
