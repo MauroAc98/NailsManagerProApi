@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\PublicController;
 use App\Http\Controllers\Api\WhatsappController;
 use App\Http\Controllers\Api\WhatsappTemplateController;
 use App\Http\Controllers\Api\EvolutionWebhookController;
+use App\Http\Controllers\Api\CloudApiWebhookController;
 use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\StatsController;
 use App\Http\Controllers\Api\GastoController;
@@ -154,3 +155,12 @@ Route::post('webhooks/mercadopago', [ReservaWebController::class, 'webhookMercad
 // el docker-compose de Evolution) puede pegarle a esta ruta.
 // ─────────────────────────────────────────────
 Route::post('webhooks/evolution/{secret}', [EvolutionWebhookController::class, 'handle']);
+
+// ─────────────────────────────────────────────
+// Webhook WhatsApp Cloud API — sin secreto en la URL: Meta firma cada
+// payload (header X-Hub-Signature-256, HMAC-SHA256 con el App Secret), así
+// que el control de acceso es la firma, no la URL. El GET es el handshake
+// de verificación que exige Meta al configurar la URL en su dashboard.
+// ─────────────────────────────────────────────
+Route::get('webhooks/whatsapp-cloud', [CloudApiWebhookController::class, 'verify']);
+Route::post('webhooks/whatsapp-cloud', [CloudApiWebhookController::class, 'handle']);
