@@ -24,6 +24,7 @@ class User extends Authenticatable
         'logo_path',
         'is_exempt',
         'recordatorio_automatico',
+        'confirmacion_automatica',
         'hora_recordatorio',
         'sena_monto',
         'fcm_token',
@@ -45,6 +46,7 @@ class User extends Authenticatable
 
     protected $attributes = [
         'recordatorio_automatico' => false,
+        'confirmacion_automatica' => true,
         'hora_recordatorio'       => '20:00',
     ];
 
@@ -55,6 +57,7 @@ class User extends Authenticatable
             'password'                => 'hashed',
             'is_exempt'               => 'boolean',
             'recordatorio_automatico' => 'boolean',
+            'confirmacion_automatica' => 'boolean',
             'sena_monto'              => 'decimal:2',
             'debe_cambiar_password'   => 'boolean',
         ];

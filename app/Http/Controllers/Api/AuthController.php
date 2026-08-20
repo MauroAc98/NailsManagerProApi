@@ -191,6 +191,7 @@ class AuthController extends Controller
             'telefono'                => 'sometimes|nullable|string|max:30',
             'direccion'               => 'sometimes|nullable|string|max:255',
             'recordatorio_automatico' => 'sometimes|boolean',
+            'confirmacion_automatica' => 'sometimes|boolean',
             'hora_recordatorio'       => 'sometimes|string|in:18:00,19:00,20:00,21:00,22:00',
             'sena_monto'              => 'sometimes|nullable|numeric|min:0',
             'fcm_token'               => 'sometimes|nullable|string',
