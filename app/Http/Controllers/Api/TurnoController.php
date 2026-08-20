@@ -649,23 +649,67 @@ class TurnoController extends Controller
 
     // ─────────────────────────────────────────────
     // GET /api/turnos/recordatorios-pendientes
-    // Turnos confirmados de mañana, con cliente con teléfono, que todavía
-    // no tienen un recordatorio gestionado (ni automático ni manual) — ver
-    // marcarRecordatorioManual() y EnviarRecordatorios, que son las dos
-    // formas en que un WhatsappMensaje tipo='recordatorio' puede existir.
+    // Unión de dos casos — ambos significan "la profesional tiene que
+    // hacer algo a mano porque el envío automático no cubrió este turno":
+    //   1. Cuenta con whatsapp_requiere_envio_manual: turnos confirmados de
+    //      mañana que todavía no tienen ningún recordatorio gestionado (ni
+    //      automático ni manual) — ver marcarRecordatorioManual() y
+    //      EnviarRecordatorios, que son las dos formas en que puede existir
+    //      un WhatsappMensaje tipo='recordatorio'. Gateado acá server-side
+    //      (antes lo gateaba el frontend no llamando al endpoint) porque
+    //      ahora el fetch ya no depende de esa flag — ver caso 2.
+    //   2. Cualquier cuenta (automática o manual): turnos todavía vigentes
+    //      con un envío automático de confirmación o recordatorio que Meta
+    //      reportó como 'failed'. Antes esto quedaba en silencio en
+    //      whatsapp_mensajes y nadie se enteraba — ver
+    //      CloudApiWebhookController, que es quien escribe status='failed'.
     // ─────────────────────────────────────────────
     public function recordatoriosPendientes(Request $request): JsonResponse
     {
         $user = $request->user();
         $manana = Carbon::tomorrow()->toDateString();
+        $ahora = Carbon::now();
 
         $turnos = Turno::delUsuario($user)
             ->confirmados()
-            ->delaFecha($manana)
-            ->whereDoesntHave('whatsappMensajes', fn ($q) => $q->where('tipo', 'recordatorio'))
-            ->with(['cliente', 'servicios'])
+            ->where(function ($query) use ($user, $manana, $ahora) {
+                if ($user->whatsapp_requiere_envio_manual) {
+                    $query->where(function ($q) use ($manana) {
+                        $q->delaFecha($manana)
+                            ->whereDoesntHave('whatsappMensajes', fn ($qq) => $qq->where('tipo', 'recordatorio'));
+                    });
+                }
+
+                $query->orWhere(function ($q) use ($ahora) {
+                    $q->where('fecha_hora', '>=', $ahora)
+                        ->whereHas(
+                            'whatsappMensajes',
+                            fn ($qq) => $qq->whereIn('tipo', ['confirmacion', 'recordatorio'])->where('status', 'failed')
+                        );
+                });
+            })
+            ->with([
+                'cliente',
+                'servicios',
+                // Hay a lo sumo un mensaje por tipo por turno (unique
+                // constraint turno_id+tipo, migración 2026_07_02_123237),
+                // así que no hace falta "latest" para desambiguar.
+                'whatsappMensajes' => fn ($q) => $q->whereIn('tipo', ['confirmacion', 'recordatorio'])
+                    ->select(['id', 'turno_id', 'tipo', 'status']),
+            ])
             ->orderBy('fecha_hora')
             ->get()
+            ->map(function (Turno $turno) {
+                // whatsapp_mensajes trae respuesta_api/message_id/numero —
+                // datos internos que no deben llegar al frontend, así que
+                // solo exponemos el status derivado por tipo (mismo patrón
+                // que confirmacion_whatsapp_status en index()/show()).
+                $turno->confirmacion_whatsapp_status = optional($turno->whatsappMensajes->firstWhere('tipo', 'confirmacion'))->status;
+                $turno->recordatorio_whatsapp_status = optional($turno->whatsappMensajes->firstWhere('tipo', 'recordatorio'))->status;
+                $turno->makeHidden('whatsappMensajes');
+
+                return $turno;
+            })
             ->filter(fn (Turno $t) => ! empty($t->cliente?->telefono))
             ->values();
 
@@ -708,6 +752,44 @@ class TurnoController extends Controller
                 // 2026_07_02_123237. Ya quedó creado por la otra request,
                 // que es exactamente el resultado que queríamos, así que se
                 // trata como éxito en vez de 500.
+                if (! str_contains(strtolower($e->getMessage()), 'unique')) {
+                    throw $e;
+                }
+            }
+        }
+
+        return response()->json(['ok' => true]);
+    }
+
+    // ─────────────────────────────────────────────
+    // POST /api/turnos/{id}/confirmacion-manual
+    // Igual que marcarRecordatorioManual(), pero para el mensaje de
+    // confirmación: la profesional lo mandó a mano por wa.me después de que
+    // el envío automático falló (ver caso 2 de recordatoriosPendientes()).
+    // Idempotente por la misma razón (doble tap del botón no duplica).
+    // ─────────────────────────────────────────────
+    public function marcarConfirmacionManual(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $turno = Turno::delUsuario($user)->with('cliente')->findOrFail($id);
+
+        $yaExiste = WhatsappMensaje::where('turno_id', $turno->id)
+            ->where('tipo', 'confirmacion')
+            ->exists();
+
+        if (! $yaExiste) {
+            try {
+                WhatsappMensaje::create([
+                    'user_id' => $user->id,
+                    'turno_id' => $turno->id,
+                    'numero' => $turno->cliente?->telefono ?? '',
+                    'mensaje' => '', // enviado manualmente por wa.me, no tenemos el texto final acá
+                    'tipo' => 'confirmacion',
+                    'message_id' => null,
+                    'status' => 'manual',
+                ]);
+            } catch (\Illuminate\Database\QueryException $e) {
+                // Misma condición de carrera que marcarRecordatorioManual().
                 if (! str_contains(strtolower($e->getMessage()), 'unique')) {
                     throw $e;
                 }

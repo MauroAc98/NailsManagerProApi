@@ -107,6 +107,7 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
         Route::get('/{id}',                [TurnoController::class, 'show']);
         Route::post('/',                   [TurnoController::class, 'store']);
         Route::post('{id}/recordatorio-manual', [TurnoController::class, 'marcarRecordatorioManual']);
+        Route::post('{id}/confirmacion-manual', [TurnoController::class, 'marcarConfirmacionManual']);
         Route::put('/{id}',                [TurnoController::class, 'update']);
         Route::patch('{id}/completar',     [TurnoController::class, 'completar']);
         Route::patch('{id}/precios',       [TurnoController::class, 'actualizarPrecios']);
