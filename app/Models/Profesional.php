@@ -13,6 +13,7 @@ class Profesional extends Model
     protected $fillable = [
         'user_id',
         'nombre',
+        'apellido',
         'color',
         'activo',
         'fondo_historia_path',
@@ -20,7 +21,7 @@ class Profesional extends Model
         'historia_precios_nota',
     ];
 
-    protected $appends = ['fondo_historia_url'];
+    protected $appends = ['fondo_historia_url', 'nombre_completo'];
     protected $hidden  = ['fondo_historia_path'];
 
     protected function casts(): array
@@ -44,6 +45,18 @@ class Profesional extends Model
             get: fn () => $this->fondo_historia_path
                 ? Storage::disk('public')->url($this->fondo_historia_path)
                 : null,
+        );
+    }
+
+    // Nombre completo para vistas de gestión (lista de profesionales, etc.)
+    // — 'nombre' solo (sin apellido) sigue siendo el dato que usan las
+    // plantillas de WhatsApp automáticas (WhatsappTemplate::parametrosCloudApi,
+    // {{7}}) y los badges compactos de la app, a propósito: ahí interesa el
+    // nombre de pila, no el nombre completo.
+    protected function nombreCompleto(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => trim("{$this->nombre} {$this->apellido}"),
         );
     }
 

@@ -45,8 +45,10 @@ class AuthController extends Controller
         $request->merge(['email' => strtolower((string) $request->input('email'))]);
 
         $data = $request->validate([
-            'name'  => 'required|string|max:255',
-            'email' => 'required|email|unique:users,email',
+            'name'                  => 'required|string|max:255',
+            'email'                 => 'required|email|unique:users,email',
+            'profesional_nombre'    => 'required|string|max:255',
+            'profesional_apellido'  => 'required|string|max:255',
         ]);
 
         $passwordProvisoria = Str::password(10, symbols: false);
@@ -64,10 +66,16 @@ class AuthController extends Controller
             'status'   => 'ACTIVO',
         ]);
 
+        // Nombre y apellido de la dueña, distinto de 'name' (nombre del
+        // estudio) — 'nombre' (solo, sin apellido) es el dato que
+        // WhatsappTemplate usa para {{7}} en los mensajes automáticos
+        // (turno.profesional.nombre), así que no puede seguir siendo una
+        // copia del nombre del estudio.
         \App\Models\Profesional::create([
-            'user_id' => $user->id,
-            'nombre'  => $user->name,
-            'activo'  => true,
+            'user_id'  => $user->id,
+            'nombre'   => $data['profesional_nombre'],
+            'apellido' => $data['profesional_apellido'],
+            'activo'   => true,
         ]);
 
         Mail::to($user->email)->send(
@@ -201,6 +209,31 @@ class AuthController extends Controller
 
         if (isset($data['password'])) {
             $data['password'] = bcrypt($data['password']);
+        }
+
+        // Los envíos automáticos de WhatsApp (confirmación/recordatorio) ya
+        // incluyen la dirección como parámetro fijo de la plantilla Meta —
+        // sin dirección cargada Meta rechaza el envío completo. Evita que
+        // alguien active el toggle sin haber cargado el dato antes.
+        //
+        // Solo dispara si la request TOCA alguno de los dos toggles — no
+        // alcanza con mirar el estado final, porque confirmacion_automatica
+        // es true por default en cuentas nuevas (ver User::$attributes) y
+        // eso bloquearía cualquier edición de perfil sin relación (cambiar
+        // locale, contraseña, etc.) en una cuenta que todavía no cargó
+        // dirección.
+        $tocaAutomaticos = array_key_exists('confirmacion_automatica', $data) || array_key_exists('recordatorio_automatico', $data);
+
+        if ($tocaAutomaticos) {
+            $confirmacionFinal = $data['confirmacion_automatica'] ?? $user->confirmacion_automatica;
+            $recordatorioFinal = $data['recordatorio_automatico'] ?? $user->recordatorio_automatico;
+            $direccionFinal = array_key_exists('direccion', $data) ? $data['direccion'] : $user->direccion;
+
+            if (($confirmacionFinal || $recordatorioFinal) && blank($direccionFinal)) {
+                throw ValidationException::withMessages([
+                    'direccion' => ['Cargá tu dirección antes de activar los envíos automáticos de WhatsApp.'],
+                ]);
+            }
         }
 
         $user->update($data);

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Cliente;
+use App\Models\Profesional;
 use App\Models\Servicio;
 use App\Models\Turno;
 use App\Models\User;
@@ -14,7 +15,7 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function crearTurnoDeMuestra(User $user): Turno
+    private function crearTurnoDeMuestra(User $user, string $nombreProfesional = 'Fernanda'): Turno
     {
         $cliente = Cliente::create([
             'user_id' => $user->id,
@@ -31,9 +32,16 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
             'activo' => true,
         ]);
 
+        $profesional = Profesional::create([
+            'user_id' => $user->id,
+            'nombre' => $nombreProfesional,
+            'activo' => true,
+        ]);
+
         $turno = Turno::create([
             'user_id' => $user->id,
             'cliente_id' => $cliente->id,
+            'profesional_id' => $profesional->id,
             'fecha_hora' => \Illuminate\Support\Carbon::parse('2026-08-20 15:30:00'),
             'duracion_total_minutos' => 60,
             'estado' => 'confirmado',
@@ -42,12 +50,12 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
 
         $turno->servicios()->attach($servicio->id);
 
-        return $turno->load(['cliente', 'servicios']);
+        return $turno->load(['cliente', 'servicios', 'profesional']);
     }
 
     public function test_arma_los_parametros_en_orden_para_recordatorio(): void
     {
-        $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'telefono' => '3765000000']);
+        $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'direccion' => 'Av. Siempre Viva 742', 'telefono' => '3765000000']);
         $turno = $this->crearTurnoDeMuestra($user);
 
         $parametros = WhatsappTemplate::parametrosCloudApi('recordatorio', $turno->cliente, $turno, $user);
@@ -58,13 +66,15 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
             '20/08',
             '15:30',
             'Manicura semipermanente',
+            'Av. Siempre Viva 742',
+            'Fernanda',
             '3765000000',
         ], $parametros);
     }
 
     public function test_arma_los_parametros_en_orden_para_confirmacion(): void
     {
-        $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'telefono' => '3765000000']);
+        $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'direccion' => 'Av. Siempre Viva 742', 'telefono' => '3765000000']);
         $turno = $this->crearTurnoDeMuestra($user);
 
         $parametros = WhatsappTemplate::parametrosCloudApi('confirmacion', $turno->cliente, $turno, $user);
@@ -78,6 +88,8 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
             '20/08',
             '15:30',
             'Manicura semipermanente',
+            'Av. Siempre Viva 742',
+            'Fernanda',
             '3765000000',
         ], $parametros);
     }
@@ -88,13 +100,46 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
         // plantilla llega vacío. Es intencional — el envío falla y queda
         // registrado como status=failed por el manejo de error que ya
         // existe en CloudApiService::enviarPlantilla().
-        $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'telefono' => null]);
+        $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'direccion' => 'Av. Siempre Viva 742', 'telefono' => null]);
         $turno = $this->crearTurnoDeMuestra($user);
 
         $parametros = WhatsappTemplate::parametrosCloudApi('confirmacion', $turno->cliente, $turno, $user);
 
-        $this->assertCount(6, $parametros);
+        $this->assertCount(8, $parametros);
+        $this->assertSame('', $parametros[7]);
+    }
+
+    public function test_direccion_vacia_devuelve_string_vacio_en_su_posicion(): void
+    {
+        // Mismo criterio sin-fallback que telefono. En la práctica está
+        // cubierto por el guard de AuthController::updatePerfil() que
+        // impide activar los envíos automáticos sin dirección — pero el
+        // helper en sí no debe asumir que siempre va a llegar cargada.
+        $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'direccion' => null, 'telefono' => '3765000000']);
+        $turno = $this->crearTurnoDeMuestra($user);
+
+        $parametros = WhatsappTemplate::parametrosCloudApi('confirmacion', $turno->cliente, $turno, $user);
+
+        $this->assertCount(8, $parametros);
         $this->assertSame('', $parametros[5]);
+    }
+
+    public function test_profesional_sin_relacion_cargada_devuelve_string_vacio_en_su_posicion(): void
+    {
+        // Mismo criterio sin-fallback. En la práctica está cubierto por el
+        // backfill de profesional_id (ver
+        // 2026_07_17_100004_backfill_default_profesionales) y por
+        // Profesional::resolverParaUsuario() — pero el helper en sí no debe
+        // asumir que turno->profesional siempre va a resolver a algo.
+        $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'direccion' => 'Av. Siempre Viva 742', 'telefono' => '3765000000']);
+        $turno = $this->crearTurnoDeMuestra($user);
+        $turno->profesional_id = null;
+        $turno->setRelation('profesional', null);
+
+        $parametros = WhatsappTemplate::parametrosCloudApi('confirmacion', $turno->cliente, $turno, $user);
+
+        $this->assertCount(8, $parametros);
+        $this->assertSame('', $parametros[6]);
     }
 
     public function test_nombre_de_plantilla_meta_segun_tipo(): void
@@ -105,7 +150,7 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
 
     public function test_mensaje_legible_incluye_los_valores_reales(): void
     {
-        $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'telefono' => '3765000000']);
+        $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'direccion' => 'Av. Siempre Viva 742', 'telefono' => '3765000000']);
         $turno = $this->crearTurnoDeMuestra($user);
 
         $resultado = WhatsappTemplate::mensajeLegible('confirmacion', $turno->cliente, $turno, $user);
@@ -115,6 +160,9 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
         $this->assertStringContainsString('20/08', $resultado);
         $this->assertStringContainsString('15:30', $resultado);
         $this->assertStringContainsString('Manicura semipermanente', $resultado);
+        $this->assertStringContainsString('Av. Siempre Viva 742', $resultado);
         $this->assertStringContainsString('3765000000', $resultado);
+        $this->assertStringContainsString('hablaste con Fernanda previamente', $resultado);
+        $this->assertStringContainsString('mensaje automático, no hace falta responder', $resultado);
     }
 }
