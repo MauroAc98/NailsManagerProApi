@@ -142,6 +142,19 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
         $this->assertSame('', $parametros[6]);
     }
 
+    public function test_profesional_con_nombre_compuesto_usa_solo_el_primero(): void
+    {
+        // Pedido explícito: "Evelin Soledad" en la plantilla tiene que
+        // sonar cercano ("hablaste con Evelin"), no formal/impersonal
+        // ("hablaste con Evelin Soledad").
+        $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'direccion' => 'Av. Siempre Viva 742', 'telefono' => '3765000000']);
+        $turno = $this->crearTurnoDeMuestra($user, 'Evelin Soledad');
+
+        $parametros = WhatsappTemplate::parametrosCloudApi('confirmacion', $turno->cliente, $turno, $user);
+
+        $this->assertSame('Evelin', $parametros[6]);
+    }
+
     public function test_nombre_de_plantilla_meta_segun_tipo(): void
     {
         $this->assertSame('recordatorio_turno', WhatsappTemplate::nombrePlantillaMeta('recordatorio'));

@@ -53,7 +53,10 @@ final class WhatsappTemplate
         $fecha = $turno->fecha_hora->format('d/m');
         $hora = $turno->fecha_hora->format('H:i');
         $direccion = $user->direccion ?? '';
-        $profesional = $turno->profesional->nombre ?? '';
+        // Primer nombre solamente (no "María José" completo) — el pedido
+        // original era sonar cercano en el mensaje, un nombre compuesto
+        // completo ahí se siente más formal/impersonal que cálido.
+        $profesional = trim(explode(' ', trim($turno->profesional->nombre ?? ''))[0]);
         $telefono = $user->telefono ?? '';
 
         return match ($tipo) {
