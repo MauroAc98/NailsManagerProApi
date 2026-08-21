@@ -52,6 +52,14 @@ class EnviarRecordatorios extends Command
         $totalFallidos = 0;
 
         foreach ($usuarios as $user) {
+            // No seguir mandando mensajes pagos (Cloud API cobra por envío)
+            // a cuentas con la suscripción vencida y sin pagar.
+            if ($user->suscripcionVencida()) {
+                $this->info("  → {$user->name}: suscripción vencida, recordatorios automáticos omitidos");
+
+                continue;
+            }
+
             if ($user->whatsapp_requiere_envio_manual) {
                 $this->info("  → {$user->name}: requiere envío manual, recordatorios automáticos omitidos");
 

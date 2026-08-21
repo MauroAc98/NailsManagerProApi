@@ -58,6 +58,12 @@ class EnviarMensajeConfirmacion implements ShouldQueue
             return;
         }
 
+        // No seguir mandando mensajes pagos (Cloud API cobra por envío) a
+        // cuentas con la suscripción vencida y sin pagar.
+        if ($user->suscripcionVencida()) {
+            return;
+        }
+
         // Evitar duplicar el mensaje si el job se reintenta (timeout de worker,
         // etc.) después de haber enviado y registrado exitosamente.
         $yaEnviado = WhatsappMensaje::where('turno_id', $turno->id)

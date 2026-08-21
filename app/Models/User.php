@@ -105,6 +105,22 @@ class User extends Authenticatable
         return $this->hasOne(Subscription::class)->latest();
     }
 
+    // Mismo criterio que CheckSubscription (middleware) — cuentas exentas
+    // nunca están vencidas; sin suscripción o con ends_at pasado, sí. Lo
+    // usan además los envíos automáticos de WhatsApp (EnviarMensajeConfirmacion,
+    // EnviarRecordatorios): cada mensaje de Cloud API tiene costo real, no
+    // hay que seguir mandándolos si la cuenta no pagó.
+    public function suscripcionVencida(): bool
+    {
+        if ($this->is_exempt) {
+            return false;
+        }
+
+        $subscription = $this->subscription;
+
+        return ! $subscription || $subscription->ends_at < now();
+    }
+
     public function servicios()
     {
         return $this->hasMany(Servicio::class);
