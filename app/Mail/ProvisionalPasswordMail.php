@@ -23,7 +23,7 @@ class ProvisionalPasswordMail extends Mailable
 
     public function build()
     {
-        return $this->subject('Tu cuenta en NailsManagerPro')
+        return $this->subject('Tu cuenta en Turnetto')
             ->view('emails.provisional-password')
             ->with([
                 'name'     => $this->name,

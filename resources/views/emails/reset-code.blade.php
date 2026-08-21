@@ -5,7 +5,7 @@
 </head>
 <body style="font-family: Arial, sans-serif; background-color: #F7F7F9; padding: 24px;">
     <div style="max-width: 400px; margin: 0 auto; background: white; border-radius: 16px; padding: 32px; text-align: center;">
-        <h2 style="color: #333; margin-bottom: 8px;">💅 NailsManagerPro</h2>
+        <h2 style="color: #333; margin-bottom: 8px;">📅 Turnetto</h2>
         <p style="color: #666; font-size: 14px; margin-bottom: 24px;">
             Usá este código para restablecer tu contraseña. Expira en 30 minutos.
         </p>
