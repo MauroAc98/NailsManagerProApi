@@ -673,6 +673,43 @@ class TurnoController extends Controller
     }
 
     // ─────────────────────────────────────────────
+    // GET /api/turnos/notificaciones
+    // Panel de la campanita en Agenda: eventos reales de WhatsApp automático
+    // de HOY (confirmaciones enviadas al agendar, recordatorios enviados a
+    // la hora configurada para los turnos de mañana) más cuántos turnos
+    // confirmados tiene mañana. Sin tracking de leído/no-leído — el badge
+    // en el frontend es simplemente la cantidad de mensajes de hoy.
+    // ─────────────────────────────────────────────
+    public function notificaciones(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $manana = Carbon::tomorrow()->toDateString();
+
+        $mensajes = WhatsappMensaje::where('user_id', $user->id)
+            ->whereDate('created_at', now()->toDateString())
+            ->with('turno.cliente')
+            ->orderByDesc('created_at')
+            ->limit(50)
+            ->get()
+            ->map(fn (WhatsappMensaje $m) => [
+                'id' => $m->id,
+                'tipo' => $m->tipo,
+                'status' => $m->status,
+                'cliente_nombre' => $m->turno?->cliente?->nombre,
+                'cliente_apellido' => $m->turno?->cliente?->apellido,
+                'created_at' => $m->created_at,
+            ])
+            ->values();
+
+        $turnosManana = Turno::delUsuario($user)->confirmados()->delaFecha($manana)->count();
+
+        return response()->json([
+            'turnos_manana' => $turnosManana,
+            'mensajes' => $mensajes,
+        ]);
+    }
+
+    // ─────────────────────────────────────────────
     // POST /api/turnos/{id}/recordatorio-manual
     // La profesional mandó el recordatorio a mano por wa.me (ver botón en
     // /agenda/recordatorios) — se registra igual que un envío automático
