@@ -742,6 +742,11 @@ class TurnoController extends Controller
                 'cliente_nombre' => $m->turno?->cliente?->nombre,
                 'cliente_apellido' => $m->turno?->cliente?->apellido,
                 'created_at' => $m->created_at,
+                // Texto real armado por WhatsappTemplate::mensajeLegible() al
+                // momento del envío — se guarda tal cual en whatsapp_mensajes,
+                // no hace falta reconstruirlo. Útil para diagnosticar un
+                // fallo (ver exactamente qué se intentó mandar).
+                'mensaje' => $m->mensaje,
             ])
             ->values();
 

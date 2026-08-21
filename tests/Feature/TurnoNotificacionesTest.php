@@ -42,7 +42,7 @@ class TurnoNotificacionesTest extends TestCase
             'turno_id' => $turno->id,
             'numero' => '3765123456',
             'provider' => 'cloud_api',
-            'mensaje' => 'x',
+            'mensaje' => 'Hola Martina, tu turno...',
             'tipo' => 'confirmacion',
             'message_id' => 'wamid.1',
             'status' => 'delivered',
@@ -57,6 +57,7 @@ class TurnoNotificacionesTest extends TestCase
         $response->assertJsonPath('mensajes.0.status', 'delivered');
         $response->assertJsonPath('mensajes.0.cliente_nombre', 'Martina');
         $response->assertJsonPath('mensajes.0.cliente_apellido', 'Diaz');
+        $response->assertJsonPath('mensajes.0.mensaje', 'Hola Martina, tu turno...');
     }
 
     public function test_no_vistos_cuenta_todo_cuando_nunca_se_abrio_el_panel(): void
