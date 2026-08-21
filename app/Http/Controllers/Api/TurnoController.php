@@ -673,24 +673,68 @@ class TurnoController extends Controller
     }
 
     // ─────────────────────────────────────────────
+    // GET /api/turnos/manana
+    // Vista de REFERENCIA (sin acciones) de TODOS los turnos confirmados de
+    // mañana, con cliente/servicios y el estado del recordatorio de cada
+    // uno (null = todavía no se mandó). Complementa a
+    // recordatoriosPendientes(), que es una lista de TAREAS (solo los que
+    // faltan mandar) — esta es la lista completa, para "a quién atiendo
+    // mañana" sin importar si el recordatorio ya salió o no.
+    // ─────────────────────────────────────────────
+    public function turnosManana(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $manana = Carbon::tomorrow()->toDateString();
+
+        $turnos = Turno::delUsuario($user)
+            ->confirmados()
+            ->delaFecha($manana)
+            ->with([
+                'cliente',
+                'servicios',
+                'whatsappMensajes' => fn ($q) => $q->where('tipo', 'recordatorio')->latest()->limit(1)->select(['id', 'turno_id', 'status']),
+            ])
+            ->orderBy('fecha_hora')
+            ->get()
+            ->map(function (Turno $t) {
+                $t->recordatorio_status = optional($t->whatsappMensajes->first())->status;
+                $t->makeHidden('whatsappMensajes');
+
+                return $t;
+            });
+
+        return response()->json($turnos);
+    }
+
+    // ─────────────────────────────────────────────
     // GET /api/turnos/notificaciones
     // Panel de la campanita en Agenda: eventos reales de WhatsApp automático
     // de HOY (confirmaciones enviadas al agendar, recordatorios enviados a
     // la hora configurada para los turnos de mañana) más cuántos turnos
-    // confirmados tiene mañana. Sin tracking de leído/no-leído — el badge
-    // en el frontend es simplemente la cantidad de mensajes de hoy.
+    // confirmados tiene mañana. `no_vistos` (para el badge) cuenta los
+    // mensajes posteriores a users.notificaciones_vistas_at — ver
+    // marcarNotificacionesVistas(). La lista `mensajes` siempre trae TODOS
+    // los de hoy, vistos o no; el frontend no distingue visualmente entre
+    // ellos, solo el número del badge cambia.
     // ─────────────────────────────────────────────
     public function notificaciones(Request $request): JsonResponse
     {
         $user = $request->user();
         $manana = Carbon::tomorrow()->toDateString();
+        $vistasDesde = $user->notificaciones_vistas_at;
 
         $mensajes = WhatsappMensaje::where('user_id', $user->id)
             ->whereDate('created_at', now()->toDateString())
             ->with('turno.cliente')
             ->orderByDesc('created_at')
             ->limit(50)
-            ->get()
+            ->get();
+
+        $noVistos = $vistasDesde
+            ? $mensajes->where('created_at', '>', $vistasDesde)->count()
+            : $mensajes->count();
+
+        $mensajes = $mensajes
             ->map(fn (WhatsappMensaje $m) => [
                 'id' => $m->id,
                 'tipo' => $m->tipo,
@@ -705,8 +749,23 @@ class TurnoController extends Controller
 
         return response()->json([
             'turnos_manana' => $turnosManana,
+            'no_vistos' => $noVistos,
             'mensajes' => $mensajes,
         ]);
+    }
+
+    // ─────────────────────────────────────────────
+    // POST /api/turnos/notificaciones/marcar-vistas
+    // Se llama al abrir el panel de la campanita — todo lo que sea de HOY
+    // en ese momento queda "visto"; un mensaje nuevo que llegue después
+    // vuelve a sumar al badge.
+    // ─────────────────────────────────────────────
+    public function marcarNotificacionesVistas(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $user->update(['notificaciones_vistas_at' => now()]);
+
+        return response()->json(['ok' => true]);
     }
 
     // ─────────────────────────────────────────────

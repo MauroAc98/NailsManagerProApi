@@ -103,7 +103,9 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
         Route::get('disponibilidad',       [TurnoController::class, 'disponibilidad']);
         Route::get('pendientes-de-cobro',  [TurnoController::class, 'pendientesDeCobro']);
         Route::get('recordatorios-pendientes', [TurnoController::class, 'recordatoriosPendientes']);
+        Route::get('manana',               [TurnoController::class, 'turnosManana']);
         Route::get('notificaciones',       [TurnoController::class, 'notificaciones']);
+        Route::post('notificaciones/marcar-vistas', [TurnoController::class, 'marcarNotificacionesVistas']);
         Route::get('/',                    [TurnoController::class, 'index']);
         Route::get('/{id}',                [TurnoController::class, 'show']);
         Route::post('/',                   [TurnoController::class, 'store']);

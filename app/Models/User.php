@@ -28,6 +28,7 @@ class User extends Authenticatable
         'hora_recordatorio',
         'sena_monto',
         'fcm_token',
+        'notificaciones_vistas_at',
         'debe_cambiar_password',
         'locale',
     ];
@@ -60,6 +61,7 @@ class User extends Authenticatable
             'confirmacion_automatica' => 'boolean',
             'sena_monto'              => 'decimal:2',
             'debe_cambiar_password'   => 'boolean',
+            'notificaciones_vistas_at' => 'datetime',
         ];
     }
 

@@ -59,6 +59,75 @@ class TurnoNotificacionesTest extends TestCase
         $response->assertJsonPath('mensajes.0.cliente_apellido', 'Diaz');
     }
 
+    public function test_no_vistos_cuenta_todo_cuando_nunca_se_abrio_el_panel(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $turno = $this->crearTurno($user);
+
+        WhatsappMensaje::create([
+            'user_id' => $user->id, 'turno_id' => $turno->id, 'numero' => '3765123456',
+            'provider' => 'cloud_api', 'mensaje' => 'x', 'tipo' => 'confirmacion',
+            'message_id' => 'wamid.a', 'status' => 'delivered',
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/turnos/notificaciones')
+            ->assertOk();
+
+        $response->assertJsonPath('no_vistos', 1);
+    }
+
+    public function test_marcar_vistas_pone_no_vistos_en_cero_para_mensajes_previos(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $turno = $this->crearTurno($user);
+
+        WhatsappMensaje::create([
+            'user_id' => $user->id, 'turno_id' => $turno->id, 'numero' => '3765123456',
+            'provider' => 'cloud_api', 'mensaje' => 'x', 'tipo' => 'confirmacion',
+            'message_id' => 'wamid.b', 'status' => 'delivered',
+        ]);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson('/api/turnos/notificaciones/marcar-vistas')
+            ->assertOk();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/turnos/notificaciones')
+            ->assertOk();
+
+        $response->assertJsonPath('no_vistos', 0);
+        $response->assertJsonCount(1, 'mensajes'); // sigue apareciendo en la lista, solo no suma al badge
+    }
+
+    public function test_un_mensaje_nuevo_despues_de_marcar_vistas_vuelve_a_sumar(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $turno = $this->crearTurno($user);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson('/api/turnos/notificaciones/marcar-vistas')
+            ->assertOk();
+
+        // created_at explícito un segundo después: la comparación es '>'
+        // estricta y el timestamp de la columna trunca a segundos, así que
+        // sin este margen el test sería flaky si ambas requests caen en el
+        // mismo segundo de reloj.
+        $mensajeNuevo = WhatsappMensaje::create([
+            'user_id' => $user->id, 'turno_id' => $turno->id, 'numero' => '3765123456',
+            'provider' => 'cloud_api', 'mensaje' => 'x', 'tipo' => 'confirmacion',
+            'message_id' => 'wamid.c', 'status' => 'delivered',
+        ]);
+        $mensajeNuevo->created_at = now()->addSecond();
+        $mensajeNuevo->save();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/turnos/notificaciones')
+            ->assertOk();
+
+        $response->assertJsonPath('no_vistos', 1);
+    }
+
     public function test_no_devuelve_mensajes_de_otro_dia(): void
     {
         $user = User::factory()->create(['is_exempt' => true]);
