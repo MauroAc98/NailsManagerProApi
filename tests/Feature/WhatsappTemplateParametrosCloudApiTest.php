@@ -68,7 +68,7 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
             'Manicura semipermanente',
             'Av. Siempre Viva 742',
             'Fernanda',
-            '3765000000',
+            '376 500-0000',
         ], $parametros);
     }
 
@@ -90,7 +90,7 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
             'Manicura semipermanente',
             'Av. Siempre Viva 742',
             'Fernanda',
-            '3765000000',
+            '376 500-0000',
         ], $parametros);
     }
 
@@ -155,6 +155,30 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
         $this->assertSame('Evelin', $parametros[6]);
     }
 
+    public function test_telefono_se_formatea_agrupado_no_crudo(): void
+    {
+        // Mismo formato que phoneUtils.formatDisplay() en el frontend
+        // (usado también en la "historia" de Instagram) — últimos 4 dígitos
+        // como bloque final con guion, el resto agrupado de a 3 desde la
+        // izquierda, incluido el "+54" si el número lo trae.
+        $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'direccion' => 'Av. Siempre Viva 742', 'telefono' => '+543765000000']);
+        $turno = $this->crearTurnoDeMuestra($user);
+
+        $parametros = WhatsappTemplate::parametrosCloudApi('confirmacion', $turno->cliente, $turno, $user);
+
+        $this->assertSame('543 765 00-0000', $parametros[7]);
+    }
+
+    public function test_telefono_corto_se_devuelve_sin_formatear(): void
+    {
+        $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'direccion' => 'Av. Siempre Viva 742', 'telefono' => '12345']);
+        $turno = $this->crearTurnoDeMuestra($user);
+
+        $parametros = WhatsappTemplate::parametrosCloudApi('confirmacion', $turno->cliente, $turno, $user);
+
+        $this->assertSame('12345', $parametros[7]);
+    }
+
     public function test_nombre_de_plantilla_meta_segun_tipo(): void
     {
         $this->assertSame('recordatorio_turno', WhatsappTemplate::nombrePlantillaMeta('recordatorio'));
@@ -174,7 +198,7 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
         $this->assertStringContainsString('15:30', $resultado);
         $this->assertStringContainsString('Manicura semipermanente', $resultado);
         $this->assertStringContainsString('Av. Siempre Viva 742', $resultado);
-        $this->assertStringContainsString('3765000000', $resultado);
+        $this->assertStringContainsString('376 500-0000', $resultado);
         $this->assertStringContainsString('hablaste con Fernanda previamente', $resultado);
         $this->assertStringContainsString('mensaje automático, no hace falta responder', $resultado);
     }

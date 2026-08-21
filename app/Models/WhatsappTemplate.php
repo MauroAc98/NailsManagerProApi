@@ -57,7 +57,11 @@ final class WhatsappTemplate
         // original era sonar cercano en el mensaje, un nombre compuesto
         // completo ahí se siente más formal/impersonal que cálido.
         $profesional = trim(explode(' ', trim($turno->profesional->nombre ?? ''))[0]);
-        $telefono = $user->telefono ?? '';
+        // Formateado ("376 500-0000"), no el crudo — mismo criterio que
+        // phoneUtils.formatDisplay() en el frontend (usado también en la
+        // "historia" de Instagram), para que el teléfono se vea igual en
+        // todos los lugares donde el cliente lo ve.
+        $telefono = static::formatearTelefono($user->telefono ?? '');
 
         return match ($tipo) {
             'recordatorio', 'confirmacion' => [$cliente->nombre, $user->name, $fecha, $hora, $servicios, $direccion, $profesional, $telefono],
@@ -88,5 +92,25 @@ final class WhatsappTemplate
         };
 
         return $cuerpo;
+    }
+
+    // Puerto 1:1 de phoneUtils.formatDisplay() (nailsmanagerpro-web,
+    // lib/phoneUtils.ts) — no asume dónde termina el código de país, agrupa
+    // de a 3 dígitos desde la izquierda con los últimos 4 como bloque final
+    // separado por guion. Números cortos (<6 dígitos, incluido '') se
+    // devuelven tal cual — mismo criterio sin-fallback que el resto de los
+    // parámetros: vacío entra, vacío sale, Meta rechaza el envío si llega así.
+    private static function formatearTelefono(string $numero): string
+    {
+        $digitos = preg_replace('/\D/', '', $numero) ?? '';
+        if (strlen($digitos) < 6) {
+            return $digitos;
+        }
+
+        $ultimo = substr($digitos, -4);
+        $resto = substr($digitos, 0, -4);
+        $grupos = implode(' ', str_split($resto, 3));
+
+        return "{$grupos}-{$ultimo}";
     }
 }
