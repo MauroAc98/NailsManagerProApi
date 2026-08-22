@@ -3,12 +3,17 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Mail\ProvisionalPasswordMail;
+use App\Models\Profesional;
+use App\Models\Subscription;
 use App\Models\User;
 use App\Models\WhatsappMensaje;
 use App\Services\AdminAudit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 
 class AdminController extends Controller
 {
@@ -48,6 +53,100 @@ class AdminController extends Controller
             'user_id' => $user->id,
             'ends_at' => $subscription->fresh()->ends_at,
         ]);
+    }
+
+    /**
+     * POST /api/admin/negocios
+     * Reemplaza a AuthController::register() — la creación de negocios se
+     * muda acá porque ahora exige sesión admin explícita (auth:admin) en
+     * vez de la ruta pública auth/register + X-Admin-Secret. Misma
+     * semántica de creación (contraseña provisoria + email), con auditoría.
+     */
+    public function crearNegocio(Request $request): JsonResponse
+    {
+        $request->merge(['email' => strtolower((string) $request->input('email'))]);
+
+        $data = $request->validate([
+            'name' => 'required|string|max:255',
+            'email' => 'required|email|unique:users,email',
+            'profesional_nombre' => 'required|string|max:255',
+            'profesional_apellido' => 'required|string|max:255',
+        ]);
+
+        $passwordProvisoria = Str::password(10, symbols: false);
+
+        $user = User::create([
+            'name' => $data['name'],
+            'email' => $data['email'],
+            'password' => $passwordProvisoria,
+            'debe_cambiar_password' => true,
+        ]);
+
+        Subscription::create([
+            'user_id' => $user->id,
+            'ends_at' => now()->addDays(10),
+            'status' => 'ACTIVO',
+        ]);
+
+        // Ver AuthController (register original, movido acá) sobre por qué
+        // 'nombre' del profesional no puede ser una copia de 'name' del
+        // negocio.
+        Profesional::create([
+            'user_id' => $user->id,
+            'nombre' => $data['profesional_nombre'],
+            'apellido' => $data['profesional_apellido'],
+            'activo' => true,
+        ]);
+
+        Mail::to($user->email)->send(
+            new ProvisionalPasswordMail($user->name, $user->email, $passwordProvisoria),
+        );
+
+        AdminAudit::record($request->user('admin'), 'negocio.creado', $user->id, [
+            'name' => $user->name,
+            'slug' => $user->slug,
+        ], $request);
+
+        return response()->json([
+            'message' => 'Negocio creado. Se envió la contraseña provisoria por email.',
+            'user' => $user,
+            'password_provisoria' => $passwordProvisoria,
+        ], 201);
+    }
+
+    /**
+     * GET /api/admin/negocios/buscar?q=
+     * Búsqueda puntual (no listado paginable, ver spec admin-subscription-
+     * renewal): email exacto o slug parcial (LIKE), máximo 5 resultados.
+     */
+    public function buscarNegocio(Request $request): JsonResponse
+    {
+        $q = strtolower(trim((string) $request->query('q', '')));
+
+        if ($q === '') {
+            return response()->json([]);
+        }
+
+        $negocios = User::where(function ($query) use ($q) {
+            $query->where('email', $q)
+                ->orWhere('slug', 'like', "%{$q}%");
+        })
+            ->with('subscription')
+            ->limit(5)
+            ->get();
+
+        return response()->json($negocios->map(fn (User $negocio) => [
+            'id' => $negocio->id,
+            'name' => $negocio->name,
+            'slug' => $negocio->slug,
+            'email' => $negocio->email,
+            'is_exempt' => $negocio->is_exempt,
+            'subscription' => $negocio->subscription ? [
+                'ends_at' => $negocio->subscription->ends_at,
+                'status' => $negocio->subscription->status,
+                'renewed_at' => $negocio->subscription->renewed_at,
+            ] : null,
+        ])->values());
     }
 
     /**

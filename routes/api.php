@@ -32,13 +32,8 @@ Route::get('support-info', [AuthController::class, 'supportInfo']);
 // Autenticación
 // ─────────────────────────────────────────────
 Route::prefix('auth')->group(function () {
-    // register() todavía vive bajo /auth por ahora (se muda a
-    // POST admin/negocios recién en la PR de provisioning) pero ya exige
-    // sesión admin — X-Admin-Secret deja de alcanzar en esta PR.
-    Route::middleware('auth:admin')->group(function () {
-        Route::post('register', [AuthController::class, 'register']);
-    });
-
+    // register() se mudó a POST admin/negocios — ver AdminController y el
+    // grupo admin/* más abajo.
     Route::post('login',    [AuthController::class, 'login'])->middleware('throttle:10,1');
 
     Route::post('cambiar-password-obligatorio', [AuthController::class, 'cambiarPasswordObligatorio']);
@@ -60,13 +55,21 @@ Route::prefix('auth')->group(function () {
 Route::prefix('admin')->group(function () {
     Route::post('login', [AdminAuthController::class, 'login'])->middleware('throttle:5,1');
 
-    Route::middleware('auth:admin')->group(function () {
+    // Limiter con nombre 'admin' (RateLimiter::for en AppServiceProvider,
+    // 30/min por admin o IP) — admin/login queda afuera a propósito, ya
+    // tiene su propio throttle:5,1 arriba.
+    Route::middleware(['auth:admin', 'throttle:admin'])->group(function () {
         Route::post('logout', [AdminAuthController::class, 'logout']);
         Route::get('me',      [AdminAuthController::class, 'me']);
 
         Route::post('subscriptions/{user}/renew', [AdminController::class, 'renewSubscription']);
         // Uso de Cloud API por salón (mensajes + conversaciones de 24hs estimadas) para cotejar costo real de Meta.
         Route::get('whatsapp/uso-por-salon', [AdminController::class, 'usoWhatsappPorSalon']);
+
+        // Creación de negocio (movida de auth/register) y búsqueda puntual
+        // por email/slug para el flujo de renovación — ver AdminController.
+        Route::post('negocios',       [AdminController::class, 'crearNegocio']);
+        Route::get('negocios/buscar', [AdminController::class, 'buscarNegocio']);
     });
 });
 
