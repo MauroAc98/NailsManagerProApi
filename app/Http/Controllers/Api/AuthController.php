@@ -18,30 +18,13 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
-    // Falla cerrado si ADMIN_SECRET no está seteado en el entorno: sin este
-    // chequeo explícito, config('app.admin_secret') y un header ausente
-    // terminan siendo ambos null, la comparación estricta da false, y la
-    // request pasa sin ninguna credencial — este endpoint no tiene
-    // auth:sanctum de respaldo.
-    private function noAutorizado(Request $request): ?JsonResponse
-    {
-        $secreto = config('app.admin_secret');
-        if ($secreto === null || $secreto === '' || $request->header('X-Admin-Secret') !== $secreto) {
-            return response()->json(['error' => 'No autorizado'], 401);
-        }
-
-        return null;
-    }
-
     // ─────────────────────────────────────────────
     // POST /api/auth/register
+    // Autorización resuelta por el middleware auth:admin (routes/api.php)
+    // — ver AdminUser / config/auth.php. Ya no depende de X-Admin-Secret.
     // ─────────────────────────────────────────────
     public function register(Request $request): JsonResponse
     {
-        if ($response = $this->noAutorizado($request)) {
-            return $response;
-        }
-
         $request->merge(['email' => strtolower((string) $request->input('email'))]);
 
         $data = $request->validate([

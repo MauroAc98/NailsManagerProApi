@@ -11,24 +11,10 @@ use Illuminate\Support\Carbon;
 
 class AdminController extends Controller
 {
-    // Falla cerrado si ADMIN_SECRET no está seteado en el entorno — ver
-    // mismo comentario en AuthController::noAutorizado().
-    private function noAutorizado(Request $request): ?JsonResponse
-    {
-        $secreto = config('app.admin_secret');
-        if ($secreto === null || $secreto === '' || $request->header('X-Admin-Secret') !== $secreto) {
-            return response()->json(['error' => 'No autorizado'], 401);
-        }
-
-        return null;
-    }
-
+    // La autorización de admin/* la resuelve el middleware auth:admin
+    // (routes/api.php) — ver AdminUser / config/auth.php.
     public function renewSubscription(Request $request, User $user): JsonResponse
     {
-        if ($response = $this->noAutorizado($request)) {
-            return $response;
-        }
-
         $subscription = $user->subscription;
 
         if (!$subscription) {
@@ -68,10 +54,6 @@ class AdminController extends Controller
      */
     public function usoWhatsappPorSalon(Request $request): JsonResponse
     {
-        if ($response = $this->noAutorizado($request)) {
-            return $response;
-        }
-
         $desde = $request->filled('desde')
             ? Carbon::parse($request->query('desde'))->startOfDay()
             : now()->startOfMonth();
