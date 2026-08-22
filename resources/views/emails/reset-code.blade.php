@@ -9,8 +9,8 @@
         <p style="color: #666; font-size: 14px; margin-bottom: 24px;">
             Usá este código para restablecer tu contraseña. Expira en 30 minutos.
         </p>
-        <div style="background: #FDF0F4; border-radius: 12px; padding: 16px; margin-bottom: 24px;">
-            <span style="font-size: 32px; font-weight: 700; letter-spacing: 8px; color: #C96B91;">
+        <div style="background: #DEE6DE; border-radius: 12px; padding: 16px; margin-bottom: 24px;">
+            <span style="font-size: 32px; font-weight: 700; letter-spacing: 8px; color: #4e6b4d;">
                 {{ $code }}
             </span>
         </div>

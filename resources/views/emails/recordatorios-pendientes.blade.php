@@ -13,8 +13,8 @@
             Tenés {{ $cantidadTurnos }} turno(s) mañana para recordar.
         </p>
 
-        <div style="background: #FDF0F4; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
-            <a href="{{ $url }}" style="background-color: #C96B91; color: white; padding: 14px 28px; border-radius: 12px; text-decoration: none; display: inline-block; font-size: 15px; font-weight: 600;">
+        <div style="background: #DEE6DE; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
+            <a href="{{ $url }}" style="background-color: #4e6b4d; color: white; padding: 14px 28px; border-radius: 12px; text-decoration: none; display: inline-block; font-size: 15px; font-weight: 600;">
                 Recordar turnos
             </a>
         </div>

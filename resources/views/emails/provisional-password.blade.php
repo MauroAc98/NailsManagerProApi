@@ -13,11 +13,11 @@
             Usá estos datos para iniciar sesión por primera vez:
         </p>
 
-        <div style="background: #FDF0F4; border-radius: 12px; padding: 20px; margin-bottom: 16px; text-align: left;">
+        <div style="background: #DEE6DE; border-radius: 12px; padding: 20px; margin-bottom: 16px; text-align: left;">
             <p style="margin: 0 0 8px 0; font-size: 13px; color: #999;">Email</p>
             <p style="margin: 0 0 16px 0; font-size: 15px; color: #333; font-weight: 600;">{{ $email }}</p>
             <p style="margin: 0 0 8px 0; font-size: 13px; color: #999;">Contraseña provisoria</p>
-            <p style="margin: 0; font-size: 20px; font-weight: 700; letter-spacing: 2px; color: #C96B91;">
+            <p style="margin: 0; font-size: 20px; font-weight: 700; letter-spacing: 2px; color: #4e6b4d;">
                 {{ $password }}
             </p>
         </div>
