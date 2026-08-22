@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\AdminUser;
 use App\Models\Profesional;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -12,16 +13,24 @@ class AuthRegisterProfesionalNombreTest extends TestCase
 {
     use RefreshDatabase;
 
+    private AdminUser $admin;
+
     protected function setUp(): void
     {
         parent::setUp();
-        config(['app.admin_secret' => 'secreto-de-test']);
+
+        $this->admin = AdminUser::create([
+            'name' => 'Superadmin',
+            'email' => 'admin@turnetto.app',
+            'password' => 'password-de-test',
+        ]);
+
         Mail::fake();
     }
 
     public function test_register_crea_el_profesional_dueño_con_su_propio_nombre_no_el_del_estudio(): void
     {
-        $response = $this->withHeader('X-Admin-Secret', 'secreto-de-test')
+        $response = $this->actingAs($this->admin, 'admin')
             ->postJson('/api/auth/register', [
                 'name' => 'Nails Studio',
                 'email' => 'nueva@estudio.com',
@@ -41,7 +50,7 @@ class AuthRegisterProfesionalNombreTest extends TestCase
 
     public function test_register_sin_profesional_nombre_es_rechazado(): void
     {
-        $this->withHeader('X-Admin-Secret', 'secreto-de-test')
+        $this->actingAs($this->admin, 'admin')
             ->postJson('/api/auth/register', [
                 'name' => 'Nails Studio',
                 'email' => 'nueva@estudio.com',
@@ -55,7 +64,7 @@ class AuthRegisterProfesionalNombreTest extends TestCase
 
     public function test_register_sin_profesional_apellido_es_rechazado(): void
     {
-        $this->withHeader('X-Admin-Secret', 'secreto-de-test')
+        $this->actingAs($this->admin, 'admin')
             ->postJson('/api/auth/register', [
                 'name' => 'Nails Studio',
                 'email' => 'nueva@estudio.com',
