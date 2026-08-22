@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\WhatsappMensaje;
+use App\Services\AdminAudit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -37,6 +38,10 @@ class AdminController extends Controller
             'status'  => 'ACTIVO',
             'renewed_at' => now(),
         ]);
+
+        AdminAudit::record($request->user('admin'), 'suscripcion.renovada', $user->id, [
+            'ends_at' => $subscription->fresh()->ends_at,
+        ], $request);
 
         return response()->json([
             'message' => 'Suscripción renovada correctamente',
