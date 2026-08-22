@@ -20,7 +20,7 @@ class SettingsSeeder extends Seeder
             ],
             [
                 'key'         => 'support_email',
-                'value'       => 'nailsmanagerpro.app@gmail.com',
+                'value'       => 'turnetto.app@gmail.com',
                 'description' => 'Email de soporte',
             ],
             [
