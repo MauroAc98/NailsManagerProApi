@@ -115,6 +115,35 @@ class AdminController extends Controller
     }
 
     /**
+     * GET /api/admin/negocios
+     * Listado completo (no paginado — solo 6 negocios existen en prod hoy,
+     * no vale la pena LengthAwarePaginator para v1). Orden por ends_at
+     * ascendente: el workflow real del admin es ver primero quién vence
+     * antes para priorizar la renovación.
+     */
+    public function listarNegocios(): JsonResponse
+    {
+        $negocios = User::with('subscription')
+            ->leftJoin('subscriptions', 'subscriptions.user_id', '=', 'users.id')
+            ->orderBy('subscriptions.ends_at')
+            ->select('users.*')
+            ->get();
+
+        return response()->json($negocios->map(fn (User $negocio) => [
+            'id' => $negocio->id,
+            'name' => $negocio->name,
+            'slug' => $negocio->slug,
+            'email' => $negocio->email,
+            'is_exempt' => $negocio->is_exempt,
+            'subscription' => $negocio->subscription ? [
+                'ends_at' => $negocio->subscription->ends_at,
+                'status' => $negocio->subscription->status,
+                'renewed_at' => $negocio->subscription->renewed_at,
+            ] : null,
+        ])->values());
+    }
+
+    /**
      * GET /api/admin/negocios/buscar?q=
      * Búsqueda puntual (no listado paginable, ver spec admin-subscription-
      * renewal): email exacto o slug parcial (LIKE), máximo 5 resultados.
