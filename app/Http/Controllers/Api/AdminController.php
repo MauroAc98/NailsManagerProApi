@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Mail\ProvisionalPasswordMail;
 use App\Models\Profesional;
+use App\Models\Setting;
 use App\Models\Subscription;
 use App\Models\User;
 use App\Models\WhatsappMensaje;
@@ -87,9 +88,11 @@ class AdminController extends Controller
         ]);
 
         if (!$isExempt) {
+            $diasPrueba = (int) (Setting::get('dias_prueba_default') ?? 10);
+
             Subscription::create([
                 'user_id' => $user->id,
-                'ends_at' => now()->addDays(10),
+                'ends_at' => now()->addDays($diasPrueba),
                 'status' => 'ACTIVO',
             ]);
         }
@@ -249,6 +252,42 @@ class AdminController extends Controller
             'desde' => $desde->toDateString(),
             'hasta' => $hasta->toDateString(),
             'salones' => $salones,
+        ]);
+    }
+
+    /**
+     * GET /api/admin/settings
+     * Config global del panel. Hoy solo dias_prueba_default (ver
+     * crearNegocio) — shape pensado para sumar más claves acá sin romper
+     * el contrato existente.
+     */
+    public function obtenerSettings(): JsonResponse
+    {
+        return response()->json([
+            'dias_prueba_default' => (int) (Setting::get('dias_prueba_default') ?? 10),
+        ]);
+    }
+
+    /**
+     * PUT /api/admin/settings
+     */
+    public function actualizarSettings(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'dias_prueba_default' => 'required|integer|min:1|max:90',
+        ]);
+
+        Setting::updateOrCreate(
+            ['key' => 'dias_prueba_default'],
+            ['value' => (string) $data['dias_prueba_default']],
+        );
+
+        AdminAudit::record($request->user('admin'), 'settings.actualizado', null, [
+            'dias_prueba_default' => $data['dias_prueba_default'],
+        ], $request);
+
+        return response()->json([
+            'dias_prueba_default' => $data['dias_prueba_default'],
         ]);
     }
 }
