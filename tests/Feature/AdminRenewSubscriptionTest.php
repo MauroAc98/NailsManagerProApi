@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\AdminUser;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -10,11 +11,17 @@ class AdminRenewSubscriptionTest extends TestCase
 {
     use RefreshDatabase;
 
+    private AdminUser $admin;
+
     protected function setUp(): void
     {
         parent::setUp();
 
-        config(['app.admin_secret' => 'secreto-de-test']);
+        $this->admin = AdminUser::create([
+            'name' => 'Superadmin',
+            'email' => 'admin@turnetto.app',
+            'password' => 'password-de-test',
+        ]);
     }
 
     public function test_renovacion_temprana_preserva_dias_restantes(): void
@@ -26,7 +33,7 @@ class AdminRenewSubscriptionTest extends TestCase
             'status' => 'VENCIDO',
         ]);
 
-        $this->withHeader('X-Admin-Secret', 'secreto-de-test')
+        $this->actingAs($this->admin, 'admin')
             ->postJson("/api/admin/subscriptions/{$user->id}/renew")
             ->assertOk();
 
@@ -48,7 +55,7 @@ class AdminRenewSubscriptionTest extends TestCase
             'status' => 'VENCIDO',
         ]);
 
-        $this->withHeader('X-Admin-Secret', 'secreto-de-test')
+        $this->actingAs($this->admin, 'admin')
             ->postJson("/api/admin/subscriptions/{$user->id}/renew")
             ->assertOk();
 
@@ -71,7 +78,7 @@ class AdminRenewSubscriptionTest extends TestCase
             'status' => 'VENCIDO',
         ]);
 
-        $this->withHeader('X-Admin-Secret', 'secreto-de-test')
+        $this->actingAs($this->admin, 'admin')
             ->postJson("/api/admin/subscriptions/{$user->id}/renew")
             ->assertOk();
 
@@ -93,7 +100,7 @@ class AdminRenewSubscriptionTest extends TestCase
             'status' => 'VENCIDO',
         ]);
 
-        $this->withHeader('X-Admin-Secret', 'secreto-de-test')
+        $this->actingAs($this->admin, 'admin')
             ->postJson("/api/admin/subscriptions/{$user->id}/renew")
             ->assertOk();
 
@@ -110,7 +117,7 @@ class AdminRenewSubscriptionTest extends TestCase
             'renewed_at' => now()->subHours(2),
         ]);
 
-        $this->withHeader('X-Admin-Secret', 'secreto-de-test')
+        $this->actingAs($this->admin, 'admin')
             ->postJson("/api/admin/subscriptions/{$user->id}/renew")
             ->assertStatus(409)
             ->assertJsonStructure(['error', 'renewed_at', 'ends_at', 'hint']);
@@ -132,7 +139,7 @@ class AdminRenewSubscriptionTest extends TestCase
             'renewed_at' => now()->subHours(2),
         ]);
 
-        $this->withHeader('X-Admin-Secret', 'secreto-de-test')
+        $this->actingAs($this->admin, 'admin')
             ->postJson("/api/admin/subscriptions/{$user->id}/renew?force=true")
             ->assertOk();
 
@@ -153,7 +160,7 @@ class AdminRenewSubscriptionTest extends TestCase
             'renewed_at' => now()->subHours(25),
         ]);
 
-        $this->withHeader('X-Admin-Secret', 'secreto-de-test')
+        $this->actingAs($this->admin, 'admin')
             ->postJson("/api/admin/subscriptions/{$user->id}/renew")
             ->assertOk();
 

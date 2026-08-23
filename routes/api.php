@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\ReservaWebController;
 use App\Http\Controllers\Api\PublicController;
 use App\Http\Controllers\Api\CloudApiWebhookController;
 use App\Http\Controllers\Api\AdminController;
+use App\Http\Controllers\Api\AdminAuthController;
 use App\Http\Controllers\Api\StatsController;
 use App\Http\Controllers\Api\GastoController;
 use Illuminate\Support\Facades\Route;
@@ -31,7 +32,8 @@ Route::get('support-info', [AuthController::class, 'supportInfo']);
 // Autenticación
 // ─────────────────────────────────────────────
 Route::prefix('auth')->group(function () {
-    Route::post('register', [AuthController::class, 'register']);
+    // register() se mudó a POST admin/negocios — ver AdminController y el
+    // grupo admin/* más abajo.
     Route::post('login',    [AuthController::class, 'login'])->middleware('throttle:10,1');
 
     Route::post('cambiar-password-obligatorio', [AuthController::class, 'cambiarPasswordObligatorio']);
@@ -47,11 +49,29 @@ Route::prefix('auth')->group(function () {
 });
 
 // ─────────────────────────────────────────────
-// Admin
+// Admin — identidad propia (guard `admin`, provider `admin_users`),
+// desacoplada de la sesión tenant. Ver AdminUser / config/auth.php.
 // ─────────────────────────────────────────────
-Route::post('admin/subscriptions/{user}/renew', [AdminController::class, 'renewSubscription']);
-// Uso de Cloud API por salón (mensajes + conversaciones de 24hs estimadas) para cotejar costo real de Meta.
-Route::get('admin/whatsapp/uso-por-salon', [AdminController::class, 'usoWhatsappPorSalon']);
+Route::prefix('admin')->group(function () {
+    Route::post('login', [AdminAuthController::class, 'login'])->middleware('throttle:5,1');
+
+    // Limiter con nombre 'admin' (RateLimiter::for en AppServiceProvider,
+    // 30/min por admin o IP) — admin/login queda afuera a propósito, ya
+    // tiene su propio throttle:5,1 arriba.
+    Route::middleware(['auth:admin', 'throttle:admin'])->group(function () {
+        Route::post('logout', [AdminAuthController::class, 'logout']);
+        Route::get('me',      [AdminAuthController::class, 'me']);
+
+        Route::post('subscriptions/{user}/renew', [AdminController::class, 'renewSubscription']);
+        // Uso de Cloud API por salón (mensajes + conversaciones de 24hs estimadas) para cotejar costo real de Meta.
+        Route::get('whatsapp/uso-por-salon', [AdminController::class, 'usoWhatsappPorSalon']);
+
+        // Creación de negocio (movida de auth/register) y búsqueda puntual
+        // por email/slug para el flujo de renovación — ver AdminController.
+        Route::post('negocios',       [AdminController::class, 'crearNegocio']);
+        Route::get('negocios/buscar', [AdminController::class, 'buscarNegocio']);
+    });
+});
 
 // ─────────────────────────────────────────────
 // Rutas privadas — requieren Bearer Token

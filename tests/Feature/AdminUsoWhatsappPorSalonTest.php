@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\AdminUser;
 use App\Models\User;
 use App\Models\WhatsappMensaje;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -11,11 +12,17 @@ class AdminUsoWhatsappPorSalonTest extends TestCase
 {
     use RefreshDatabase;
 
+    private AdminUser $admin;
+
     protected function setUp(): void
     {
         parent::setUp();
 
-        config(['app.admin_secret' => 'secreto-de-test']);
+        $this->admin = AdminUser::create([
+            'name' => 'Superadmin',
+            'email' => 'admin@turnetto.app',
+            'password' => 'password-de-test',
+        ]);
     }
 
     private function crearMensaje(int $userId, string $numero, string $createdAt, string $provider = 'cloud_api'): WhatsappMensaje
@@ -34,7 +41,7 @@ class AdminUsoWhatsappPorSalonTest extends TestCase
         return $mensaje;
     }
 
-    public function test_rechaza_sin_el_header_correcto(): void
+    public function test_rechaza_sin_sesion_admin(): void
     {
         $this->getJson('/api/admin/whatsapp/uso-por-salon')
             ->assertStatus(401);
@@ -48,7 +55,7 @@ class AdminUsoWhatsappPorSalonTest extends TestCase
         $this->crearMensaje($user->id, '5493765000001', '2026-08-05 10:00:00');
         $this->crearMensaje($user->id, '5493765000001', '2026-08-06 09:59:00');
 
-        $response = $this->withHeader('X-Admin-Secret', 'secreto-de-test')
+        $response = $this->actingAs($this->admin, 'admin')
             ->getJson('/api/admin/whatsapp/uso-por-salon?desde=2026-08-01&hasta=2026-08-31')
             ->assertOk();
 
@@ -68,7 +75,7 @@ class AdminUsoWhatsappPorSalonTest extends TestCase
         $this->crearMensaje($user->id, '5493765000001', '2026-08-05 10:00:00');
         $this->crearMensaje($user->id, '5493765000001', '2026-08-06 10:01:00');
 
-        $response = $this->withHeader('X-Admin-Secret', 'secreto-de-test')
+        $response = $this->actingAs($this->admin, 'admin')
             ->getJson('/api/admin/whatsapp/uso-por-salon?desde=2026-08-01&hasta=2026-08-31')
             ->assertOk();
 
@@ -87,7 +94,7 @@ class AdminUsoWhatsappPorSalonTest extends TestCase
         $this->crearMensaje($user->id, '5493765000001', '2026-08-05 10:30:00');
         $this->crearMensaje($user->id, '5493765000001', '2026-08-06 16:00:00'); // 30hs después del inicio de la ventana anterior
 
-        $response = $this->withHeader('X-Admin-Secret', 'secreto-de-test')
+        $response = $this->actingAs($this->admin, 'admin')
             ->getJson('/api/admin/whatsapp/uso-por-salon?desde=2026-08-01&hasta=2026-08-31')
             ->assertOk();
 
@@ -105,7 +112,7 @@ class AdminUsoWhatsappPorSalonTest extends TestCase
         $this->crearMensaje($user->id, '5493765000001', '2026-08-05 10:00:00');
         $this->crearMensaje($user->id, '5493765000002', '2026-08-05 10:05:00');
 
-        $response = $this->withHeader('X-Admin-Secret', 'secreto-de-test')
+        $response = $this->actingAs($this->admin, 'admin')
             ->getJson('/api/admin/whatsapp/uso-por-salon?desde=2026-08-01&hasta=2026-08-31')
             ->assertOk();
 
@@ -122,7 +129,7 @@ class AdminUsoWhatsappPorSalonTest extends TestCase
 
         $this->crearMensaje($user->id, '5493765000001', '2026-08-05 10:00:00', 'evolution');
 
-        $response = $this->withHeader('X-Admin-Secret', 'secreto-de-test')
+        $response = $this->actingAs($this->admin, 'admin')
             ->getJson('/api/admin/whatsapp/uso-por-salon?desde=2026-08-01&hasta=2026-08-31')
             ->assertOk();
 
@@ -135,7 +142,7 @@ class AdminUsoWhatsappPorSalonTest extends TestCase
 
         $this->crearMensaje($user->id, '5493765000001', '2026-07-01 10:00:00');
 
-        $response = $this->withHeader('X-Admin-Secret', 'secreto-de-test')
+        $response = $this->actingAs($this->admin, 'admin')
             ->getJson('/api/admin/whatsapp/uso-por-salon?desde=2026-08-01&hasta=2026-08-31')
             ->assertOk();
 
@@ -151,7 +158,7 @@ class AdminUsoWhatsappPorSalonTest extends TestCase
         $this->crearMensaje($userB->id, '5493765000002', '2026-08-05 10:00:00');
         $this->crearMensaje($userB->id, '5493765000002', '2026-08-05 11:00:00');
 
-        $response = $this->withHeader('X-Admin-Secret', 'secreto-de-test')
+        $response = $this->actingAs($this->admin, 'admin')
             ->getJson('/api/admin/whatsapp/uso-por-salon?desde=2026-08-01&hasta=2026-08-31')
             ->assertOk();
 
@@ -172,7 +179,7 @@ class AdminUsoWhatsappPorSalonTest extends TestCase
     {
         User::factory()->create();
 
-        $response = $this->withHeader('X-Admin-Secret', 'secreto-de-test')
+        $response = $this->actingAs($this->admin, 'admin')
             ->getJson('/api/admin/whatsapp/uso-por-salon?desde=2026-08-01&hasta=2026-08-31')
             ->assertOk();
 

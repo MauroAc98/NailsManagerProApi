@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Mail\ProvisionalPasswordMail;
 use App\Mail\ResetCodeMail;
 use App\Models\Setting;
 use App\Models\User;
@@ -13,81 +12,13 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
-    // Falla cerrado si ADMIN_SECRET no está seteado en el entorno: sin este
-    // chequeo explícito, config('app.admin_secret') y un header ausente
-    // terminan siendo ambos null, la comparación estricta da false, y la
-    // request pasa sin ninguna credencial — este endpoint no tiene
-    // auth:sanctum de respaldo.
-    private function noAutorizado(Request $request): ?JsonResponse
-    {
-        $secreto = config('app.admin_secret');
-        if ($secreto === null || $secreto === '' || $request->header('X-Admin-Secret') !== $secreto) {
-            return response()->json(['error' => 'No autorizado'], 401);
-        }
-
-        return null;
-    }
-
-    // ─────────────────────────────────────────────
-    // POST /api/auth/register
-    // ─────────────────────────────────────────────
-    public function register(Request $request): JsonResponse
-    {
-        if ($response = $this->noAutorizado($request)) {
-            return $response;
-        }
-
-        $request->merge(['email' => strtolower((string) $request->input('email'))]);
-
-        $data = $request->validate([
-            'name'                  => 'required|string|max:255',
-            'email'                 => 'required|email|unique:users,email',
-            'profesional_nombre'    => 'required|string|max:255',
-            'profesional_apellido'  => 'required|string|max:255',
-        ]);
-
-        $passwordProvisoria = Str::password(10, symbols: false);
-
-        $user = User::create([
-            'name'                  => $data['name'],
-            'email'                 => $data['email'],
-            'password'              => $passwordProvisoria,
-            'debe_cambiar_password' => true,
-        ]);
-
-        \App\Models\Subscription::create([
-            'user_id'  => $user->id,
-            'ends_at'  => now()->addDays(10),
-            'status'   => 'ACTIVO',
-        ]);
-
-        // Nombre y apellido de la dueña, distinto de 'name' (nombre del
-        // estudio) — 'nombre' (solo, sin apellido) es el dato que
-        // WhatsappTemplate usa para {{7}} en los mensajes automáticos
-        // (turno.profesional.nombre), así que no puede seguir siendo una
-        // copia del nombre del estudio.
-        \App\Models\Profesional::create([
-            'user_id'  => $user->id,
-            'nombre'   => $data['profesional_nombre'],
-            'apellido' => $data['profesional_apellido'],
-            'activo'   => true,
-        ]);
-
-        Mail::to($user->email)->send(
-            new ProvisionalPasswordMail($user->name, $user->email, $passwordProvisoria),
-        );
-
-        return response()->json([
-            'message'             => 'Usuario creado. Se envió la contraseña provisoria por email.',
-            'user'                => $user,
-            'password_provisoria' => $passwordProvisoria,
-        ], 201);
-    }
+    // register() se mudó a AdminController::crearNegocio() — ver
+    // POST /api/admin/negocios. La creación de negocios ahora exige sesión
+    // admin (auth:admin) en vez de la ruta pública auth/register.
 
     // ─────────────────────────────────────────────
     // POST /api/auth/login

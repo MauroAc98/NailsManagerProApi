@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\AdminUser;
 use App\Models\User;
 
 return [
@@ -42,6 +43,22 @@ return [
             'driver' => 'session',
             'provider' => 'users',
         ],
+
+        // Sanctum registra este guard con 'provider' => null si no está
+        // definido acá (SanctumServiceProvider::register()) — sin provider,
+        // Guard::hasValidProvider() devuelve true siempre, así que CUALQUIER
+        // tokenable (incluido un futuro AdminUser) autenticaba en rutas
+        // auth:sanctum. Pinearlo a 'users' es lo que separa de verdad los
+        // dos guards, no el nombre 'admin' del guard de abajo.
+        'sanctum' => [
+            'driver' => 'sanctum',
+            'provider' => 'users',
+        ],
+
+        'admin' => [
+            'driver' => 'sanctum',
+            'provider' => 'admin_users',
+        ],
     ],
 
     /*
@@ -71,6 +88,11 @@ return [
         //     'driver' => 'database',
         //     'table' => 'users',
         // ],
+
+        'admin_users' => [
+            'driver' => 'eloquent',
+            'model' => AdminUser::class,
+        ],
     ],
 
     /*
