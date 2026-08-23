@@ -61,6 +61,27 @@ class AdminListarNegociosTest extends TestCase
         $response->assertJsonCount(7);
     }
 
+    // Regresión: status era una columna STORED que nunca se actualizaba
+    // cuando ends_at simplemente pasaba (sin job programado). Ahora se
+    // computa en vivo, igual que AuthController::subscriptionStatus().
+    public function test_negocio_vencido_devuelve_status_vencido_aunque_la_columna_diga_activo(): void
+    {
+        $user = User::factory()->create(['email' => 'vencido@estudio.com']);
+        $user->subscription()->create(['ends_at' => now()->subDays(1), 'status' => 'ACTIVO']);
+
+        $response = $this->actingAs($this->admin, 'admin')
+            ->getJson('/api/admin/negocios')
+            ->assertOk();
+
+        $response->assertJsonFragment([
+            'id' => $user->id,
+        ]);
+
+        $negocio = collect($response->json())->firstWhere('id', $user->id);
+
+        $this->assertSame('VENCIDO', $negocio['subscription']['status']);
+    }
+
     // Orden = workflow real del admin: quién vence antes va primero. Un
     // negocio sin suscripción no debe romper el sort.
     public function test_ordena_por_ends_at_ascendente_soonest_first(): void

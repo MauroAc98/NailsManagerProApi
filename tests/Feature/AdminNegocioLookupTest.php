@@ -48,6 +48,21 @@ class AdminNegocioLookupTest extends TestCase
         $response->assertJsonStructure([['id', 'name', 'slug', 'email', 'is_exempt', 'subscription' => ['ends_at', 'status', 'renewed_at']]]);
     }
 
+    // Regresión: status era una columna STORED que nunca se actualizaba
+    // cuando ends_at simplemente pasaba (sin job programado). Ahora se
+    // computa en vivo, igual que AuthController::subscriptionStatus().
+    public function test_negocio_vencido_devuelve_status_vencido_aunque_la_columna_diga_activo(): void
+    {
+        $user = User::factory()->create(['email' => 'vencido@estudio.com']);
+        $user->subscription()->create(['ends_at' => now()->subDays(1), 'status' => 'ACTIVO']);
+
+        $response = $this->actingAs($this->admin, 'admin')
+            ->getJson('/api/admin/negocios/buscar?q=vencido@estudio.com')
+            ->assertOk();
+
+        $response->assertJsonPath('0.subscription.status', 'VENCIDO');
+    }
+
     // El email tiene que matchear completo — un fragmento del email no
     // alcanza (a diferencia del slug, que sí usa LIKE parcial).
     public function test_email_parcial_no_matchea(): void
