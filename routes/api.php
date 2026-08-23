@@ -69,6 +69,7 @@ Route::prefix('admin')->group(function () {
         // Creación de negocio (movida de auth/register) y búsqueda puntual
         // por email/slug para el flujo de renovación — ver AdminController.
         Route::post('negocios',       [AdminController::class, 'crearNegocio']);
+        Route::get('negocios',        [AdminController::class, 'listarNegocios']);
         Route::get('negocios/buscar', [AdminController::class, 'buscarNegocio']);
     });
 });
