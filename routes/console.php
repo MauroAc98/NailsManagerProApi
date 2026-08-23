@@ -13,3 +13,5 @@ Schedule::command('turnos:completar-vencidos')->everyFifteenMinutes();
 Schedule::command('recordatorios:enviar')
     ->hourly()
     ->appendOutputTo(storage_path('logs/recordatorios.log'));
+
+Schedule::command('suscripciones:marcar-vencidas')->daily();
