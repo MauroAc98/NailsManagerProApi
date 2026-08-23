@@ -137,7 +137,11 @@ class AdminController extends Controller
             'is_exempt' => $negocio->is_exempt,
             'subscription' => $negocio->subscription ? [
                 'ends_at' => $negocio->subscription->ends_at,
-                'status' => $negocio->subscription->status,
+                // Status computado en vivo, no la columna guardada — ver
+                // AuthController::subscriptionStatus() (mismo criterio).
+                // La columna 'status' nunca se actualiza sola cuando
+                // ends_at simplemente pasa (no hay job programado).
+                'status' => $negocio->subscription->ends_at > now() ? 'ACTIVO' : 'VENCIDO',
                 'renewed_at' => $negocio->subscription->renewed_at,
             ] : null,
         ])->values());
@@ -172,7 +176,11 @@ class AdminController extends Controller
             'is_exempt' => $negocio->is_exempt,
             'subscription' => $negocio->subscription ? [
                 'ends_at' => $negocio->subscription->ends_at,
-                'status' => $negocio->subscription->status,
+                // Status computado en vivo, no la columna guardada — ver
+                // AuthController::subscriptionStatus() (mismo criterio).
+                // La columna 'status' nunca se actualiza sola cuando
+                // ends_at simplemente pasa (no hay job programado).
+                'status' => $negocio->subscription->ends_at > now() ? 'ACTIVO' : 'VENCIDO',
                 'renewed_at' => $negocio->subscription->renewed_at,
             ] : null,
         ])->values());
