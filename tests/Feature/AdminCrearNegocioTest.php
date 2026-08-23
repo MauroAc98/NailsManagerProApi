@@ -128,6 +128,43 @@ class AdminCrearNegocioTest extends TestCase
         $this->assertDatabaseMissing('users', ['email' => 'nueva@estudio.com']);
     }
 
+    public function test_crea_negocio_exento_sin_suscripcion(): void
+    {
+        $response = $this->actingAs($this->admin, 'admin')
+            ->postJson('/api/admin/negocios', [
+                'name' => 'Nails Studio',
+                'email' => 'exenta@estudio.com',
+                'profesional_nombre' => 'Fernanda',
+                'profesional_apellido' => 'Gómez',
+                'is_exempt' => true,
+            ])
+            ->assertCreated();
+
+        $user = User::where('email', 'exenta@estudio.com')->firstOrFail();
+
+        $this->assertTrue($user->is_exempt);
+        $this->assertNull($user->subscription);
+        $response->assertJsonStructure(['password_provisoria']);
+        $this->assertNotEmpty($response->json('password_provisoria'));
+    }
+
+    public function test_sin_is_exempt_mantiene_el_comportamiento_actual(): void
+    {
+        $this->actingAs($this->admin, 'admin')
+            ->postJson('/api/admin/negocios', [
+                'name' => 'Nails Studio',
+                'email' => 'nueva@estudio.com',
+                'profesional_nombre' => 'Fernanda',
+                'profesional_apellido' => 'Gómez',
+            ])
+            ->assertCreated();
+
+        $user = User::where('email', 'nueva@estudio.com')->firstOrFail();
+
+        $this->assertFalse($user->is_exempt);
+        $this->assertNotNull($user->subscription);
+    }
+
     // Spec admin-api-boundary — Scenario "Creation is audited".
     public function test_creacion_genera_registro_de_auditoria(): void
     {

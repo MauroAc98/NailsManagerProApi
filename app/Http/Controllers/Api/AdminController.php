@@ -71,7 +71,10 @@ class AdminController extends Controller
             'email' => 'required|email|unique:users,email',
             'profesional_nombre' => 'required|string|max:255',
             'profesional_apellido' => 'required|string|max:255',
+            'is_exempt' => 'sometimes|boolean',
         ]);
+
+        $isExempt = $data['is_exempt'] ?? false;
 
         $passwordProvisoria = Str::password(10, symbols: false);
 
@@ -80,13 +83,16 @@ class AdminController extends Controller
             'email' => $data['email'],
             'password' => $passwordProvisoria,
             'debe_cambiar_password' => true,
+            'is_exempt' => $isExempt,
         ]);
 
-        Subscription::create([
-            'user_id' => $user->id,
-            'ends_at' => now()->addDays(10),
-            'status' => 'ACTIVO',
-        ]);
+        if (!$isExempt) {
+            Subscription::create([
+                'user_id' => $user->id,
+                'ends_at' => now()->addDays(10),
+                'status' => 'ACTIVO',
+            ]);
+        }
 
         // Ver AuthController (register original, movido acá) sobre por qué
         // 'nombre' del profesional no puede ser una copia de 'name' del
