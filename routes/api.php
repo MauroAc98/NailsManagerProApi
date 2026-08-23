@@ -71,6 +71,9 @@ Route::prefix('admin')->group(function () {
         Route::post('negocios',       [AdminController::class, 'crearNegocio']);
         Route::get('negocios',        [AdminController::class, 'listarNegocios']);
         Route::get('negocios/buscar', [AdminController::class, 'buscarNegocio']);
+
+        Route::get('settings', [AdminController::class, 'obtenerSettings']);
+        Route::put('settings', [AdminController::class, 'actualizarSettings']);
     });
 });
 
