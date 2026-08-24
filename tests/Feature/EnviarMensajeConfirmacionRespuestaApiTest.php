@@ -21,7 +21,7 @@ class EnviarMensajeConfirmacionRespuestaApiTest extends TestCase
         config([
             'services.whatsapp_cloud.token' => 'fake-token',
             'services.whatsapp_cloud.phone_number_id' => '123456',
-            'services.whatsapp_cloud.api_version' => 'v25.0',
+            'services.whatsapp_cloud.api_version' => 'v26.0',
         ]);
 
         Http::fake([
@@ -65,7 +65,7 @@ class EnviarMensajeConfirmacionRespuestaApiTest extends TestCase
         config([
             'services.whatsapp_cloud.token' => 'fake-token',
             'services.whatsapp_cloud.phone_number_id' => '123456',
-            'services.whatsapp_cloud.api_version' => 'v25.0',
+            'services.whatsapp_cloud.api_version' => 'v26.0',
         ]);
 
         Http::fake([

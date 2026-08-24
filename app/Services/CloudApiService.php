@@ -2,11 +2,14 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class CloudApiService
 {
+    public const CACHE_KEY_SALUD = 'whatsapp_cloud:salud_numero';
+
     private string $token = '';
 
     private string $phoneNumberId = '';
@@ -79,5 +82,145 @@ class CloudApiService
         }
 
         return new CloudApiEnvioResultado($response->json('messages.0.id'), $response->status(), $respuesta);
+    }
+
+    /**
+     * Escritor del webhook: procesa el `value` de un change con
+     * field === 'phone_number_quality_update'. Parser event-only —
+     * confirmado contra la muestra real de Meta App Dashboard (v26.0), que
+     * no trae ningún campo de rating, solo `event`.
+     *
+     * FLAGGED/UNFLAGGED escriben un veredicto nuevo. Cualquier otro valor
+     * (ONBOARDING/UPGRADE/DOWNGRADE, o uno ausente/no reconocido) deja el
+     * cache intacto: los primeros son transiciones de tier/capacidad, no
+     * señales de deliverability, y sobreescribir un veredicto real con eso
+     * destruiría información. Devuelve null cuando no escribió nada.
+     */
+    public function registrarCalidad(array $value): ?array
+    {
+        $event = $value['event'] ?? null;
+
+        $rating = match ($event) {
+            'FLAGGED' => 'RED',
+            'UNFLAGGED' => 'GREEN',
+            default => null,
+        };
+
+        if ($rating === null) {
+            $contexto = ['event' => $event, 'value' => $value];
+
+            if (in_array($event, ['ONBOARDING', 'UPGRADE', 'DOWNGRADE'], true)) {
+                Log::info('whatsapp.calidad.evento_tier', $contexto);
+            } else {
+                Log::warning('whatsapp.calidad.evento_no_reconocido', $contexto);
+            }
+
+            return null;
+        }
+
+        $registro = [
+            'quality_rating' => $rating,
+            'messaging_limit' => $value['current_limit'] ?? null,
+            'event' => $event,
+            'origen' => 'webhook',
+            'checked_at' => now()->toIso8601String(),
+        ];
+
+        $contexto = [
+            'display_phone_number' => $value['display_phone_number'] ?? null,
+            'event' => $event,
+            'quality_rating' => $rating,
+        ];
+
+        if ($rating === 'RED') {
+            Log::warning('whatsapp.calidad.veredicto_rojo', $contexto);
+        } else {
+            Log::info('whatsapp.calidad.veredicto_verde', $contexto);
+        }
+
+        Cache::forever(self::CACHE_KEY_SALUD, $registro);
+
+        return $registro;
+    }
+
+    /**
+     * Sembrado en frío, manual y no programado (`whatsapp:sembrar-salud`):
+     * una única llamada GET al mismo phone_number_id que arma un veredicto
+     * cuando todavía no llegó ningún webhook de calidad. También sirve
+     * para verificar post-deploy que el token tiene el scope de lectura
+     * (`whatsapp_business_management`, distinto del de envío).
+     *
+     * Falla → null, no toca el cache. Fallas de auth (401/403, indicio de
+     * scope faltante) se loguean distinto de fallas de transporte
+     * genéricas, para diagnosticar rápido cuál de las dos es.
+     */
+    public function sembrarSalud(): ?array
+    {
+        try {
+            $response = Http::withHeaders($this->headers())
+                ->timeout(5)
+                ->get("https://graph.facebook.com/{$this->apiVersion}/{$this->phoneNumberId}", [
+                    'fields' => 'quality_rating',
+                ]);
+        } catch (\Throwable $e) {
+            Log::error('CloudApiService::sembrarSalud falló por transporte', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        if (! $response->successful()) {
+            $contexto = [
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ];
+
+            if (in_array($response->status(), [401, 403], true)) {
+                Log::error('CloudApiService::sembrarSalud falló por permisos (revisar scope whatsapp_business_management)', $contexto);
+            } else {
+                Log::error('CloudApiService::sembrarSalud falló', $contexto);
+            }
+
+            return null;
+        }
+
+        $registro = [
+            'quality_rating' => $response->json('quality_rating'),
+            'messaging_limit' => null,
+            'event' => null,
+            'origen' => 'seed',
+            'checked_at' => now()->toIso8601String(),
+        ];
+
+        Cache::forever(self::CACHE_KEY_SALUD, $registro);
+
+        return $registro;
+    }
+
+    /**
+     * Path de lectura usado en request time: solo cache, nunca HTTP.
+     * Miss (nunca sembrado, o `cache:clear` manual) resuelve a saludable
+     * (fail-open) — no bloquear el envío automático por falta de dato.
+     */
+    public function estaSaludable(): bool
+    {
+        try {
+            $cache = Cache::get(self::CACHE_KEY_SALUD);
+        } catch (\Throwable $e) {
+            Log::error('CloudApiService::estaSaludable falló al leer el cache, degradando a saludable (fail-open)', [
+                'exception' => $e->getMessage(),
+            ]);
+
+            return true;
+        }
+
+        $rating = $cache['quality_rating'] ?? null;
+
+        if ($rating === null) {
+            return true;
+        }
+
+        return ! in_array($rating, config('services.whatsapp_cloud.calidad_bloqueante'), true);
     }
 }
