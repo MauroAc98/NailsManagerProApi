@@ -32,6 +32,51 @@ class ClienteTelefonoValidoTest extends TestCase
         $response->assertJsonValidationErrors('telefono');
     }
 
+    // ─────────────────────────────────────────────
+    // App deliberadamente NO guarda el "9" post-código-de-país para
+    // celulares argentinos — CloudApiService::normalizarNumero() documenta
+    // un envío real confirmado con "+543764794897" (sin el "9") entregado
+    // correctamente vía Cloud API. El "9" es solo una convención de discado
+    // internacional, no forma parte del número de abonado E.164 que modela
+    // libphonenumber, así que isValidNumber() no debería exigirlo — y como
+    // AR tiene rangos de fijo/celular superpuestos, la lib puede clasificar
+    // este número como FIXED_LINE_OR_MOBILE en vez de MOBILE puro. Eso es
+    // esperado: la regla NO debe restringir por tipo, solo por
+    // isValidNumber().
+    // ─────────────────────────────────────────────
+    public function test_acepta_un_numero_argentino_real_sin_el_9_de_celular(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/clientes', [
+                'nombre' => 'Sofía',
+                'apellido' => 'Gómez',
+                'telefono' => '+543764794897',
+            ]);
+
+        $response->assertCreated();
+    }
+
+    public function test_update_acepta_un_numero_argentino_real_sin_el_9_de_celular(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+
+        $cliente = $user->clientes()->create([
+            'nombre' => 'Sofía',
+            'apellido' => 'Gómez',
+            'telefono' => '+543764583295',
+            'activo' => true,
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/clientes/{$cliente->id}", [
+                'telefono' => '+543764794897',
+            ]);
+
+        $response->assertOk();
+    }
+
     public static function numerosValidosPorPais(): array
     {
         return [
