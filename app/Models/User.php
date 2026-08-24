@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\CloudApiService;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -172,10 +173,15 @@ class User extends Authenticatable
     // Cloud API no tiene concepto de "conexión" — el flag es true por
     // cualquiera de estas razones: (a) falta el teléfono de contacto de la
     // profesional (no se puede armar la variable {{6}} de la plantilla),
-    // (b) el locale es pt-BR (no hay plantilla aprobada en portugués
-    // todavía), o (c) el ratio de mensajes fallidos de Cloud API es alto.
-    // En cualquiera de los tres casos, el frontend ofrece mandar el
-    // mensaje a mano por wa.me en vez de depender del envío automático.
+    // (b) falta la dirección de la profesional (también es un parámetro
+    // de la plantilla — si falta, Meta rechaza el envío completo), (c) el
+    // locale es pt-BR (no hay plantilla aprobada en portugués todavía), o
+    // (d) el número de Cloud API compartido está señalado como no
+    // saludable por Meta (ver CloudApiService::estaSaludable — señal
+    // cacheada, actualizada por webhook, global a todas las cuentas que
+    // comparten el número). En cualquiera de los cuatro casos, el
+    // frontend ofrece mandar el mensaje a mano por wa.me en vez de
+    // depender del envío automático.
     public function getWhatsappRequiereEnvioManualAttribute(): bool
     {
         return $this->criterioRequiereEnvioManualWhatsapp();
@@ -183,7 +189,11 @@ class User extends Authenticatable
 
     protected function criterioRequiereEnvioManualWhatsapp(): bool
     {
-        if (empty($this->telefono)) {
+        if (empty(trim($this->telefono ?? ''))) {
+            return true;
+        }
+
+        if (empty(trim($this->direccion ?? ''))) {
             return true;
         }
 
@@ -191,28 +201,6 @@ class User extends Authenticatable
             return true;
         }
 
-        $desde = now()->subDays(30);
-
-        // Filtrado por provider='cloud_api': la ventana de 30 días todavía
-        // puede contener mensajes históricos de Evolution del corte
-        // reciente — sin este filtro, fallos viejos de un proveedor que ya
-        // no existe diluirían (o inflarían) el ratio real de Cloud API.
-        $total = $this->whatsappMensajes()
-            ->where('provider', 'cloud_api')
-            ->where('created_at', '>=', $desde)
-            ->where('status', '!=', 'manual')
-            ->count();
-
-        if ($total < 5) {
-            return false;
-        }
-
-        $fallidos = $this->whatsappMensajes()
-            ->where('provider', 'cloud_api')
-            ->where('created_at', '>=', $desde)
-            ->where('status', 'failed')
-            ->count();
-
-        return ($fallidos / $total) >= 0.03;
+        return ! app(CloudApiService::class)->estaSaludable();
     }
 }

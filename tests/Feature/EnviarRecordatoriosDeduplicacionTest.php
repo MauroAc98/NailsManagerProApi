@@ -6,7 +6,9 @@ use App\Models\Cliente;
 use App\Models\Turno;
 use App\Models\User;
 use App\Models\WhatsappMensaje;
+use App\Services\CloudApiService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -14,15 +16,26 @@ class EnviarRecordatoriosDeduplicacionTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Cache::forget(CloudApiService::CACHE_KEY_SALUD);
+    }
+
     // Escenario real: la profesional mandó el recordatorio a mano desde
     // /agenda/recordatorios a la mañana (crea un WhatsappMensaje
-    // status='manual'), y el flag whatsapp_requiere_envio_manual se cura
-    // ese mismo día antes de que corra el cron horario en hora_recordatorio.
-    // El comando entra por la rama NORMAL (flag ya en false) — sin el fix,
-    // vuelve a mandar el mismo recordatorio: duplicado real al cliente, y
-    // el WhatsappMensaje::create() posterior explota contra el unique
+    // status='manual'). El flag whatsapp_requiere_envio_manual ya está en
+    // false para esta cuenta (teléfono y dirección completos, número
+    // saludable), así que el comando entra por la rama NORMAL. Sin la
+    // deduplicación por (turno_id, tipo), volvería a mandar el mismo
+    // recordatorio de forma automática: duplicado real al cliente, y el
+    // WhatsappMensaje::create() posterior explota contra el unique
     // constraint (turno_id, tipo), quedando logueado como fallido pese a
-    // que en realidad ya estaba resuelto.
+    // que en realidad ya estaba resuelto. Esto es independiente de CUÁL
+    // sea la razón por la que el flag esté en false — antes dependía de
+    // que el ratio de fallos no se disparara, ahora depende de teléfono +
+    // dirección + locale + la señal de salud cacheada de Cloud API — la
+    // deduplicación protege contra el reenvío sin importar el criterio.
     public function test_no_reenvia_recordatorio_automatico_para_un_turno_ya_gestionado(): void
     {
         Http::fake();

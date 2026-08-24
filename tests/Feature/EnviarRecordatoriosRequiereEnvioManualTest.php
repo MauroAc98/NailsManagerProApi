@@ -7,7 +7,9 @@ use App\Models\Cliente;
 use App\Models\Turno;
 use App\Models\User;
 use App\Models\WhatsappMensaje;
+use App\Services\CloudApiService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
@@ -15,6 +17,12 @@ use Tests\TestCase;
 class EnviarRecordatoriosRequiereEnvioManualTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Cache::forget(CloudApiService::CACHE_KEY_SALUD);
+    }
 
     private function crearUsuarioConEnvioManual(): User
     {
@@ -36,6 +44,42 @@ class EnviarRecordatoriosRequiereEnvioManualTest extends TestCase
         Mail::fake();
 
         $user = $this->crearUsuarioConEnvioManual();
+
+        $cliente = Cliente::create([
+            'user_id' => $user->id,
+            'nombre' => 'Ana',
+            'apellido' => 'Gomez',
+            'telefono' => '3765252395',
+        ]);
+
+        Turno::create([
+            'user_id' => $user->id,
+            'cliente_id' => $cliente->id,
+            'fecha_hora' => now()->addDay()->setTime(10, 0),
+            'duracion_total_minutos' => 60,
+            'estado' => 'confirmado',
+            'origen' => 'app',
+        ]);
+
+        $this->artisan('recordatorios:enviar');
+
+        Http::assertNothingSent();
+    }
+
+    public function test_omite_recordatorios_automaticos_cuando_el_veredicto_de_salud_cacheado_esta_en_rojo(): void
+    {
+        Http::fake();
+        Mail::fake();
+        Cache::forever(CloudApiService::CACHE_KEY_SALUD, ['quality_rating' => 'RED']);
+
+        // Teléfono y dirección completos, locale por defecto -> el único
+        // motivo del flag es el veredicto de salud cacheado en rojo.
+        $user = User::factory()->create([
+            'is_exempt' => true,
+            'recordatorio_automatico' => true,
+            'hora_recordatorio' => now()->format('H:00'),
+            'telefono' => '3765000000',
+        ]);
 
         $cliente = Cliente::create([
             'user_id' => $user->id,
