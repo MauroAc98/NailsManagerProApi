@@ -75,6 +75,11 @@ class EnviarMensajeConfirmacion implements ShouldQueue
         }
 
         if ($user->whatsapp_requiere_envio_manual) {
+            Log::info('EnviarMensajeConfirmacion: requiere envío manual, confirmación automática omitida', [
+                'turno_id' => $this->turnoId,
+                'user_id' => $user->id,
+            ]);
+
             return;
         }
 
