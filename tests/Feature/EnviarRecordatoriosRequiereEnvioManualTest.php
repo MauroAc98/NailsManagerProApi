@@ -79,7 +79,6 @@ class EnviarRecordatoriosRequiereEnvioManualTest extends TestCase
             'recordatorio_automatico' => true,
             'hora_recordatorio' => now()->format('H:00'),
             'telefono' => '3765000000',
-            'direccion' => 'San Martin 123',
         ]);
 
         $cliente = Cliente::create([

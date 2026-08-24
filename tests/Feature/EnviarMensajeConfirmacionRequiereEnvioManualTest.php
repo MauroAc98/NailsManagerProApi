@@ -70,7 +70,6 @@ class EnviarMensajeConfirmacionRequiereEnvioManualTest extends TestCase
         $user = User::factory()->create([
             'is_exempt' => true,
             'telefono' => '3765000000',
-            'direccion' => 'San Martin 123',
         ]);
 
         $cliente = Cliente::create([

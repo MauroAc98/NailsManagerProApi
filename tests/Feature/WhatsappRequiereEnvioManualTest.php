@@ -23,7 +23,6 @@ class WhatsappRequiereEnvioManualTest extends TestCase
     {
         $user = User::factory()->create([
             'telefono' => null,
-            'direccion' => 'San Martin 123',
         ]);
 
         $this->actingAs($user, 'sanctum')
@@ -62,7 +61,6 @@ class WhatsappRequiereEnvioManualTest extends TestCase
     {
         $user = User::factory()->create([
             'telefono' => '   ',
-            'direccion' => 'San Martin 123',
         ]);
 
         $this->actingAs($user, 'sanctum')
@@ -75,7 +73,6 @@ class WhatsappRequiereEnvioManualTest extends TestCase
     {
         $user = User::factory()->create([
             'telefono' => '3765000000',
-            'direccion' => 'San Martin 123',
             'locale' => 'pt-BR',
         ]);
 
@@ -91,7 +88,6 @@ class WhatsappRequiereEnvioManualTest extends TestCase
 
         $user = User::factory()->create([
             'telefono' => '3765000000',
-            'direccion' => 'San Martin 123',
             'locale' => 'es',
         ]);
 
@@ -107,7 +103,6 @@ class WhatsappRequiereEnvioManualTest extends TestCase
 
         $user = User::factory()->create([
             'telefono' => '3765000000',
-            'direccion' => 'San Martin 123',
             'locale' => 'es',
         ]);
 
@@ -123,7 +118,6 @@ class WhatsappRequiereEnvioManualTest extends TestCase
 
         $user = User::factory()->create([
             'telefono' => '3765000000',
-            'direccion' => 'San Martin 123',
             'locale' => 'es',
         ]);
 
@@ -137,7 +131,6 @@ class WhatsappRequiereEnvioManualTest extends TestCase
     {
         $user = User::factory()->create([
             'telefono' => '3765000000',
-            'direccion' => 'San Martin 123',
             'locale' => 'es',
         ]);
 
@@ -153,7 +146,6 @@ class WhatsappRequiereEnvioManualTest extends TestCase
 
         $user = User::factory()->create([
             'telefono' => '3765000000',
-            'direccion' => 'San Martin 123',
             'locale' => 'es',
         ]);
 

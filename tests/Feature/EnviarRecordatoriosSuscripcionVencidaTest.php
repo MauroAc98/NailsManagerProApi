@@ -83,7 +83,6 @@ class EnviarRecordatoriosSuscripcionVencidaTest extends TestCase
             'recordatorio_automatico' => true,
             'hora_recordatorio' => now()->format('H:00'),
             'telefono' => '+543765111111',
-            'direccion' => 'San Martin 123',
         ]);
         Subscription::create(['user_id' => $user->id, 'ends_at' => now()->addDays(10), 'status' => 'ACTIVO']);
 
@@ -107,7 +106,6 @@ class EnviarRecordatoriosSuscripcionVencidaTest extends TestCase
             'recordatorio_automatico' => true,
             'hora_recordatorio' => now()->format('H:00'),
             'telefono' => '+543765111111',
-            'direccion' => 'San Martin 123',
         ]);
 
         $this->crearTurnoDeManana($user);

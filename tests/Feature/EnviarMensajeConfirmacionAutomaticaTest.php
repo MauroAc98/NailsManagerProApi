@@ -69,7 +69,6 @@ class EnviarMensajeConfirmacionAutomaticaTest extends TestCase
         $user = User::factory()->create([
             'is_exempt' => true,
             'telefono' => '+543765111111',
-            'direccion' => 'San Martin 123',
             'confirmacion_automatica' => true,
         ]);
 
@@ -132,7 +131,6 @@ class EnviarMensajeConfirmacionAutomaticaTest extends TestCase
         $user = User::factory()->create([
             'is_exempt' => false,
             'telefono' => '+543765111111',
-            'direccion' => 'San Martin 123',
             'confirmacion_automatica' => true,
         ]);
         Subscription::create(['user_id' => $user->id, 'ends_at' => now()->addDays(10), 'status' => 'ACTIVO']);
@@ -156,7 +154,6 @@ class EnviarMensajeConfirmacionAutomaticaTest extends TestCase
         $user = User::factory()->create([
             'is_exempt' => true,
             'telefono' => '+543765111111',
-            'direccion' => 'San Martin 123',
         ]);
 
         $turno = $this->crearTurno($user);

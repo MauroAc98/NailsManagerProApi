@@ -33,7 +33,6 @@ class EnviarMensajeConfirmacionRespuestaApiTest extends TestCase
         $user = User::factory()->create([
             'is_exempt' => true,
             'telefono' => '+543765111111',
-            'direccion' => 'San Martin 123',
         ]);
 
         $cliente = Cliente::create([
@@ -76,7 +75,6 @@ class EnviarMensajeConfirmacionRespuestaApiTest extends TestCase
         $user = User::factory()->create([
             'is_exempt' => true,
             'telefono' => '+543765111111',
-            'direccion' => 'San Martin 123',
         ]);
 
         $cliente = Cliente::create([

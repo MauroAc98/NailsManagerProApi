@@ -42,7 +42,6 @@ class WhatsappEnvioManualConsistenciaConsumidoresTest extends TestCase
         $user = User::factory()->create([
             'is_exempt' => true,
             'telefono' => '3765000000',
-            'direccion' => 'San Martin 123',
             'recordatorio_automatico' => true,
             'hora_recordatorio' => now()->format('H:00'),
         ]);
