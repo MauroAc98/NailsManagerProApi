@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\WhatsappMensaje;
+use App\Services\CloudApiService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -40,7 +41,7 @@ class CloudApiWebhookController extends Controller
     // (sha256=<hmac hex> sobre el body crudo, con el App Secret) — a
     // diferencia de Evolution, acá no hay secreto en la URL.
     // ─────────────────────────────────────────────
-    public function handle(Request $request): JsonResponse
+    public function handle(Request $request, CloudApiService $cloudApi): JsonResponse
     {
         $appSecret = config('services.whatsapp_cloud.app_secret');
         $header = $request->header('X-Hub-Signature-256', '');
@@ -67,6 +68,21 @@ class CloudApiWebhookController extends Controller
                 // migrar profesionales reales más allá del piloto.
                 foreach ($change['value']['statuses'] ?? [] as $status) {
                     $this->procesarStatus($status);
+                }
+
+                // Rama hermana de la de arriba (no elseif): un mismo payload
+                // puede traer ambos campos en el mismo `changes[]` y hay que
+                // procesar los dos. try/catch defensivo: un value con forma
+                // inesperada nunca debe tumbar la respuesta 200 ni afectar el
+                // procesamiento de statuses del resto del payload.
+                if (($change['field'] ?? null) === 'phone_number_quality_update') {
+                    try {
+                        $cloudApi->registrarCalidad($change['value'] ?? []);
+                    } catch (\Throwable $e) {
+                        Log::warning('WhatsApp Cloud API: no se pudo procesar phone_number_quality_update', [
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
                 }
             }
         }

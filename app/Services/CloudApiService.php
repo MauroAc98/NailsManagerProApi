@@ -2,11 +2,14 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class CloudApiService
 {
+    public const CACHE_KEY_SALUD = 'whatsapp_cloud:salud_numero';
+
     private string $token = '';
 
     private string $phoneNumberId = '';
@@ -79,5 +82,52 @@ class CloudApiService
         }
 
         return new CloudApiEnvioResultado($response->json('messages.0.id'), $response->status(), $respuesta);
+    }
+
+    /**
+     * Escritor del webhook: procesa el `value` de un change con
+     * field === 'phone_number_quality_update'. Parser event-only —
+     * confirmado contra la muestra real de Meta App Dashboard (v26.0), que
+     * no trae ningún campo de rating, solo `event`.
+     *
+     * FLAGGED/UNFLAGGED escriben un veredicto nuevo. Cualquier otro valor
+     * (ONBOARDING/UPGRADE/DOWNGRADE, o uno ausente/no reconocido) deja el
+     * cache intacto: los primeros son transiciones de tier/capacidad, no
+     * señales de deliverability, y sobreescribir un veredicto real con eso
+     * destruiría información. Devuelve null cuando no escribió nada.
+     */
+    public function registrarCalidad(array $value): ?array
+    {
+        $event = $value['event'] ?? null;
+
+        $rating = match ($event) {
+            'FLAGGED' => 'RED',
+            'UNFLAGGED' => 'GREEN',
+            default => null,
+        };
+
+        if ($rating === null) {
+            $contexto = ['event' => $event, 'value' => $value];
+
+            if (in_array($event, ['ONBOARDING', 'UPGRADE', 'DOWNGRADE'], true)) {
+                Log::info('whatsapp.calidad.evento_tier', $contexto);
+            } else {
+                Log::warning('whatsapp.calidad.evento_no_reconocido', $contexto);
+            }
+
+            return null;
+        }
+
+        $registro = [
+            'quality_rating' => $rating,
+            'messaging_limit' => $value['current_limit'] ?? null,
+            'event' => $event,
+            'origen' => 'webhook',
+            'checked_at' => now()->toIso8601String(),
+        ];
+
+        Cache::forever(self::CACHE_KEY_SALUD, $registro);
+
+        return $registro;
     }
 }
