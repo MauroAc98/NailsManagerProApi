@@ -130,4 +130,21 @@ class CloudApiService
 
         return $registro;
     }
+
+    /**
+     * Path de lectura usado en request time: solo cache, nunca HTTP.
+     * Miss (nunca sembrado, o `cache:clear` manual) resuelve a saludable
+     * (fail-open) — no bloquear el envío automático por falta de dato.
+     */
+    public function estaSaludable(): bool
+    {
+        $cache = Cache::get(self::CACHE_KEY_SALUD);
+        $rating = $cache['quality_rating'] ?? null;
+
+        if ($rating === null) {
+            return true;
+        }
+
+        return ! in_array($rating, config('services.whatsapp_cloud.calidad_bloqueante'), true);
+    }
 }
