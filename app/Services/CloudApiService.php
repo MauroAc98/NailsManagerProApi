@@ -126,6 +126,18 @@ class CloudApiService
             'checked_at' => now()->toIso8601String(),
         ];
 
+        $contexto = [
+            'display_phone_number' => $value['display_phone_number'] ?? null,
+            'event' => $event,
+            'quality_rating' => $rating,
+        ];
+
+        if ($rating === 'RED') {
+            Log::warning('whatsapp.calidad.veredicto_rojo', $contexto);
+        } else {
+            Log::info('whatsapp.calidad.veredicto_verde', $contexto);
+        }
+
         Cache::forever(self::CACHE_KEY_SALUD, $registro);
 
         return $registro;

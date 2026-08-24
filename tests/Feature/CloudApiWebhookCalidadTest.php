@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use App\Models\WhatsappMensaje;
+use App\Services\CloudApiService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -16,8 +17,6 @@ class CloudApiWebhookCalidadTest extends TestCase
     use RefreshDatabase;
 
     private const APP_SECRET = 'app-secret-de-test';
-
-    private const CACHE_KEY_SALUD = 'whatsapp_cloud:salud_numero';
 
     protected function setUp(): void
     {
@@ -67,9 +66,15 @@ class CloudApiWebhookCalidadTest extends TestCase
 
     public function test_flagged_cachea_un_veredicto_rojo(): void
     {
+        Log::shouldReceive('warning')
+            ->once()
+            ->withArgs(fn ($mensaje, $contexto) => is_string($mensaje)
+                && ($contexto['event'] ?? null) === 'FLAGGED'
+                && ($contexto['quality_rating'] ?? null) === 'RED');
+
         $this->postSigned($this->qualityChangePayload($this->eventValue('FLAGGED')))->assertOk();
 
-        $cache = Cache::get(self::CACHE_KEY_SALUD);
+        $cache = Cache::get(CloudApiService::CACHE_KEY_SALUD);
 
         $this->assertSame('RED', $cache['quality_rating']);
         $this->assertSame('FLAGGED', $cache['event']);
@@ -77,9 +82,15 @@ class CloudApiWebhookCalidadTest extends TestCase
 
     public function test_unflagged_cachea_un_veredicto_verde(): void
     {
+        Log::shouldReceive('info')
+            ->once()
+            ->withArgs(fn ($mensaje, $contexto) => is_string($mensaje)
+                && ($contexto['event'] ?? null) === 'UNFLAGGED'
+                && ($contexto['quality_rating'] ?? null) === 'GREEN');
+
         $this->postSigned($this->qualityChangePayload($this->eventValue('UNFLAGGED')))->assertOk();
 
-        $cache = Cache::get(self::CACHE_KEY_SALUD);
+        $cache = Cache::get(CloudApiService::CACHE_KEY_SALUD);
 
         $this->assertSame('GREEN', $cache['quality_rating']);
         $this->assertSame('UNFLAGGED', $cache['event']);
@@ -88,7 +99,7 @@ class CloudApiWebhookCalidadTest extends TestCase
     #[DataProvider('eventosDeTierProvider')]
     public function test_eventos_de_tier_no_modifican_el_cache_y_loguean_info(string $evento): void
     {
-        Cache::forever(self::CACHE_KEY_SALUD, ['quality_rating' => 'RED', 'origen' => 'seed']);
+        Cache::forever(CloudApiService::CACHE_KEY_SALUD, ['quality_rating' => 'RED', 'origen' => 'seed']);
 
         Log::shouldReceive('info')
             ->once()
@@ -96,7 +107,7 @@ class CloudApiWebhookCalidadTest extends TestCase
 
         $this->postSigned($this->qualityChangePayload($this->eventValue($evento)))->assertOk();
 
-        $cache = Cache::get(self::CACHE_KEY_SALUD);
+        $cache = Cache::get(CloudApiService::CACHE_KEY_SALUD);
 
         $this->assertSame(['quality_rating' => 'RED', 'origen' => 'seed'], $cache);
     }
@@ -112,28 +123,35 @@ class CloudApiWebhookCalidadTest extends TestCase
 
     public function test_event_ausente_no_modifica_el_cache_y_loguea_warning(): void
     {
-        Cache::forever(self::CACHE_KEY_SALUD, ['quality_rating' => 'GREEN', 'origen' => 'webhook']);
+        Cache::forever(CloudApiService::CACHE_KEY_SALUD, ['quality_rating' => 'GREEN', 'origen' => 'webhook']);
 
-        Log::shouldReceive('warning')->once();
+        Log::shouldReceive('warning')
+            ->once()
+            ->withArgs(fn ($mensaje, $contexto) => $mensaje === 'whatsapp.calidad.evento_no_reconocido'
+                && array_key_exists('event', $contexto)
+                && $contexto['event'] === null);
 
         $this->postSigned($this->qualityChangePayload([
             'display_phone_number' => '16505551111',
         ]))->assertOk();
 
-        $cache = Cache::get(self::CACHE_KEY_SALUD);
+        $cache = Cache::get(CloudApiService::CACHE_KEY_SALUD);
 
         $this->assertSame(['quality_rating' => 'GREEN', 'origen' => 'webhook'], $cache);
     }
 
     public function test_event_no_reconocido_no_modifica_el_cache_y_loguea_warning(): void
     {
-        Cache::forever(self::CACHE_KEY_SALUD, ['quality_rating' => 'GREEN', 'origen' => 'webhook']);
+        Cache::forever(CloudApiService::CACHE_KEY_SALUD, ['quality_rating' => 'GREEN', 'origen' => 'webhook']);
 
-        Log::shouldReceive('warning')->once();
+        Log::shouldReceive('warning')
+            ->once()
+            ->withArgs(fn ($mensaje, $contexto) => $mensaje === 'whatsapp.calidad.evento_no_reconocido'
+                && ($contexto['event'] ?? null) === 'ALGO_FUTURO_NO_DOCUMENTADO');
 
         $this->postSigned($this->qualityChangePayload($this->eventValue('ALGO_FUTURO_NO_DOCUMENTADO')))->assertOk();
 
-        $cache = Cache::get(self::CACHE_KEY_SALUD);
+        $cache = Cache::get(CloudApiService::CACHE_KEY_SALUD);
 
         $this->assertSame(['quality_rating' => 'GREEN', 'origen' => 'webhook'], $cache);
     }
@@ -179,7 +197,7 @@ class CloudApiWebhookCalidadTest extends TestCase
         $this->postSigned($payload)->assertOk();
 
         $this->assertSame('delivered', $mensaje->fresh()->status);
-        $this->assertSame('RED', Cache::get(self::CACHE_KEY_SALUD)['quality_rating']);
+        $this->assertSame('RED', Cache::get(CloudApiService::CACHE_KEY_SALUD)['quality_rating']);
     }
 
     public function test_value_malformado_no_revienta_y_devuelve_200(): void
