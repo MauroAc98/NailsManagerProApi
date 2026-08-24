@@ -189,11 +189,11 @@ class User extends Authenticatable
 
     protected function criterioRequiereEnvioManualWhatsapp(): bool
     {
-        if (empty($this->telefono)) {
+        if (empty(trim($this->telefono ?? ''))) {
             return true;
         }
 
-        if (empty($this->direccion)) {
+        if (empty(trim($this->direccion ?? ''))) {
             return true;
         }
 

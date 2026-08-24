@@ -45,6 +45,32 @@ class WhatsappRequiereEnvioManualTest extends TestCase
             ->assertJson(['whatsapp_requiere_envio_manual' => true]);
     }
 
+    public function test_true_con_direccion_solo_espacios_en_blanco(): void
+    {
+        $user = User::factory()->create([
+            'telefono' => '3765000000',
+            'direccion' => '   ',
+        ]);
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJson(['whatsapp_requiere_envio_manual' => true]);
+    }
+
+    public function test_true_con_telefono_solo_espacios_en_blanco(): void
+    {
+        $user = User::factory()->create([
+            'telefono' => '   ',
+            'direccion' => 'San Martin 123',
+        ]);
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJson(['whatsapp_requiere_envio_manual' => true]);
+    }
+
     public function test_true_con_locale_pt_br(): void
     {
         $user = User::factory()->create([
