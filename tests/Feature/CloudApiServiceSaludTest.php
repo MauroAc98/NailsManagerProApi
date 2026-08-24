@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Services\CloudApiService;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class CloudApiServiceSaludTest extends TestCase
@@ -41,5 +42,25 @@ class CloudApiServiceSaludTest extends TestCase
         Cache::forever(CloudApiService::CACHE_KEY_SALUD, ['quality_rating' => 'YELLOW']);
 
         $this->assertFalse(app(CloudApiService::class)->estaSaludable());
+    }
+
+    public function test_no_hace_llamadas_http_cuando_hay_un_veredicto_cacheado(): void
+    {
+        Http::fake();
+        config(['services.whatsapp_cloud.calidad_bloqueante' => ['RED']]);
+        Cache::forever(CloudApiService::CACHE_KEY_SALUD, ['quality_rating' => 'RED']);
+
+        app(CloudApiService::class)->estaSaludable();
+
+        Http::assertNothingSent();
+    }
+
+    public function test_no_hace_llamadas_http_cuando_el_cache_esta_vacio_fail_open(): void
+    {
+        Http::fake();
+
+        app(CloudApiService::class)->estaSaludable();
+
+        Http::assertNothingSent();
     }
 }
