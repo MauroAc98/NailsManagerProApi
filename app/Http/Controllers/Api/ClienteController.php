@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Cliente;
+use App\Rules\TelefonoValido;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\Rule;
@@ -53,7 +54,7 @@ class ClienteController extends Controller
             'telefono' => [
                 'required',
                 'string',
-                'regex:/^\+[1-9]\d{7,14}$/',
+                new TelefonoValido(),
                 Rule::unique('clientes', 'telefono')
                     ->where('user_id', $request->user()->id),
             ],
@@ -93,7 +94,7 @@ class ClienteController extends Controller
             'telefono' => [
                 'sometimes',
                 'string',
-                'regex:/^\+[1-9]\d{7,14}$/',
+                new TelefonoValido(),
                 Rule::unique('clientes', 'telefono')
                     ->where('user_id', $request->user()->id)
                     ->ignore($cliente->id),
