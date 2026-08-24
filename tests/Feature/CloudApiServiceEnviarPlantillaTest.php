@@ -8,12 +8,20 @@ use Tests\TestCase;
 
 class CloudApiServiceEnviarPlantillaTest extends TestCase
 {
+    public function test_api_version_por_defecto_es_v26_sin_override_de_env(): void
+    {
+        // No seteamos WHATSAPP_CLOUD_API_VERSION: debe resolver al default
+        // del config, alineado con la muestra confirmada de Meta App
+        // Dashboard (webhook phone_number_quality_update, v26.0).
+        $this->assertSame('v26.0', config('services.whatsapp_cloud.api_version'));
+    }
+
     public function test_arma_el_payload_correcto_y_devuelve_el_message_id(): void
     {
         config([
             'services.whatsapp_cloud.token' => 'fake-token-123',
             'services.whatsapp_cloud.phone_number_id' => '1315423274987306',
-            'services.whatsapp_cloud.api_version' => 'v25.0',
+            'services.whatsapp_cloud.api_version' => 'v26.0',
         ]);
 
         Http::fake([
@@ -36,7 +44,7 @@ class CloudApiServiceEnviarPlantillaTest extends TestCase
         Http::assertSent(function ($request) {
             $body = $request->data();
 
-            return $request->url() === 'https://graph.facebook.com/v25.0/1315423274987306/messages'
+            return $request->url() === 'https://graph.facebook.com/v26.0/1315423274987306/messages'
                 && $request->hasHeader('Authorization', 'Bearer fake-token-123')
                 && $body['messaging_product'] === 'whatsapp'
                 && $body['to'] === '5493765123456'

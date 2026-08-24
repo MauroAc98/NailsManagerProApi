@@ -38,7 +38,7 @@ return [
     'whatsapp_cloud' => [
         'token' => env('WHATSAPP_CLOUD_TOKEN'),
         'phone_number_id' => env('WHATSAPP_CLOUD_PHONE_NUMBER_ID'),
-        'api_version' => env('WHATSAPP_CLOUD_API_VERSION', 'v25.0'),
+        'api_version' => env('WHATSAPP_CLOUD_API_VERSION', 'v26.0'),
         'verify_token' => env('WHATSAPP_CLOUD_VERIFY_TOKEN'),
         'app_secret' => env('WHATSAPP_CLOUD_APP_SECRET'),
         'calidad_bloqueante' => array_filter(explode(',', (string) env('WHATSAPP_CLOUD_CALIDAD_BLOQUEANTE', 'RED'))),
