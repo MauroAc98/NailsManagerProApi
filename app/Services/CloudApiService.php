@@ -205,7 +205,16 @@ class CloudApiService
      */
     public function estaSaludable(): bool
     {
-        $cache = Cache::get(self::CACHE_KEY_SALUD);
+        try {
+            $cache = Cache::get(self::CACHE_KEY_SALUD);
+        } catch (\Throwable $e) {
+            Log::error('CloudApiService::estaSaludable falló al leer el cache, degradando a saludable (fail-open)', [
+                'exception' => $e->getMessage(),
+            ]);
+
+            return true;
+        }
+
         $rating = $cache['quality_rating'] ?? null;
 
         if ($rating === null) {

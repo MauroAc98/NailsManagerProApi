@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Services\CloudApiService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Tests\TestCase;
 
 class CloudApiServiceSaludTest extends TestCase
@@ -62,5 +63,17 @@ class CloudApiServiceSaludTest extends TestCase
         app(CloudApiService::class)->estaSaludable();
 
         Http::assertNothingSent();
+    }
+
+    public function test_es_saludable_fail_open_cuando_la_lectura_de_cache_lanza_excepcion(): void
+    {
+        Cache::shouldReceive('get')
+            ->once()
+            ->with(CloudApiService::CACHE_KEY_SALUD)
+            ->andThrow(new \RuntimeException('DB pool exhausted'));
+
+        Log::shouldReceive('error')->once();
+
+        $this->assertTrue(app(CloudApiService::class)->estaSaludable());
     }
 }
