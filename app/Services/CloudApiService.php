@@ -132,6 +132,61 @@ class CloudApiService
     }
 
     /**
+     * Sembrado en frío, manual y no programado (`whatsapp:sembrar-salud`):
+     * una única llamada GET al mismo phone_number_id que arma un veredicto
+     * cuando todavía no llegó ningún webhook de calidad. También sirve
+     * para verificar post-deploy que el token tiene el scope de lectura
+     * (`whatsapp_business_management`, distinto del de envío).
+     *
+     * Falla → null, no toca el cache. Fallas de auth (401/403, indicio de
+     * scope faltante) se loguean distinto de fallas de transporte
+     * genéricas, para diagnosticar rápido cuál de las dos es.
+     */
+    public function sembrarSalud(): ?array
+    {
+        try {
+            $response = Http::withHeaders($this->headers())
+                ->timeout(5)
+                ->get("https://graph.facebook.com/{$this->apiVersion}/{$this->phoneNumberId}", [
+                    'fields' => 'quality_rating',
+                ]);
+        } catch (\Throwable $e) {
+            Log::error('CloudApiService::sembrarSalud falló por transporte', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        if (! $response->successful()) {
+            $contexto = [
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ];
+
+            if (in_array($response->status(), [401, 403], true)) {
+                Log::error('CloudApiService::sembrarSalud falló por permisos (revisar scope whatsapp_business_management)', $contexto);
+            } else {
+                Log::error('CloudApiService::sembrarSalud falló', $contexto);
+            }
+
+            return null;
+        }
+
+        $registro = [
+            'quality_rating' => $response->json('quality_rating'),
+            'messaging_limit' => null,
+            'event' => null,
+            'origen' => 'seed',
+            'checked_at' => now()->toIso8601String(),
+        ];
+
+        Cache::forever(self::CACHE_KEY_SALUD, $registro);
+
+        return $registro;
+    }
+
+    /**
      * Path de lectura usado en request time: solo cache, nunca HTTP.
      * Miss (nunca sembrado, o `cache:clear` manual) resuelve a saludable
      * (fail-open) — no bloquear el envío automático por falta de dato.
