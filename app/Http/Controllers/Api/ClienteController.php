@@ -59,7 +59,7 @@ class ClienteController extends Controller
                     ->where('user_id', $request->user()->id),
             ],
         ], [
-            'telefono.unique' => 'Ya existe una cliente registrada con ese teléfono.',
+            'telefono.unique' => 'Ya existe un cliente registrado con ese teléfono.',
         ]);
 
         $data['activo'] = true;
@@ -102,12 +102,12 @@ class ClienteController extends Controller
             'activo' => 'sometimes|boolean',
             'whatsapp_opt_out' => 'sometimes|boolean',
         ], [
-            'telefono.unique' => 'Ya existe una cliente registrada con ese teléfono.',
+            'telefono.unique' => 'Ya existe un cliente registrado con ese teléfono.',
         ]);
 
         if (($data['activo'] ?? null) === false && $this->tieneTurnosFuturosConfirmados($cliente)) {
             return response()->json([
-                'message' => 'No se puede inhabilitar una cliente con turnos futuros confirmados.',
+                'message' => 'No se puede inhabilitar un cliente con turnos futuros confirmados.',
             ], 422);
         }
 
@@ -125,7 +125,7 @@ class ClienteController extends Controller
 
         if ($this->tieneTurnosFuturosConfirmados($cliente)) {
             return response()->json([
-                'message' => 'No se puede inhabilitar una cliente con turnos futuros confirmados.',
+                'message' => 'No se puede inhabilitar un cliente con turnos futuros confirmados.',
             ], 422);
         }
 
