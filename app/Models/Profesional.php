@@ -72,14 +72,32 @@ class Profesional extends Model
     // existe o es de otro usuario). Si se omite, resuelve al profesional
     // default de la cuenta (el más antiguo) — este es el mecanismo de
     // backward-compat: la app RN nunca manda profesional_id.
+    //
+    // $soloActivas (default true): excluye profesionales desactivadas de
+    // ambas ramas — antes de este fix, desactivar una profesional (activo
+    // = false) no le impedía seguir recibiendo turnos nuevos ni seguir
+    // apareciendo con horarios disponibles, porque nada acá filtraba por
+    // `activo`. Los callers que necesitan resolver una profesional YA
+    // desactivada (ej. editar/completar un turno histórico que quedó
+    // asignado a ella antes de desactivarla) pasan false explícitamente.
     // ─────────────────────────────────────────────
-    public static function resolverParaUsuario(User $user, ?int $profesionalIdSolicitado): ?self
+    public static function resolverParaUsuario(User $user, ?int $profesionalIdSolicitado, bool $soloActivas = true): ?self
     {
         if ($profesionalIdSolicitado) {
-            return $user->profesionales()->findOrFail($profesionalIdSolicitado);
+            $query = $user->profesionales();
+            if ($soloActivas) {
+                $query->where('activo', true);
+            }
+
+            return $query->findOrFail($profesionalIdSolicitado);
         }
 
-        return static::where('user_id', $user->id)->oldest('id')->first();
+        $query = static::where('user_id', $user->id);
+        if ($soloActivas) {
+            $query->where('activo', true);
+        }
+
+        return $query->oldest('id')->first();
     }
 
     // ── Relaciones ───────────────────────────────────────────────
