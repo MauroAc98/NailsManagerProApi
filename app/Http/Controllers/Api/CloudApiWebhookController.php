@@ -117,7 +117,35 @@ class CloudApiWebhookController extends Controller
             return;
         }
 
-        $registro->update(['status' => $nuevoStatus]);
+        // Meta no garantiza el orden de entrega de los webhooks de status
+        // (reintentos, colas paralelas) — sin esto, un 'sent' que llega
+        // tarde después de un 'read'/'delivered' ya procesado hacía
+        // RETROCEDER el status en silencio. Se descarta cualquier evento
+        // cronológicamente más viejo (según el reloj de Meta, no el
+        // nuestro) que el último ya aplicado — comparación de enteros Unix
+        // crudos (ver comentario en la migración add_status_event_at sobre
+        // por qué NO es un Carbon/datetime). Si el payload no trae
+        // timestamp (no debería pasar en la práctica), se aplica igual —
+        // más forgiving que bloquear una actualización real por un dato
+        // ausente.
+        $eventoTimestamp = isset($status['timestamp']) ? (int) $status['timestamp'] : null;
+
+        if ($eventoTimestamp !== null && $registro->status_event_at !== null && $eventoTimestamp < $registro->status_event_at) {
+            Log::info('WhatsApp Cloud API: status descartado por llegar fuera de orden', [
+                'message_id' => $messageId,
+                'status_actual' => $registro->status,
+                'status_descartado' => $nuevoStatus,
+                'evento_timestamp' => $eventoTimestamp,
+                'ultimo_evento_aplicado_timestamp' => $registro->status_event_at,
+            ]);
+
+            return;
+        }
+
+        $registro->update([
+            'status' => $nuevoStatus,
+            'status_event_at' => $eventoTimestamp ?? $registro->status_event_at,
+        ]);
 
         // Un fallo al escribir el log no debe tumbar la respuesta 200 que ya
         // se va a devolver — el estado ya quedó persistido arriba.

@@ -31,12 +31,12 @@ class CloudApiWebhookHandleTest extends TestCase
         ], $body);
     }
 
-    private function statusPayload(string $messageId, string $status, array $errors = []): array
+    private function statusPayload(string $messageId, string $status, array $errors = [], ?int $timestamp = null): array
     {
         $statusEntry = [
             'id' => $messageId,
             'status' => $status,
-            'timestamp' => (string) now()->timestamp,
+            'timestamp' => (string) ($timestamp ?? now()->timestamp),
             'recipient_id' => '5493765123456',
         ];
 
@@ -132,6 +132,43 @@ class CloudApiWebhookHandleTest extends TestCase
             ->assertOk();
 
         $this->assertSame(0, WhatsappMensaje::count());
+    }
+
+    public function test_un_status_sent_que_llega_tarde_no_hace_retroceder_un_read_ya_procesado(): void
+    {
+        $user = User::factory()->create();
+        $mensaje = $this->crearMensaje($user, 'wamid.FUERA-DE-ORDEN');
+
+        $ahora = now()->timestamp;
+
+        // 'read' llega primero (cronológicamente más nuevo, timestamp +20s)
+        $this->postSigned($this->statusPayload('wamid.FUERA-DE-ORDEN', 'read', timestamp: $ahora + 20))
+            ->assertOk();
+        $this->assertSame('read', $mensaje->fresh()->status);
+
+        // 'sent' (-> 'pending' en nuestro mapeo) llega DESPUÉS en el tiempo
+        // de red, pero es cronológicamente más VIEJO (timestamp +5s) —
+        // reintento/cola fuera de orden de Meta. No debe pisar el 'read'.
+        $this->postSigned($this->statusPayload('wamid.FUERA-DE-ORDEN', 'sent', timestamp: $ahora + 5))
+            ->assertOk();
+
+        $this->assertSame('read', $mensaje->fresh()->status);
+    }
+
+    public function test_status_events_en_orden_cronologico_se_aplican_normalmente(): void
+    {
+        $user = User::factory()->create();
+        $mensaje = $this->crearMensaje($user, 'wamid.EN-ORDEN');
+
+        $ahora = now()->timestamp;
+
+        $this->postSigned($this->statusPayload('wamid.EN-ORDEN', 'delivered', timestamp: $ahora))
+            ->assertOk();
+        $this->assertSame('delivered', $mensaje->fresh()->status);
+
+        $this->postSigned($this->statusPayload('wamid.EN-ORDEN', 'read', timestamp: $ahora + 10))
+            ->assertOk();
+        $this->assertSame('read', $mensaje->fresh()->status);
     }
 
     public function test_payload_con_messages_entrantes_no_tira_excepcion(): void
