@@ -347,8 +347,13 @@ class TurnoController extends Controller
         $servicios = Servicio::whereIn('id', $data['servicio_ids'])->get();
         $fechaHora = Carbon::parse($data['fecha_hora']);
 
-        // Backward compat: mismo default-resolution que en store().
-        $profesional = $this->resolverProfesional($user, $data['profesional_id'] ?? null);
+        // Backward compat: mismo default-resolution que en store(). A
+        // diferencia de store()/disponibilidad(), acá se permite resolver una
+        // profesional YA desactivada (soloActivas: false) — un turno editado
+        // puede seguir apuntando a la profesional original si se desactivó
+        // después de crearlo; bloquear la edición ahí sería peor que dejarla
+        // pasar (no se puede completar/cancelar un turno legítimo).
+        $profesional = $this->resolverProfesional($user, $data['profesional_id'] ?? null, false);
 
         if (! $profesional) {
             return response()->json([
@@ -885,8 +890,8 @@ class TurnoController extends Controller
     // profesional default de la cuenta (el más antiguo) — este es el
     // mecanismo de backward-compat: la app RN nunca manda profesional_id.
     // ─────────────────────────────────────────────
-    private function resolverProfesional(User $user, ?int $profesionalIdSolicitado): ?Profesional
+    private function resolverProfesional(User $user, ?int $profesionalIdSolicitado, bool $soloActivas = true): ?Profesional
     {
-        return Profesional::resolverParaUsuario($user, $profesionalIdSolicitado);
+        return Profesional::resolverParaUsuario($user, $profesionalIdSolicitado, $soloActivas);
     }
 }
