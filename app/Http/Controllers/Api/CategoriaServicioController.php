@@ -91,10 +91,20 @@ class CategoriaServicioController extends Controller
                 $required,
                 'string',
                 'max:150',
-                Rule::unique('categorias_servicio')->where(
-                    fn($q) =>
-                    $q->where('user_id', $request->user()->id)
-                )->ignore($ignoreId),
+                // Case-insensitive a propósito (a diferencia de Servicio::nombre,
+                // que es case-sensitive hoy) — regla closure en vez de
+                // Rule::unique porque esa clase compara la columna tal cual,
+                // sin poder reemplazar el match exacto por LOWER(nombre).
+                function (string $attribute, mixed $value, \Closure $fail) use ($request, $ignoreId) {
+                    $existe = CategoriaServicio::where('user_id', $request->user()->id)
+                        ->whereRaw('LOWER(nombre) = ?', [mb_strtolower($value)])
+                        ->when($ignoreId, fn($q) => $q->where('id', '!=', $ignoreId))
+                        ->exists();
+
+                    if ($existe) {
+                        $fail('Ya existe una categoría con ese nombre.');
+                    }
+                },
             ],
         ];
     }
