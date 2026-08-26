@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\AdminAuthController;
 use App\Http\Controllers\Api\StatsController;
 use App\Http\Controllers\Api\GastoController;
+use App\Http\Controllers\Api\CategoriaServicioController;
 use Illuminate\Support\Facades\Route;
 
 // ─────────────────────────────────────────────
@@ -89,6 +90,9 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
     // Servicios
     Route::patch('servicios/reordenar', [ServicioController::class, 'reordenar']);
     Route::apiResource('servicios', ServicioController::class);
+
+    // Categorías de servicio
+    Route::apiResource('categorias-servicio', CategoriaServicioController::class);
 
     // Gastos
     Route::apiResource('gastos', GastoController::class);

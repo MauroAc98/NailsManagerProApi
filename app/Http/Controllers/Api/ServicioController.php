@@ -41,12 +41,24 @@ class ServicioController extends Controller
             'duracion_minutos' => 'required|integer|min:1|max:480',
             'precio'           => 'nullable|numeric|min:0',
             'es_promo'         => 'sometimes|boolean',
+            'categoria_id'     => [
+                'nullable',
+                'integer',
+                Rule::exists('categorias_servicio', 'id')->where(
+                    fn($q) =>
+                    $q->where('user_id', $request->user()->id)
+                ),
+            ],
         ]);
 
         // Se fija explícito (en vez de confiar en el default de columna)
         // para que el JSON de respuesta del create ya lo refleje sin
         // necesitar un refresh — mismo criterio que 'activo' en Profesional.
         $data['es_promo'] = $data['es_promo'] ?? false;
+
+        // Igual que 'es_promo': explícito para que el create ya lo refleje.
+        // Ausente en el payload = null (sin categoría), no un error.
+        $data['categoria_id'] = $data['categoria_id'] ?? null;
 
         // El próximo 'orden' se calcula desde el máximo existente, no desde
         // el conteo de filas, mismo criterio que 'orden' en HistoriaPrecioFoto.
@@ -93,6 +105,14 @@ class ServicioController extends Controller
             'precio'           => 'nullable|numeric|min:0',
             'activo'           => 'sometimes|boolean',
             'es_promo'         => 'sometimes|boolean',
+            'categoria_id'     => [
+                'nullable',
+                'integer',
+                Rule::exists('categorias_servicio', 'id')->where(
+                    fn($q) =>
+                    $q->where('user_id', $request->user()->id)
+                ),
+            ],
         ]);
 
         $servicio = Servicio::delUsuario($request->user())->findOrFail($id);
