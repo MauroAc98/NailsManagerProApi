@@ -18,10 +18,15 @@ return new class extends Migration
 
         // Plain Eloquent unique(['user_id', 'nombre']) is case-sensitive on
         // Postgres (prod), which would let "Manos" and "manos" both insert
-        // while app-level validation only catches the second one on the
-        // request path — no real guard against a race or a direct insert.
-        // An expression index on lower(nombre) closes that gap and is
-        // supported by both Postgres (prod) and sqlite (local dev).
+        // with no DB-level guard against a race or a direct insert bypassing
+        // the app-level check. This expression index closes that gap for
+        // plain ASCII names. It is NOT a full Unicode-aware guarantee —
+        // SQL LOWER() doesn't reliably fold accented Spanish letters
+        // (á/é/í/ó/ú/ñ) the same way on every engine/locale, so the
+        // authoritative case-insensitive check (accent-correct, via PHP
+        // mb_strtolower) lives in CategoriaServicioController::rules().
+        // This index is a best-effort DB-level backstop, not the source
+        // of truth for that rule.
         DB::statement('CREATE UNIQUE INDEX categorias_servicio_user_id_nombre_lower_unique ON categorias_servicio (user_id, lower(nombre))');
     }
 

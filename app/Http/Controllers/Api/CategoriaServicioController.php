@@ -92,14 +92,21 @@ class CategoriaServicioController extends Controller
                 'string',
                 'max:150',
                 // Case-insensitive a propósito (a diferencia de Servicio::nombre,
-                // que es case-sensitive hoy) — regla closure en vez de
-                // Rule::unique porque esa clase compara la columna tal cual,
-                // sin poder reemplazar el match exacto por LOWER(nombre).
+                // que es case-sensitive hoy). La comparación se hace en PHP con
+                // mb_strtolower sobre ambos lados, no con LOWER() de la base:
+                // el LOWER() de sqlite no baja acentos/ñ ("MANÍA" queda "manÍa"),
+                // y el de Postgres depende del locale del cluster — con nombres
+                // de categoría en español (tildes, ñ) eso rompe justo el caso
+                // que esta regla existe para cubrir. El set de categorías por
+                // usuario es chico, así que traer y comparar en PHP es correcto
+                // y portable en vez de rápido-pero-frágil.
                 function (string $attribute, mixed $value, \Closure $fail) use ($request, $ignoreId) {
+                    $valorNormalizado = mb_strtolower($value);
+
                     $existe = CategoriaServicio::where('user_id', $request->user()->id)
-                        ->whereRaw('LOWER(nombre) = ?', [mb_strtolower($value)])
                         ->when($ignoreId, fn($q) => $q->where('id', '!=', $ignoreId))
-                        ->exists();
+                        ->get(['id', 'nombre'])
+                        ->contains(fn($categoria) => mb_strtolower($categoria->nombre) === $valorNormalizado);
 
                     if ($existe) {
                         $fail('Ya existe una categoría con ese nombre.');
