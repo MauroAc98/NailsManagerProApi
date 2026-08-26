@@ -14,6 +14,7 @@ class Servicio extends Model
         'activo',
         'es_promo',
         'orden',
+        'categoria_id',
     ];
 
     protected function casts(): array
@@ -24,6 +25,7 @@ class Servicio extends Model
             'precio'           => 'decimal:2',
             'es_promo'         => 'boolean',
             'orden'            => 'integer',
+            'categoria_id'     => 'integer',
         ];
     }
 
@@ -47,5 +49,10 @@ class Servicio extends Model
     public function profesionales()
     {
         return $this->belongsToMany(Profesional::class, 'profesional_servicio');
+    }
+
+    public function categoria()
+    {
+        return $this->belongsTo(CategoriaServicio::class, 'categoria_id');
     }
 }
