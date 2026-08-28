@@ -8,6 +8,7 @@ use App\Models\WhatsappConnection;
 use App\Services\EmbeddedSignupService;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -206,6 +207,60 @@ class EmbeddedSignupServiceTest extends TestCase
         }
 
         $this->assertDatabaseCount('whatsapp_connections', 0);
+    }
+
+    public function test_lista_de_numeros_vacia_da_422_y_no_persiste_nada(): void
+    {
+        $this->fakeMeta([
+            'graph.facebook.com/*/phone_numbers*' => Http::response(['data' => []]),
+        ]);
+
+        try {
+            $this->conectar(phoneNumberId: null);
+            $this->fail('Se esperaba un HttpException 422.');
+        } catch (HttpExceptionInterface $e) {
+            $this->assertSame(422, $e->getStatusCode());
+        }
+
+        $this->assertDatabaseCount('whatsapp_connections', 0);
+    }
+
+    public function test_las_llamadas_http_corren_fuera_de_toda_transaccion_db(): void
+    {
+        $nivelesTransaccion = [];
+
+        Http::fake(function ($request) use (&$nivelesTransaccion) {
+            $nivelesTransaccion[] = DB::transactionLevel();
+
+            return match (true) {
+                str_contains($request->url(), '/oauth/access_token') => Http::response([
+                    'access_token' => 'EAAG-token-de-tenant',
+                    'expires_in' => 0,
+                ]),
+                str_contains($request->url(), '/phone_numbers') => Http::response([
+                    'data' => [[
+                        'id' => self::PHONE_NUMBER_ID,
+                        'display_phone_number' => '+54 9 11 2233-4455',
+                        'verified_name' => 'Salón Demo',
+                    ]],
+                ]),
+                default => Http::response(['success' => true]),
+            };
+        });
+
+        // Baseline: RefreshDatabase envuelve el test en una transacción, así que
+        // el nivel base no es 0. Lo que importa es que las 3 llamadas HTTP NO
+        // abran una transacción adicional por encima de ese baseline.
+        $baseline = DB::transactionLevel();
+
+        $this->conectar();
+
+        $this->assertCount(3, $nivelesTransaccion);
+        $this->assertSame(
+            [$baseline, $baseline, $baseline],
+            $nivelesTransaccion,
+            'Las llamadas a Meta deben correr fuera de toda transacción DB (design §3).',
+        );
     }
 
     public function test_expires_in_ausente_persiste_token_expires_at_null(): void

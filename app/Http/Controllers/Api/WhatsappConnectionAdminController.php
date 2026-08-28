@@ -72,6 +72,16 @@ class WhatsappConnectionAdminController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        // Guarda de tiempo de request, sólo para esta ruta. En prod, nginx usa
+        // el `fastcgi_read_timeout` default de 60s y PHP-FPM tiene
+        // `request_terminate_timeout` deshabilitado, pero el `php.ini` de FPM
+        // fija `max_execution_time = 30`. El intercambio de Embedded Signup
+        // tiene un presupuesto worst-case de ~39s (design §3: 8s + 3×5s + 2×8s
+        // + reintentos), así que subimos el límite por-request acá.
+        // (En Linux `max_execution_time` normalmente excluye la espera de cURL;
+        // esto es belt-and-suspenders y acotado a esta ruta.)
+        set_time_limit(70);
+
         $data = $request->validate([
             'user_id' => ['required', 'integer', 'exists:users,id'],
             'code' => ['required', 'string'],
