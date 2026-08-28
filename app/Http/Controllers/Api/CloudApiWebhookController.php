@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\WhatsappConnection;
 use App\Models\WhatsappMensaje;
 use App\Services\CloudApiService;
 use Illuminate\Http\JsonResponse;
@@ -61,33 +62,96 @@ class CloudApiWebhookController extends Controller
 
         foreach ($payload['entry'] ?? [] as $entry) {
             foreach ($entry['changes'] ?? [] as $change) {
+                $field = $change['field'] ?? null;
+
                 // `value.messages[]` (mensajes entrantes) se ignora a propósito:
                 // con un solo número Cloud API compartido para todo el SaaS,
                 // todavía no está decidido cómo desambiguar a qué profesional/
                 // cliente pertenece un mensaje entrante — se resuelve antes de
-                // migrar profesionales reales más allá del piloto.
+                // migrar profesionales reales más allá del piloto. El ruteo
+                // por-tenant de calidad ya existe (abajo); la pregunta abierta
+                // es la de ownership del entrante.
+                //
+                // procesarStatus() queda FUERA del try/catch de calidad: un
+                // error de DB acá debe propagar a 500 para que Meta reintente,
+                // nunca convertirse en un 200 + warning que pierde el update.
                 foreach ($change['value']['statuses'] ?? [] as $status) {
                     $this->procesarStatus($status);
                 }
 
                 // Rama hermana de la de arriba (no elseif): un mismo payload
-                // puede traer ambos campos en el mismo `changes[]` y hay que
-                // procesar los dos. try/catch defensivo: un value con forma
-                // inesperada nunca debe tumbar la respuesta 200 ni afectar el
-                // procesamiento de statuses del resto del payload.
-                if (($change['field'] ?? null) === 'phone_number_quality_update') {
+                // puede traer ambos campos en el mismo `changes[]`. try/catch
+                // defensivo: SOLO envuelve el resolver + la rama de calidad —
+                // un value con forma inesperada nunca debe tumbar la respuesta
+                // 200 ni el procesamiento de statuses del resto del payload.
+                if ($field === 'phone_number_quality_update') {
                     try {
-                        $cloudApi->registrarCalidad($change['value'] ?? []);
+                        $value = is_array($change['value'] ?? null) ? $change['value'] : [];
+
+                        if (! WhatsappConnection::exists()) {
+                            // Rama 1 — modo legacy / número único: escritura
+                            // incondicional en la clave compartida, sin gating
+                            // ni resolver. Idéntico al comportamiento previo.
+                            $cloudApi->registrarCalidad($value);
+                        } else {
+                            // Rama 2 — hay al menos un número de tenant: se
+                            // resuelve perezosamente (solo acá, nunca antes del
+                            // loop de statuses) a qué conexión pertenece.
+                            $conexion = WhatsappConnection::resolverDesdeWebhook($entry, $change);
+
+                            if ($conexion !== null) {
+                                $cloudApi->registrarCalidad($value, $conexion->phone_number_id);
+                            } elseif ($this->eventoEsDelNumeroCompartido($value)) {
+                                $cloudApi->registrarCalidad($value);
+                            } else {
+                                Log::warning('whatsapp.calidad.evento_sin_ruta', [
+                                    'entry_id' => $entry['id'] ?? null,
+                                ]);
+                            }
+                        }
                     } catch (\Throwable $e) {
-                        Log::warning('WhatsApp Cloud API: no se pudo procesar phone_number_quality_update', [
+                        Log::warning('whatsapp.webhook.calidad_no_procesada', [
                             'error' => $e->getMessage(),
                         ]);
                     }
+                } elseif ($field !== null && $field !== 'messages') {
+                    // Seam Q6 (`account_update` y futuros): hoy estos eventos se
+                    // tragan en silencio. A partir de acá se ven en logs y
+                    // agregar su handler es una rama nueva, no un refactor.
+                    // `messages` se excluye a propósito (inundaría el log).
+                    Log::info('whatsapp.webhook.field_no_manejado', [
+                        'field' => $field,
+                        'entry_id' => $entry['id'] ?? null,
+                    ]);
                 }
             }
         }
 
         return response()->json(['ok' => true]);
+    }
+
+    /**
+     * ¿El evento de calidad identifica positivamente al número compartido de
+     * Turnetto? Se consulta SOLO en la rama 2 (cuando ya hay conexiones de
+     * tenant y el resolver no matcheó): sin un `phone_number_id` compartido
+     * configurado no hay forma de afirmarlo, así que devuelve false.
+     */
+    private function eventoEsDelNumeroCompartido(array $value): bool
+    {
+        $compartido = config('services.whatsapp_cloud.phone_number_id');
+
+        if (empty($compartido)) {
+            return false;
+        }
+
+        if (($value['metadata']['phone_number_id'] ?? null) === $compartido) {
+            return true;
+        }
+
+        $display = $value['display_phone_number'] ?? null;
+
+        return $display !== null
+            && preg_replace('/\D/', '', (string) $display) === preg_replace('/\D/', '', (string) $compartido);
     }
 
     private function procesarStatus(array $status): void
