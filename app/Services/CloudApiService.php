@@ -10,6 +10,28 @@ class CloudApiService
 {
     public const CACHE_KEY_SALUD = 'whatsapp_cloud:salud_numero';
 
+    /**
+     * Clave de cache del veredicto de salud, derivada del phone_number_id.
+     *
+     * Backward-compatible por construcción (§4 del diseño): el número
+     * compartido de todo el SaaS — y cualquier caller que no pase argumento —
+     * sigue usando la clave legacy CACHE_KEY_SALUD tal cual. Solo un
+     * phone_number_id de tenant distinto del compartido obtiene su propio
+     * namespace `CACHE_KEY_SALUD:{phone_number_id}`. Así el veredicto real
+     * sembrado en prod y los 8 test files que referencian CACHE_KEY_SALUD
+     * quedan intactos.
+     */
+    public static function claveSalud(?string $phoneNumberId = null): string
+    {
+        $compartido = config('services.whatsapp_cloud.phone_number_id');
+
+        if ($phoneNumberId === null || $phoneNumberId === '' || $phoneNumberId === $compartido) {
+            return self::CACHE_KEY_SALUD;
+        }
+
+        return self::CACHE_KEY_SALUD.':'.$phoneNumberId;
+    }
+
     private string $token = '';
 
     private string $phoneNumberId = '';
@@ -96,7 +118,7 @@ class CloudApiService
      * señales de deliverability, y sobreescribir un veredicto real con eso
      * destruiría información. Devuelve null cuando no escribió nada.
      */
-    public function registrarCalidad(array $value): ?array
+    public function registrarCalidad(array $value, ?string $phoneNumberId = null): ?array
     {
         $event = $value['event'] ?? null;
 
@@ -138,7 +160,7 @@ class CloudApiService
             Log::info('whatsapp.calidad.veredicto_verde', $contexto);
         }
 
-        Cache::forever(self::CACHE_KEY_SALUD, $registro);
+        Cache::forever(self::claveSalud($phoneNumberId), $registro);
 
         return $registro;
     }
@@ -203,10 +225,10 @@ class CloudApiService
      * Miss (nunca sembrado, o `cache:clear` manual) resuelve a saludable
      * (fail-open) — no bloquear el envío automático por falta de dato.
      */
-    public function estaSaludable(): bool
+    public function estaSaludable(?string $phoneNumberId = null): bool
     {
         try {
-            $cache = Cache::get(self::CACHE_KEY_SALUD);
+            $cache = Cache::get(self::claveSalud($phoneNumberId));
         } catch (\Throwable $e) {
             Log::error('CloudApiService::estaSaludable falló al leer el cache, degradando a saludable (fail-open)', [
                 'exception' => $e->getMessage(),
