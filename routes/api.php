@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\AdminAuthController;
 use App\Http\Controllers\Api\StatsController;
 use App\Http\Controllers\Api\GastoController;
 use App\Http\Controllers\Api\CategoriaServicioController;
+use App\Http\Controllers\Api\WhatsappConnectionAdminController;
 use Illuminate\Support\Facades\Route;
 
 // ─────────────────────────────────────────────
@@ -66,6 +67,12 @@ Route::prefix('admin')->group(function () {
         Route::post('subscriptions/{user}/renew', [AdminController::class, 'renewSubscription']);
         // Uso de Cloud API por salón (mensajes + conversaciones de 24hs estimadas) para cotejar costo real de Meta.
         Route::get('whatsapp/uso-por-salon', [AdminController::class, 'usoWhatsappPorSalon']);
+
+        // Onboarding de Embedded Signup (design §7). El GET de estado es
+        // INGATEADO — sigue alcanzable mientras la feature está gated (Q1);
+        // la gate de Advanced Access la aplica el seam en el POST.
+        Route::get('whatsapp/connections',  [WhatsappConnectionAdminController::class, 'index']);
+        Route::post('whatsapp/connections', [WhatsappConnectionAdminController::class, 'store']);
 
         // Creación de negocio (movida de auth/register) y búsqueda puntual
         // por email/slug para el flujo de renovación — ver AdminController.
