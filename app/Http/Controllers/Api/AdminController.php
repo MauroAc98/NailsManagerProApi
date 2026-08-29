@@ -226,8 +226,12 @@ class AdminController extends Controller
                 // Status computado en vivo, no la columna guardada — ver
                 // AuthController::subscriptionStatus() (mismo criterio).
                 // La columna 'status' nunca se actualiza sola cuando
-                // ends_at simplemente pasa (no hay job programado).
-                'status' => $negocio->subscription->ends_at > now() ? 'ACTIVO' : 'VENCIDO',
+                // ends_at simplemente pasa (no hay job programado). La
+                // excepción es SUSPENDIDO: ese sí es un hecho guardado que
+                // no se deriva de ends_at y se devuelve tal cual.
+                'status' => $negocio->subscription->status === 'SUSPENDIDO'
+                    ? 'SUSPENDIDO'
+                    : ($negocio->subscription->ends_at > now() ? 'ACTIVO' : 'VENCIDO'),
                 'renewed_at' => $negocio->subscription->renewed_at,
             ] : null,
         ])->values());
@@ -265,8 +269,12 @@ class AdminController extends Controller
                 // Status computado en vivo, no la columna guardada — ver
                 // AuthController::subscriptionStatus() (mismo criterio).
                 // La columna 'status' nunca se actualiza sola cuando
-                // ends_at simplemente pasa (no hay job programado).
-                'status' => $negocio->subscription->ends_at > now() ? 'ACTIVO' : 'VENCIDO',
+                // ends_at simplemente pasa (no hay job programado). La
+                // excepción es SUSPENDIDO: ese sí es un hecho guardado que
+                // no se deriva de ends_at y se devuelve tal cual.
+                'status' => $negocio->subscription->status === 'SUSPENDIDO'
+                    ? 'SUSPENDIDO'
+                    : ($negocio->subscription->ends_at > now() ? 'ACTIVO' : 'VENCIDO'),
                 'renewed_at' => $negocio->subscription->renewed_at,
             ] : null,
         ])->values());

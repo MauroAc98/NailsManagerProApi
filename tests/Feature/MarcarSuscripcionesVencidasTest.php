@@ -44,6 +44,20 @@ class MarcarSuscripcionesVencidasTest extends TestCase
         $this->artisan('suscripciones:marcar-vencidas')->assertExitCode(0);
     }
 
+    public function test_no_pisa_una_suscripcion_suspendida_con_ends_at_pasado(): void
+    {
+        $user = User::factory()->create();
+        $subscription = Subscription::create([
+            'user_id' => $user->id,
+            'ends_at' => now()->subDays(3),
+            'status' => 'SUSPENDIDO',
+        ]);
+
+        $this->artisan('suscripciones:marcar-vencidas')->assertExitCode(0);
+
+        $this->assertSame('SUSPENDIDO', $subscription->fresh()->status);
+    }
+
     public function test_es_idempotente_no_rompe_si_ya_estaba_vencida(): void
     {
         $user = User::factory()->create();
