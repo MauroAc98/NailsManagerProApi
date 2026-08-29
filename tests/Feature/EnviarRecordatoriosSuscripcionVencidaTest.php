@@ -52,6 +52,26 @@ class EnviarRecordatoriosSuscripcionVencidaTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_omite_recordatorios_automaticos_cuando_la_suscripcion_esta_suspendida(): void
+    {
+        Http::fake();
+
+        $user = User::factory()->create([
+            'is_exempt' => false,
+            'recordatorio_automatico' => true,
+            'hora_recordatorio' => now()->format('H:00'),
+            'telefono' => '+543765111111',
+        ]);
+        // ends_at en el futuro: solo la suspensión debe cortar el envío pago.
+        Subscription::create(['user_id' => $user->id, 'ends_at' => now()->addDays(10), 'status' => 'SUSPENDIDO']);
+
+        $this->crearTurnoDeManana($user);
+
+        $this->artisan('recordatorios:enviar');
+
+        Http::assertNothingSent();
+    }
+
     public function test_omite_recordatorios_automaticos_sin_ninguna_suscripcion_cargada(): void
     {
         Http::fake();
