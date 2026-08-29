@@ -294,6 +294,7 @@ class AuthController extends Controller
                 'is_exempt' => true,
                 'ends_at'   => null,
                 'days_left' => null,
+                'code'      => null,
             ]);
         }
 
@@ -305,6 +306,7 @@ class AuthController extends Controller
                 'is_exempt' => false,
                 'ends_at'   => null,
                 'days_left' => 0,
+                'code'      => 'NO_SUBSCRIPTION',
             ]);
         }
 
@@ -312,14 +314,24 @@ class AuthController extends Controller
 
         // SUSPENDIDO es el único status guardado que no se deriva de ends_at:
         // se devuelve tal cual para que un dueño cortado vea el motivo real
-        // (este endpoint NO pasa por CheckSubscription).
+        // (este endpoint NO pasa por CheckSubscription). `code` espeja el
+        // mismo vocabulario que CheckSubscription y es puramente aditivo —
+        // el frontend sigue gateando el bloqueo por `status !== 'ACTIVO'`.
+        $suspendida = $subscription->status === 'SUSPENDIDO';
+        $vencida    = $subscription->ends_at <= now();
+
         return response()->json([
-            'status'    => $subscription->status === 'SUSPENDIDO'
+            'status'    => $suspendida
                 ? 'SUSPENDIDO'
                 : ($subscription->ends_at > now() ? 'ACTIVO' : 'VENCIDO'),
             'is_exempt' => false,
             'ends_at'   => $subscription->ends_at,
             'days_left' => $daysLeft,
+            'code'      => match (true) {
+                $suspendida => 'SUBSCRIPTION_SUSPENDED',
+                $vencida    => 'SUBSCRIPTION_EXPIRED',
+                default     => null,
+            },
         ]);
     }
 
