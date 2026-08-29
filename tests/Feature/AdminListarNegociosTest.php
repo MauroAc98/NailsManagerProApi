@@ -82,6 +82,23 @@ class AdminListarNegociosTest extends TestCase
         $this->assertSame('VENCIDO', $negocio['subscription']['status']);
     }
 
+    // SUSPENDIDO es el único status que NO se recomputa: es el hecho
+    // guardado que las lecturas tienen que respetar tal cual, aunque a la
+    // suscripción le queden días.
+    public function test_negocio_suspendido_devuelve_status_suspendido_aunque_ends_at_este_en_el_futuro(): void
+    {
+        $user = User::factory()->create(['email' => 'suspendido@estudio.com']);
+        $user->subscription()->create(['ends_at' => now()->addDays(10), 'status' => 'SUSPENDIDO']);
+
+        $response = $this->actingAs($this->admin, 'admin')
+            ->getJson('/api/admin/negocios')
+            ->assertOk();
+
+        $negocio = collect($response->json())->firstWhere('id', $user->id);
+
+        $this->assertSame('SUSPENDIDO', $negocio['subscription']['status']);
+    }
+
     // Orden = workflow real del admin: quién vence antes va primero. Un
     // negocio sin suscripción no debe romper el sort.
     public function test_ordena_por_ends_at_ascendente_soonest_first(): void

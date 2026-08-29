@@ -14,7 +14,7 @@ class MarcarSuscripcionesVencidas extends Command
     public function handle(): int
     {
         $actualizadas = Subscription::where('ends_at', '<', now())
-            ->where('status', '!=', 'VENCIDO')
+            ->whereNotIn('status', ['VENCIDO', 'SUSPENDIDO'])
             ->update(['status' => 'VENCIDO']);
 
         if ($actualizadas === 0) {

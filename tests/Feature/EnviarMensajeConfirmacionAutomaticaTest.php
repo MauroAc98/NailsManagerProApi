@@ -103,6 +103,26 @@ class EnviarMensajeConfirmacionAutomaticaTest extends TestCase
         $this->assertSame(0, WhatsappMensaje::where('turno_id', $turno->id)->count());
     }
 
+    public function test_no_envia_confirmacion_cuando_la_suscripcion_esta_suspendida(): void
+    {
+        Http::fake();
+
+        $user = User::factory()->create([
+            'is_exempt' => false,
+            'telefono' => '+543765111111',
+            'confirmacion_automatica' => true,
+        ]);
+        // ends_at en el futuro: solo la suspensión debe cortar el envío pago.
+        Subscription::create(['user_id' => $user->id, 'ends_at' => now()->addDays(10), 'status' => 'SUSPENDIDO']);
+
+        $turno = $this->crearTurno($user);
+
+        (new EnviarMensajeConfirmacion($turno->id))->handle(app(CloudApiService::class));
+
+        Http::assertNothingSent();
+        $this->assertSame(0, WhatsappMensaje::where('turno_id', $turno->id)->count());
+    }
+
     public function test_no_envia_confirmacion_sin_ninguna_suscripcion_cargada(): void
     {
         Http::fake();

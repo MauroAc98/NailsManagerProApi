@@ -63,6 +63,19 @@ class AdminNegocioLookupTest extends TestCase
         $response->assertJsonPath('0.subscription.status', 'VENCIDO');
     }
 
+    // SUSPENDIDO se devuelve verbatim, nunca recomputado a ACTIVO/VENCIDO.
+    public function test_negocio_suspendido_devuelve_status_suspendido_aunque_ends_at_este_en_el_futuro(): void
+    {
+        $user = User::factory()->create(['email' => 'suspendido@estudio.com']);
+        $user->subscription()->create(['ends_at' => now()->addDays(10), 'status' => 'SUSPENDIDO']);
+
+        $response = $this->actingAs($this->admin, 'admin')
+            ->getJson('/api/admin/negocios/buscar?q=suspendido@estudio.com')
+            ->assertOk();
+
+        $response->assertJsonPath('0.subscription.status', 'SUSPENDIDO');
+    }
+
     // El email tiene que matchear completo — un fragmento del email no
     // alcanza (a diferencia del slug, que sí usa LIKE parcial).
     public function test_email_parcial_no_matchea(): void

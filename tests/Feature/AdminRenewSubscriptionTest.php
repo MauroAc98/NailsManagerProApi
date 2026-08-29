@@ -150,6 +150,30 @@ class AdminRenewSubscriptionTest extends TestCase
         );
     }
 
+    public function test_rechaza_renovar_una_suscripcion_suspendida(): void
+    {
+        $user = User::factory()->create();
+
+        $subscription = $user->subscription()->create([
+            'ends_at' => now()->addDays(10),
+            'status' => 'SUSPENDIDO',
+        ]);
+        $endsAtOriginal = $subscription->ends_at->timestamp;
+
+        $this->actingAs($this->admin, 'admin')
+            ->postJson("/api/admin/subscriptions/{$user->id}/renew")
+            ->assertStatus(409);
+
+        $fresh = $subscription->fresh();
+        $this->assertSame('SUSPENDIDO', $fresh->status);
+        $this->assertSame($endsAtOriginal, $fresh->ends_at->timestamp);
+
+        $this->assertDatabaseMissing('admin_audit_logs', [
+            'action' => 'suscripcion.renovada',
+            'target_user_id' => $user->id,
+        ]);
+    }
+
     public function test_permite_renovar_de_nuevo_pasadas_las_24hs(): void
     {
         $user = User::factory()->create();

@@ -122,7 +122,13 @@ class User extends Authenticatable
 
         $subscription = $this->subscription;
 
-        return ! $subscription || $subscription->ends_at < now();
+        if (! $subscription) {
+            return true;
+        }
+
+        // SUSPENDIDO es el único status no derivable de ends_at: una cuenta
+        // suspendida por el admin queda cortada aunque le queden días.
+        return $subscription->status === 'SUSPENDIDO' || $subscription->ends_at < now();
     }
 
     public function servicios()

@@ -28,6 +28,13 @@ class AdminController extends Controller
             return response()->json(['error' => 'El usuario no tiene suscripción'], 404);
         }
 
+        if ($subscription->status === 'SUSPENDIDO') {
+            return response()->json([
+                'error' => 'Reactivá la suscripción antes de renovar',
+                'hint' => 'Usá el endpoint reactivate primero',
+            ], 409);
+        }
+
         $renewedRecently = $subscription->renewed_at && $subscription->renewed_at->gt(now()->subHours(24));
 
         if ($renewedRecently && !$request->boolean('force')) {
@@ -52,6 +59,76 @@ class AdminController extends Controller
         return response()->json([
             'message' => 'Suscripción renovada correctamente',
             'user_id' => $user->id,
+            'ends_at' => $subscription->fresh()->ends_at,
+        ]);
+    }
+
+    /**
+     * POST /api/admin/subscriptions/{user}/suspend
+     * Corta el acceso del negocio de inmediato (sin período de gracia) sin
+     * tocar ends_at. SUSPENDIDO es el único status que no se deriva de
+     * ends_at — se limpia solo con reactivate. Ver spec admin-subscription-
+     * lifecycle.
+     */
+    public function suspendSubscription(Request $request, User $user): JsonResponse
+    {
+        $subscription = $user->subscription;
+
+        if (!$subscription) {
+            return response()->json(['error' => 'El usuario no tiene suscripción'], 404);
+        }
+
+        if ($subscription->status === 'SUSPENDIDO') {
+            return response()->json(['error' => 'La suscripción ya está suspendida'], 409);
+        }
+
+        $statusPrevio = $subscription->status;
+
+        $subscription->update(['status' => 'SUSPENDIDO']);
+
+        AdminAudit::record($request->user('admin'), 'suscripcion.suspendida', $user->id, [
+            'ends_at' => $subscription->fresh()->ends_at,
+            'previous_status' => $statusPrevio,
+        ], $request);
+
+        return response()->json([
+            'message' => 'Suscripción suspendida',
+            'user_id' => $user->id,
+            'status' => 'SUSPENDIDO',
+            'ends_at' => $subscription->fresh()->ends_at,
+        ]);
+    }
+
+    /**
+     * POST /api/admin/subscriptions/{user}/reactivate
+     * Saca el negocio de SUSPENDIDO y recalcula el status según ends_at
+     * (ACTIVO si todavía tiene días, VENCIDO si no) SIN mover ends_at.
+     */
+    public function reactivateSubscription(Request $request, User $user): JsonResponse
+    {
+        $subscription = $user->subscription;
+
+        if (!$subscription) {
+            return response()->json(['error' => 'El usuario no tiene suscripción'], 404);
+        }
+
+        if ($subscription->status !== 'SUSPENDIDO') {
+            return response()->json(['error' => 'La suscripción no está suspendida'], 409);
+        }
+
+        $nuevoStatus = $subscription->ends_at > now() ? 'ACTIVO' : 'VENCIDO';
+
+        $subscription->update(['status' => $nuevoStatus]);
+
+        AdminAudit::record($request->user('admin'), 'suscripcion.reactivada', $user->id, [
+            'ends_at' => $subscription->fresh()->ends_at,
+            'new_status' => $nuevoStatus,
+        ], $request);
+
+        return response()->json([
+            'message' => 'Suscripción reactivada',
+            'user_id' => $user->id,
+            'status' => $nuevoStatus,
             'ends_at' => $subscription->fresh()->ends_at,
         ]);
     }
@@ -149,8 +226,12 @@ class AdminController extends Controller
                 // Status computado en vivo, no la columna guardada — ver
                 // AuthController::subscriptionStatus() (mismo criterio).
                 // La columna 'status' nunca se actualiza sola cuando
-                // ends_at simplemente pasa (no hay job programado).
-                'status' => $negocio->subscription->ends_at > now() ? 'ACTIVO' : 'VENCIDO',
+                // ends_at simplemente pasa (no hay job programado). La
+                // excepción es SUSPENDIDO: ese sí es un hecho guardado que
+                // no se deriva de ends_at y se devuelve tal cual.
+                'status' => $negocio->subscription->status === 'SUSPENDIDO'
+                    ? 'SUSPENDIDO'
+                    : ($negocio->subscription->ends_at > now() ? 'ACTIVO' : 'VENCIDO'),
                 'renewed_at' => $negocio->subscription->renewed_at,
             ] : null,
         ])->values());
@@ -188,8 +269,12 @@ class AdminController extends Controller
                 // Status computado en vivo, no la columna guardada — ver
                 // AuthController::subscriptionStatus() (mismo criterio).
                 // La columna 'status' nunca se actualiza sola cuando
-                // ends_at simplemente pasa (no hay job programado).
-                'status' => $negocio->subscription->ends_at > now() ? 'ACTIVO' : 'VENCIDO',
+                // ends_at simplemente pasa (no hay job programado). La
+                // excepción es SUSPENDIDO: ese sí es un hecho guardado que
+                // no se deriva de ends_at y se devuelve tal cual.
+                'status' => $negocio->subscription->status === 'SUSPENDIDO'
+                    ? 'SUSPENDIDO'
+                    : ($negocio->subscription->ends_at > now() ? 'ACTIVO' : 'VENCIDO'),
                 'renewed_at' => $negocio->subscription->renewed_at,
             ] : null,
         ])->values());

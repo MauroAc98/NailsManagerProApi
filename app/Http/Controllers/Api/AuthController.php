@@ -310,8 +310,13 @@ class AuthController extends Controller
 
         $daysLeft = max(0, (int) now()->diffInDays($subscription->ends_at, false));
 
+        // SUSPENDIDO es el único status guardado que no se deriva de ends_at:
+        // se devuelve tal cual para que un dueño cortado vea el motivo real
+        // (este endpoint NO pasa por CheckSubscription).
         return response()->json([
-            'status'    => $subscription->ends_at > now() ? 'ACTIVO' : 'VENCIDO',
+            'status'    => $subscription->status === 'SUSPENDIDO'
+                ? 'SUSPENDIDO'
+                : ($subscription->ends_at > now() ? 'ACTIVO' : 'VENCIDO'),
             'is_exempt' => false,
             'ends_at'   => $subscription->ends_at,
             'days_left' => $daysLeft,
