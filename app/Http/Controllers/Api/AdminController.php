@@ -13,6 +13,7 @@ use App\Services\AdminAudit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 
@@ -127,6 +128,61 @@ class AdminController extends Controller
 
         return response()->json([
             'message' => 'Suscripción reactivada',
+            'user_id' => $user->id,
+            'status' => $nuevoStatus,
+            'ends_at' => $subscription->fresh()->ends_at,
+        ]);
+    }
+
+    /**
+     * POST /api/admin/subscriptions/{user}/adjust-expiry
+     * Mueve ends_at a la fecha indicada (fin del día en la tz de la app) y
+     * recalcula el status por esa fecha — salvo que esté SUSPENDIDO, en cuyo
+     * caso la suspensión se mantiene hasta un reactivate explícito.
+     *
+     * Escribe con DB::table + string pre-formateado (no un save de Eloquent)
+     * a propósito: el cast datetime hace un round-trip que corre el instante
+     * ~3hs porque app.timezone no es UTC. Ver discovery
+     * "Eloquent datetime cast timezone bug".
+     */
+    public function adjustExpiry(Request $request, User $user): JsonResponse
+    {
+        $validated = $request->validate([
+            'ends_at' => ['required', 'date'],
+        ]);
+
+        $subscription = $user->subscription;
+
+        if (!$subscription) {
+            return response()->json(['error' => 'El usuario no tiene suscripción'], 404);
+        }
+
+        $nuevoEndsAt = Carbon::parse($validated['ends_at'], config('app.timezone'))->endOfDay();
+        $nuevoEndsAtString = $nuevoEndsAt->format('Y-m-d H:i:s');
+
+        $endsAtAnterior = DB::table('subscriptions')
+            ->where('user_id', $user->id)
+            ->value('ends_at');
+
+        $nuevoStatus = $subscription->status === 'SUSPENDIDO'
+            ? 'SUSPENDIDO'
+            : ($nuevoEndsAt->isFuture() ? 'ACTIVO' : 'VENCIDO');
+
+        DB::table('subscriptions')
+            ->where('user_id', $user->id)
+            ->update([
+                'ends_at' => $nuevoEndsAtString,
+                'status' => $nuevoStatus,
+                'updated_at' => now(),
+            ]);
+
+        AdminAudit::record($request->user('admin'), 'suscripcion.expiracion_ajustada', $user->id, [
+            'ends_at_anterior' => $endsAtAnterior,
+            'ends_at_nuevo' => $nuevoEndsAtString,
+        ], $request);
+
+        return response()->json([
+            'message' => 'Vencimiento ajustado',
             'user_id' => $user->id,
             'status' => $nuevoStatus,
             'ends_at' => $subscription->fresh()->ends_at,
