@@ -23,7 +23,10 @@ class CheckSubscriptionSuspendidaTest extends TestCase
         $this->actingAs($user, 'sanctum')
             ->getJson('/api/gastos')
             ->assertStatus(403)
-            ->assertJson(['code' => 'SUBSCRIPTION_EXPIRED']);
+            ->assertJson([
+                'error' => 'Suscripción suspendida',
+                'code'  => 'SUBSCRIPTION_SUSPENDED',
+            ]);
     }
 
     public function test_suscripcion_activa_deja_pasar(): void
