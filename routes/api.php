@@ -67,6 +67,7 @@ Route::prefix('admin')->group(function () {
         Route::post('subscriptions/{user}/renew', [AdminController::class, 'renewSubscription']);
         Route::post('subscriptions/{user}/suspend', [AdminController::class, 'suspendSubscription']);
         Route::post('subscriptions/{user}/reactivate', [AdminController::class, 'reactivateSubscription']);
+        Route::post('subscriptions/{user}/adjust-expiry', [AdminController::class, 'adjustExpiry']);
         // Uso de Cloud API por salón (mensajes + conversaciones de 24hs estimadas) para cotejar costo real de Meta.
         Route::get('whatsapp/uso-por-salon', [AdminController::class, 'usoWhatsappPorSalon']);
 
