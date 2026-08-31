@@ -208,21 +208,55 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
         $this->assertSame('confirmacion_turno', WhatsappTemplate::nombrePlantillaMeta('confirmacion'));
     }
 
-    public function test_mensaje_legible_incluye_los_valores_reales(): void
+    public function test_mensaje_legible_confirmacion_refleja_la_plantilla_aprobada(): void
     {
+        // Snapshot 1:1 del cuerpo aprobado en Meta para confirmacion_turno
+        // (tono "sistema", re-aprobado 2026-08-30). El log en
+        // whatsapp_mensajes.mensaje tiene que reflejar exactamente lo que ve
+        // el cliente, incluidos los marcadores de negrita *...* y los emojis.
         $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'direccion' => 'Av. Siempre Viva 742', 'telefono' => '3765000000']);
         $turno = $this->crearTurnoDeMuestra($user);
 
         $resultado = WhatsappTemplate::mensajeLegible('confirmacion', $turno->cliente, $turno, $user);
 
-        $this->assertStringContainsString('Martina', $resultado);
-        $this->assertStringContainsString('Nails Studio', $resultado);
-        $this->assertStringContainsString('20/08', $resultado);
-        $this->assertStringContainsString('15:30', $resultado);
-        $this->assertStringContainsString('Manicura semipermanente', $resultado);
-        $this->assertStringContainsString('Av. Siempre Viva 742', $resultado);
-        $this->assertStringContainsString('376 500-0000', $resultado);
-        $this->assertStringContainsString('hablaste con Fernanda previamente', $resultado);
-        $this->assertStringContainsString('mensaje automático, no hace falta responder', $resultado);
+        $esperado = <<<'TXT'
+            Hola Martina, tu turno en *Nails Studio* quedó confirmado.
+
+            🗓️ 20/08 · 🕒 15:30 hs
+            ✨ Manicura semipermanente
+            📍 Av. Siempre Viva 742
+
+            ⚠️ Desde este número solo se envían avisos. Si respondés a este mensaje, *Fernanda no lo recibe y no puede contestarte.*
+
+            Para consultas o cambios de turno, comunicate al +54 9 376 500-0000 con al menos 24 hs de anticipación.
+            TXT;
+
+        $this->assertSame($esperado, $resultado);
+    }
+
+    public function test_mensaje_legible_recordatorio_refleja_la_plantilla_aprobada(): void
+    {
+        // Snapshot 1:1 del cuerpo aprobado en Meta para recordatorio_turno.
+        // OJO: acá "🕒 {{4}}" NO lleva el sufijo "hs" (a diferencia de
+        // confirmacion) y el negocio va con el punto DENTRO de la negrita
+        // (*Nails Studio.*).
+        $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'direccion' => 'Av. Siempre Viva 742', 'telefono' => '3765000000']);
+        $turno = $this->crearTurnoDeMuestra($user);
+
+        $resultado = WhatsappTemplate::mensajeLegible('recordatorio', $turno->cliente, $turno, $user);
+
+        $esperado = <<<'TXT'
+            Hola Martina, te recordamos tu turno de mañana en *Nails Studio.*
+
+            🗓️ 20/08 · 🕒 15:30
+            ✨ Manicura semipermanente
+            📍 Av. Siempre Viva 742
+
+            ⚠️ Desde este número solo se envían avisos. Si respondés a este mensaje, *Fernanda no lo recibe y no puede contestarte.*
+
+            Para consultas o cambios de turno, comunicate al +54 9 376 500-0000 con al menos 24 hs de anticipación.
+            TXT;
+
+        $this->assertSame($esperado, $resultado);
     }
 }
