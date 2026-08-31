@@ -72,9 +72,13 @@ final class WhatsappTemplate
     // ── Texto legible para el log (WhatsappMensaje.mensaje) ────────
     // Refleja el texto REAL y fijo de la plantilla aprobada en Meta (no
     // hay más texto personalizable) — mismos 8 valores que
-    // parametrosCloudApi(), mismo orden, interpolados en el cuerpo real,
-    // más el footer fijo (sin variables) que Meta también le muestra al
-    // cliente.
+    // parametrosCloudApi(), mismo orden, interpolados en el cuerpo real.
+    //
+    // Los cuerpos de confirmacion_turno y recordatorio_turno se re-aprobaron
+    // en Meta con tono "sistema" (2026-08-30): se sacó la línea "Te atiende"
+    // y el footer "mensaje automático"; {{7}} (profesional) ahora aparece
+    // solo dentro del aviso ⚠️. Se conservan los marcadores *...* de negrita
+    // y los emojis para que el log calque lo que ve el cliente.
     public static function mensajeLegible(
         string $tipo,
         Cliente $cliente,
@@ -83,34 +87,53 @@ final class WhatsappTemplate
     ): string {
         [$nombre, $negocio, $fecha, $hora, $servicios, $direccion, $profesional, $telefono] = static::parametrosCloudApi($tipo, $cliente, $turno, $user);
 
-        $footer = "\n\nEste es un mensaje automático, no hace falta responder.";
+        $aviso = "⚠️ Desde este número solo se envían avisos. Si respondés a este mensaje, *{$profesional} no lo recibe y no puede contestarte.*";
+        $contacto = "Para consultas o cambios de turno, comunicate al {$telefono} con al menos 24 hs de anticipación.";
 
-        $cuerpo = match ($tipo) {
-            'recordatorio' => "Hola {$nombre} ✨\n\n⏰ Recordatorio: tu turno es *mañana* en {$negocio}\n🗓️ {$fecha} · 🕒 {$hora} hs\n✨ {$servicios}\n📍 {$direccion}\n\n*¡Te esperamos!*\n\n📞 ¿Consultas o cambios de turno? Si ya hablaste con {$profesional} previamente, comunicate por ahí. Si no, este es su número: 💬 {$telefono}.\nPor favor, avisar con 24hs de anticipación. ¡Gracias!{$footer}",
-            'confirmacion' => "Hola {$nombre} ✨\n\n✅ Turno confirmado en {$negocio}\n🗓️ {$fecha} · 🕒 {$hora} hs\n✨ {$servicios}\n📍 {$direccion}\n\n*¡Te esperamos!*\n\n📞 ¿Consultas o cambios de turno? Si ya hablaste con {$profesional} previamente, comunicate por ahí. Si no, este es su número: 💬 {$telefono}.\nPor favor, avisar con 24hs de anticipación. ¡Gracias!{$footer}",
+        return match ($tipo) {
+            // OJO: en recordatorio "🕒 {$hora}" NO lleva "hs" (a diferencia
+            // de confirmacion) y el negocio va con el punto DENTRO de la
+            // negrita — así quedó aprobado en Meta.
+            'recordatorio' => "Hola {$nombre}, te recordamos tu turno de mañana en *{$negocio}.*\n\n🗓️ {$fecha} · 🕒 {$hora}\n✨ {$servicios}\n📍 {$direccion}\n\n{$aviso}\n\n{$contacto}",
+            'confirmacion' => "Hola {$nombre}, tu turno en *{$negocio}* quedó confirmado.\n\n🗓️ {$fecha} · 🕒 {$hora} hs\n✨ {$servicios}\n📍 {$direccion}\n\n{$aviso}\n\n{$contacto}",
             default => '',
         };
-
-        return $cuerpo;
     }
 
-    // Puerto 1:1 de phoneUtils.formatDisplay() (nailsmanagerpro-web,
-    // lib/phoneUtils.ts) — no asume dónde termina el código de país, agrupa
-    // de a 3 dígitos desde la izquierda con los últimos 4 como bloque final
-    // separado por guion. Números cortos (<6 dígitos, incluido '') se
-    // devuelven tal cual — mismo criterio sin-fallback que el resto de los
-    // parámetros: vacío entra, vacío sale, Meta rechaza el envío si llega así.
+    // El teléfono viaja DENTRO del cuerpo de la plantilla Meta. WhatsApp
+    // solo lo vuelve tappable si está en formato internacional, así que
+    // normalizamos cualquier forma de cargar el número (nacional, con o sin
+    // código de país, con o sin el 9 de móvil, con separadores) al string
+    // canónico "+54 9 AAA NNN-NNNN".
+    //
+    // Best-effort con fallback crudo: si de la entrada no se puede derivar
+    // un número nacional de 10 dígitos (área de 3 + abonado de 7), se
+    // devuelve el valor original sin tocar — no queda tappable pero tampoco
+    // roto, mismo criterio sin-fallback que el resto de los parámetros
+    // (vacío entra, vacío sale; Meta rechaza el envío si llega así).
     private static function formatearTelefono(string $numero): string
     {
         $digitos = preg_replace('/\D/', '', $numero) ?? '';
-        if (strlen($digitos) < 6) {
-            return $digitos;
+
+        // Código de país: si viene con 54 al frente lo sacamos; si no,
+        // asumimos que ya es el número nacional (equivale a anteponer 549).
+        if (str_starts_with($digitos, '54')) {
+            $digitos = substr($digitos, 2);
         }
 
-        $ultimo = substr($digitos, -4);
-        $resto = substr($digitos, 0, -4);
-        $grupos = implode(' ', str_split($resto, 3));
+        // 9 de móvil: "549..." → nacional de 11 dígitos que empieza con 9.
+        if (strlen($digitos) === 11 && str_starts_with($digitos, '9')) {
+            $digitos = substr($digitos, 1);
+        }
 
-        return "{$grupos}-{$ultimo}";
+        if (strlen($digitos) !== 10) {
+            return $numero;
+        }
+
+        $area = substr($digitos, 0, 3);
+        $central = substr($digitos, 3, 3);
+        $final = substr($digitos, 6, 4);
+
+        return "+54 9 {$area} {$central}-{$final}";
     }
 }
