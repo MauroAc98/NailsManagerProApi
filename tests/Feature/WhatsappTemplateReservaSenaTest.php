@@ -124,6 +124,23 @@ class WhatsappTemplateReservaSenaTest extends TestCase
         }
     }
 
+    public function test_datos_cuenta_sena_colapsa_espacios_saltos_y_tabs_interiores(): void
+    {
+        $user = $this->userConSena([
+            'whatsapp_sena_titular' => "Kimberley\nFaustino",
+            'whatsapp_sena_entidad' => "Banco\tMacro",
+            'whatsapp_sena_alias' => 'Kim     1710',
+            'whatsapp_sena_cbu' => null,
+        ]);
+
+        $salida = WhatsappTemplate::datosCuentaSena($user);
+
+        $this->assertSame('Kimberley Faustino · Banco Macro · Alias: Kim 1710', $salida);
+        $this->assertStringNotContainsString("\n", $salida);
+        $this->assertStringNotContainsString("\t", $salida);
+        $this->assertDoesNotMatchRegularExpression('/ {2,}/', $salida);
+    }
+
     public function test_formatea_cbu_corto_o_con_basura_best_effort(): void
     {
         $user = $this->userConSena([

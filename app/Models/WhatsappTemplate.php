@@ -96,27 +96,36 @@ final class WhatsappTemplate
     {
         $partes = [];
 
-        $titular = trim($user->whatsapp_sena_titular ?? '');
+        $titular = static::unaLinea($user->whatsapp_sena_titular);
         if ($titular !== '') {
             $partes[] = $titular;
         }
 
-        $entidad = trim($user->whatsapp_sena_entidad ?? '');
+        $entidad = static::unaLinea($user->whatsapp_sena_entidad);
         if ($entidad !== '') {
             $partes[] = $entidad;
         }
 
-        $alias = trim($user->whatsapp_sena_alias ?? '');
+        $alias = static::unaLinea($user->whatsapp_sena_alias);
         if ($alias !== '') {
             $partes[] = "Alias: {$alias}";
         }
 
-        $cbu = trim($user->whatsapp_sena_cbu ?? '');
+        $cbu = static::unaLinea($user->whatsapp_sena_cbu);
         if ($cbu !== '') {
             $partes[] = 'CBU: '.static::formatearCbu($cbu);
         }
 
         return implode(' · ', $partes);
+    }
+
+    // Colapsa cualquier whitespace interior (saltos de línea, tabs, espacios
+    // múltiples) a un solo espacio y recorta los bordes. {{8}} viaja como
+    // parámetro de plantilla Meta: si llega con un \n, Meta rechaza el envío
+    // completo (400) y la deduplicación bloquea el reintento.
+    private static function unaLinea(?string $valor): string
+    {
+        return trim(preg_replace('/\s+/', ' ', $valor ?? ''));
     }
 
     // Un espacio cada 4 dígitos. Se descartan los no-dígitos primero (por
