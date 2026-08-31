@@ -92,14 +92,22 @@ class EnviarMensajeConfirmacion implements ShouldQueue
             return;
         }
 
-        $mensaje = WhatsappTemplate::mensajeLegible('confirmacion', $cliente, $turno, $user);
+        // Los salones que activaron el opt-in de seña usan la plantilla
+        // reserva_turno_sena (10 vars: agrega monto y datos de la cuenta).
+        // El resto sigue con confirmacion_turno (8 vars). La categoría del
+        // registro (WhatsappMensaje.tipo) queda en 'confirmacion' en ambos
+        // casos — es el tipo de evento para tracking/dedup, no el nombre de
+        // la plantilla.
+        $templateTipo = $user->whatsapp_pide_sena ? 'reserva_sena' : 'confirmacion';
+
+        $mensaje = WhatsappTemplate::mensajeLegible($templateTipo, $cliente, $turno, $user);
         $numero = $cloudApiService->normalizarNumero($cliente->telefono);
 
         $resultado = $cloudApiService->enviarPlantilla(
             $numero,
-            WhatsappTemplate::nombrePlantillaMeta('confirmacion'),
+            WhatsappTemplate::nombrePlantillaMeta($templateTipo),
             'es_AR',
-            WhatsappTemplate::parametrosCloudApi('confirmacion', $cliente, $turno, $user),
+            WhatsappTemplate::parametrosCloudApi($templateTipo, $cliente, $turno, $user),
         );
         $messageId = $resultado->messageId;
 
