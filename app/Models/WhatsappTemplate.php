@@ -94,23 +94,40 @@ final class WhatsappTemplate
         return $cuerpo;
     }
 
-    // Puerto 1:1 de phoneUtils.formatDisplay() (nailsmanagerpro-web,
-    // lib/phoneUtils.ts) — no asume dónde termina el código de país, agrupa
-    // de a 3 dígitos desde la izquierda con los últimos 4 como bloque final
-    // separado por guion. Números cortos (<6 dígitos, incluido '') se
-    // devuelven tal cual — mismo criterio sin-fallback que el resto de los
-    // parámetros: vacío entra, vacío sale, Meta rechaza el envío si llega así.
+    // El teléfono viaja DENTRO del cuerpo de la plantilla Meta. WhatsApp
+    // solo lo vuelve tappable si está en formato internacional, así que
+    // normalizamos cualquier forma de cargar el número (nacional, con o sin
+    // código de país, con o sin el 9 de móvil, con separadores) al string
+    // canónico "+54 9 AAA NNN-NNNN".
+    //
+    // Best-effort con fallback crudo: si de la entrada no se puede derivar
+    // un número nacional de 10 dígitos (área de 3 + abonado de 7), se
+    // devuelve el valor original sin tocar — no queda tappable pero tampoco
+    // roto, mismo criterio sin-fallback que el resto de los parámetros
+    // (vacío entra, vacío sale; Meta rechaza el envío si llega así).
     private static function formatearTelefono(string $numero): string
     {
         $digitos = preg_replace('/\D/', '', $numero) ?? '';
-        if (strlen($digitos) < 6) {
-            return $digitos;
+
+        // Código de país: si viene con 54 al frente lo sacamos; si no,
+        // asumimos que ya es el número nacional (equivale a anteponer 549).
+        if (str_starts_with($digitos, '54')) {
+            $digitos = substr($digitos, 2);
         }
 
-        $ultimo = substr($digitos, -4);
-        $resto = substr($digitos, 0, -4);
-        $grupos = implode(' ', str_split($resto, 3));
+        // 9 de móvil: "549..." → nacional de 11 dígitos que empieza con 9.
+        if (strlen($digitos) === 11 && str_starts_with($digitos, '9')) {
+            $digitos = substr($digitos, 1);
+        }
 
-        return "{$grupos}-{$ultimo}";
+        if (strlen($digitos) !== 10) {
+            return $numero;
+        }
+
+        $area = substr($digitos, 0, 3);
+        $central = substr($digitos, 3, 3);
+        $final = substr($digitos, 6, 4);
+
+        return "+54 9 {$area} {$central}-{$final}";
     }
 }

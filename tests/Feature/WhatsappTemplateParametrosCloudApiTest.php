@@ -68,7 +68,7 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
             'Manicura semipermanente',
             'Av. Siempre Viva 742',
             'Fernanda',
-            '376 500-0000',
+            '+54 9 376 500-0000',
         ], $parametros);
     }
 
@@ -90,7 +90,7 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
             'Manicura semipermanente',
             'Av. Siempre Viva 742',
             'Fernanda',
-            '376 500-0000',
+            '+54 9 376 500-0000',
         ], $parametros);
     }
 
@@ -155,18 +155,28 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
         $this->assertSame('Evelin', $parametros[6]);
     }
 
-    public function test_telefono_se_formatea_agrupado_no_crudo(): void
+    public function test_telefono_se_normaliza_a_formato_internacional(): void
     {
-        // Mismo formato que phoneUtils.formatDisplay() en el frontend
-        // (usado también en la "historia" de Instagram) — últimos 4 dígitos
-        // como bloque final con guion, el resto agrupado de a 3 desde la
-        // izquierda, incluido el "+54" si el número lo trae.
-        $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'direccion' => 'Av. Siempre Viva 742', 'telefono' => '+543765000000']);
+        // El teléfono va DENTRO del cuerpo de la plantilla Meta; WhatsApp
+        // solo lo vuelve tappable si está en formato internacional
+        // (+54 9 …). formatearTelefono normaliza distintas formas de cargar
+        // el mismo número de Misiones (área 376) al mismo string canónico.
+        $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'direccion' => 'Av. Siempre Viva 742']);
         $turno = $this->crearTurnoDeMuestra($user);
 
-        $parametros = WhatsappTemplate::parametrosCloudApi('confirmacion', $turno->cliente, $turno, $user);
+        $entradas = [
+            '3765000000',      // nacional sin 9 ni país
+            '376 500-0000',    // como lo muestra el front (formatDisplay)
+            '+543765000000',   // país sin 9
+            '543765000000',    // país sin 9, sin +
+            '5493765000000',   // país + 9 (móvil canónico)
+        ];
 
-        $this->assertSame('543 765 00-0000', $parametros[7]);
+        foreach ($entradas as $entrada) {
+            $user->telefono = $entrada;
+            $parametros = WhatsappTemplate::parametrosCloudApi('confirmacion', $turno->cliente, $turno, $user);
+            $this->assertSame('+54 9 376 500-0000', $parametros[7], "Entrada: {$entrada}");
+        }
     }
 
     public function test_telefono_corto_se_devuelve_sin_formatear(): void
@@ -177,6 +187,19 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
         $parametros = WhatsappTemplate::parametrosCloudApi('confirmacion', $turno->cliente, $turno, $user);
 
         $this->assertSame('12345', $parametros[7]);
+    }
+
+    public function test_telefono_sin_largo_valido_se_devuelve_tal_cual(): void
+    {
+        // Fallback best-effort: si no se puede derivar un número nacional
+        // de 10 dígitos, sale el valor original sin tocar (no tappable pero
+        // no roto) — mismo criterio sin-fallback que hoy.
+        $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'direccion' => 'Av. Siempre Viva 742', 'telefono' => '1234567']);
+        $turno = $this->crearTurnoDeMuestra($user);
+
+        $parametros = WhatsappTemplate::parametrosCloudApi('confirmacion', $turno->cliente, $turno, $user);
+
+        $this->assertSame('1234567', $parametros[7]);
     }
 
     public function test_nombre_de_plantilla_meta_segun_tipo(): void
