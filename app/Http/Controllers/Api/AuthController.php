@@ -133,6 +133,11 @@ class AuthController extends Controller
             'confirmacion_automatica' => 'sometimes|boolean',
             'hora_recordatorio'       => 'sometimes|string|in:18:00,19:00,20:00,21:00,22:00',
             'sena_monto'              => 'sometimes|nullable|numeric|min:0',
+            'whatsapp_pide_sena'      => 'sometimes|boolean',
+            'whatsapp_sena_titular'   => 'sometimes|nullable|string|max:120',
+            'whatsapp_sena_entidad'   => 'sometimes|nullable|string|max:120',
+            'whatsapp_sena_alias'     => 'sometimes|nullable|string|max:60',
+            'whatsapp_sena_cbu'       => 'sometimes|nullable|string|max:34',
             'fcm_token'               => 'sometimes|nullable|string',
             'password'                => 'sometimes|string|min:8|confirmed',
             'locale'                  => 'sometimes|nullable|in:es,pt-BR,en',
@@ -164,6 +169,41 @@ class AuthController extends Controller
                 throw ValidationException::withMessages([
                     'direccion' => ['Cargá tu dirección antes de activar los envíos automáticos de WhatsApp.'],
                 ]);
+            }
+        }
+
+        // Guard de la seña: pedir seña en las confirmaciones solo tiene
+        // sentido si el cliente sabe cuánto y a dónde pagar. Si la request
+        // toca cualquiera de los campos de seña, se evalúa el estado FINAL
+        // (valor de la request ?? valor actual del usuario) y, si queda
+        // pidiendo seña, se exige monto > 0 + titular + (alias o CBU).
+        // Apagar el toggle no borra nada — los datos bancarios quedan
+        // guardados para reactivarlo sin recargarlos.
+        $camposSena = ['whatsapp_pide_sena', 'sena_monto', 'whatsapp_sena_titular', 'whatsapp_sena_entidad', 'whatsapp_sena_alias', 'whatsapp_sena_cbu'];
+        $tocaSena = (bool) array_intersect($camposSena, array_keys($data));
+
+        if ($tocaSena) {
+            $valorFinal = fn (string $campo) => array_key_exists($campo, $data) ? $data[$campo] : $user->{$campo};
+
+            if ($valorFinal('whatsapp_pide_sena')) {
+                $errores = [];
+
+                $montoFinal = $valorFinal('sena_monto');
+                if (! is_numeric($montoFinal) || (float) $montoFinal <= 0) {
+                    $errores['sena_monto'] = ['Cargá el monto de la seña para pedirla en las confirmaciones.'];
+                }
+
+                if (blank($valorFinal('whatsapp_sena_titular'))) {
+                    $errores['whatsapp_sena_titular'] = ['Cargá el titular de la cuenta para pedir la seña.'];
+                }
+
+                if (blank($valorFinal('whatsapp_sena_alias')) && blank($valorFinal('whatsapp_sena_cbu'))) {
+                    $errores['whatsapp_sena_alias'] = ['Cargá el alias o el CBU de la cuenta para pedir la seña.'];
+                }
+
+                if ($errores !== []) {
+                    throw ValidationException::withMessages($errores);
+                }
             }
         }
 
