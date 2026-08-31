@@ -218,9 +218,20 @@ final class WhatsappTemplate
             return $numero;
         }
 
-        $area = substr($digitos, 0, 3);
-        $central = substr($digitos, 3, 3);
-        $final = substr($digitos, 6, 4);
+        // AMBA (CABA + GBA) usa código de área "11" de 2 dígitos + abonado
+        // de 8; el resto del país usa área de 3 + abonado de 7. Se agrupa
+        // según corresponda para no partir mal el número. El raro caso de
+        // área de 4 dígitos (algunas localidades chicas) cae en la rama de
+        // 3 y queda con un espacio corrido — aceptable, sigue siendo válido.
+        if (str_starts_with($digitos, '11')) {
+            $area = substr($digitos, 0, 2);
+            $central = substr($digitos, 2, 4);
+            $final = substr($digitos, 6, 4);
+        } else {
+            $area = substr($digitos, 0, 3);
+            $central = substr($digitos, 3, 3);
+            $final = substr($digitos, 6, 4);
+        }
 
         return "+54 9 {$area} {$central}-{$final}";
     }

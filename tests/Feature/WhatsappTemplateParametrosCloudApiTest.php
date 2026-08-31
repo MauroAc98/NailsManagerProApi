@@ -179,6 +179,28 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
         }
     }
 
+    public function test_telefono_de_amba_usa_area_de_dos_digitos(): void
+    {
+        // El código de área de AMBA es "11" (2 dígitos) + abonado de 8, a
+        // diferencia del interior (área de 3 + abonado de 7). El
+        // agrupamiento tiene que respetarlo: "11 4567-8901", no "114 567-8901".
+        $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'direccion' => 'Av. Siempre Viva 742']);
+        $turno = $this->crearTurnoDeMuestra($user);
+
+        $entradas = [
+            '1145678901',       // nacional sin 9 ni país
+            '11 4567-8901',     // como lo muestra el front
+            '+541145678901',    // país sin 9
+            '5491145678901',    // país + 9 (móvil canónico)
+        ];
+
+        foreach ($entradas as $entrada) {
+            $user->telefono = $entrada;
+            $parametros = WhatsappTemplate::parametrosCloudApi('confirmacion', $turno->cliente, $turno, $user);
+            $this->assertSame('+54 9 11 4567-8901', $parametros[7], "Entrada: {$entrada}");
+        }
+    }
+
     public function test_telefono_corto_se_devuelve_sin_formatear(): void
     {
         $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'direccion' => 'Av. Siempre Viva 742', 'telefono' => '12345']);
