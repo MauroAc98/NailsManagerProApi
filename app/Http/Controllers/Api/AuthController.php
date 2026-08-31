@@ -134,10 +134,13 @@ class AuthController extends Controller
             'hora_recordatorio'       => 'sometimes|string|in:18:00,19:00,20:00,21:00,22:00',
             'sena_monto'              => 'sometimes|nullable|numeric|min:0',
             'whatsapp_pide_sena'      => 'sometimes|boolean',
-            'whatsapp_sena_titular'   => 'sometimes|nullable|string|max:120',
-            'whatsapp_sena_entidad'   => 'sometimes|nullable|string|max:120',
-            'whatsapp_sena_alias'     => 'sometimes|nullable|string|max:60',
-            'whatsapp_sena_cbu'       => 'sometimes|nullable|string|max:34',
+            // not_regex: los datos bancarios viajan como parámetros de la
+            // plantilla Meta reserva_turno_sena — un salto de línea o tab
+            // hace que Meta rechace el envío completo.
+            'whatsapp_sena_titular'   => 'sometimes|nullable|string|max:120|not_regex:/[\r\n\t]/',
+            'whatsapp_sena_entidad'   => 'sometimes|nullable|string|max:120|not_regex:/[\r\n\t]/',
+            'whatsapp_sena_alias'     => 'sometimes|nullable|string|max:60|not_regex:/[\r\n\t]/',
+            'whatsapp_sena_cbu'       => 'sometimes|nullable|string|max:34|not_regex:/[\r\n\t]/',
             'fcm_token'               => 'sometimes|nullable|string',
             'password'                => 'sometimes|string|min:8|confirmed',
             'locale'                  => 'sometimes|nullable|in:es,pt-BR,en',
@@ -191,6 +194,11 @@ class AuthController extends Controller
                 $montoFinal = $valorFinal('sena_monto');
                 if (! is_numeric($montoFinal) || (float) $montoFinal <= 0) {
                     $errores['sena_monto'] = ['Cargá el monto de la seña para pedirla en las confirmaciones.'];
+                }
+
+                // direccion es el parámetro fijo {{6}} de reserva_turno_sena.
+                if (blank($valorFinal('direccion'))) {
+                    $errores['direccion'] = ['Cargá tu dirección antes de pedir la seña en las confirmaciones.'];
                 }
 
                 if (blank($valorFinal('whatsapp_sena_titular'))) {

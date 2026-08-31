@@ -87,6 +87,54 @@ class UpdatePerfilSenaRequeridaTest extends TestCase
             ->assertJsonValidationErrors('whatsapp_sena_alias');
     }
 
+    public function test_activar_sena_sin_direccion_cargada_es_rechazado(): void
+    {
+        // direccion es el parámetro fijo {{6}} de reserva_turno_sena — si
+        // llega vacío Meta rechaza el envío completo.
+        $user = User::factory()->create(['is_exempt' => true, 'direccion' => null, 'whatsapp_pide_sena' => false]);
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson('/api/perfil', [
+                'whatsapp_pide_sena' => true,
+                'sena_monto' => 5000,
+                'whatsapp_sena_titular' => 'Kimberley Faustino',
+                'whatsapp_sena_alias' => 'Kim1710',
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('direccion');
+
+        $this->assertFalse($user->fresh()->whatsapp_pide_sena);
+    }
+
+    public function test_activar_sena_cargando_direccion_en_el_mismo_request_se_permite(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true, 'direccion' => null, 'whatsapp_pide_sena' => false]);
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson('/api/perfil', [
+                'whatsapp_pide_sena' => true,
+                'direccion' => 'Av. Siempre Viva 742',
+                'sena_monto' => 5000,
+                'whatsapp_sena_titular' => 'Kimberley Faustino',
+                'whatsapp_sena_alias' => 'Kim1710',
+            ])
+            ->assertOk();
+
+        $this->assertTrue($user->fresh()->whatsapp_pide_sena);
+    }
+
+    public function test_rechaza_saltos_de_linea_o_tabs_en_los_datos_bancarios(): void
+    {
+        $user = $this->userConSenaCompleta();
+
+        foreach (['whatsapp_sena_titular', 'whatsapp_sena_entidad', 'whatsapp_sena_alias', 'whatsapp_sena_cbu'] as $campo) {
+            $this->actingAs($user, 'sanctum')
+                ->putJson('/api/perfil', [$campo => "linea1\nlinea2"])
+                ->assertStatus(422)
+                ->assertJsonValidationErrors($campo);
+        }
+    }
+
     public function test_borrar_el_unico_medio_de_pago_de_un_salon_activo_es_rechazado(): void
     {
         $user = $this->userConSenaCompleta(); // alias Kim1710, sin cbu
