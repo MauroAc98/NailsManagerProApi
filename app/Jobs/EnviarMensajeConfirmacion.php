@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Turno;
+use App\Models\User;
 use App\Models\WhatsappMensaje;
 use App\Models\WhatsappTemplate;
 use App\Services\CloudApiService;
@@ -100,6 +101,21 @@ class EnviarMensajeConfirmacion implements ShouldQueue
         // la plantilla.
         $templateTipo = $user->whatsapp_pide_sena ? 'reserva_sena' : 'confirmacion';
 
+        // Backstop de datos: el guard de AuthController::updatePerfil ya
+        // impide activar la seña sin monto/titular/medio-de-pago/dirección,
+        // pero una edición directa de DB puede dejar whatsapp_pide_sena en
+        // true con la config incompleta (p. ej. sena_monto null renderiza
+        // "$0,00"). En ese caso se manda la confirmación simple en vez de
+        // saltear el envío — el cliente igual recibe su confirmación.
+        if ($templateTipo === 'reserva_sena' && ! $this->senaConfigCompleta($user)) {
+            Log::warning('EnviarMensajeConfirmacion: whatsapp_pide_sena activo con config de seña incompleta, se envía confirmación simple', [
+                'turno_id' => $this->turnoId,
+                'user_id' => $user->id,
+            ]);
+
+            $templateTipo = 'confirmacion';
+        }
+
         $mensaje = WhatsappTemplate::mensajeLegible($templateTipo, $cliente, $turno, $user);
         $numero = $cloudApiService->normalizarNumero($cliente->telefono);
 
@@ -155,5 +171,17 @@ class EnviarMensajeConfirmacion implements ShouldQueue
                 // no-op: el estado ya se guardó, el log es best-effort
             }
         }
+    }
+
+    // Mismas condiciones que el guard de AuthController::updatePerfil: la
+    // plantilla reserva_turno_sena necesita monto > 0, titular, un medio de
+    // pago (alias o CBU) y la dirección ({{6}}) para que Meta acepte el envío.
+    private function senaConfigCompleta(User $user): bool
+    {
+        return is_numeric($user->sena_monto)
+            && (float) $user->sena_monto > 0
+            && filled($user->whatsapp_sena_titular)
+            && (filled($user->whatsapp_sena_alias) || filled($user->whatsapp_sena_cbu))
+            && filled($user->direccion);
     }
 }

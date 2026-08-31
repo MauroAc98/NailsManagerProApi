@@ -11,6 +11,7 @@ use App\Models\WhatsappMensaje;
 use App\Services\CloudApiService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Tests\TestCase;
 
 class EnviarMensajeConfirmacionSenaTest extends TestCase
@@ -93,6 +94,42 @@ class EnviarMensajeConfirmacionSenaTest extends TestCase
             return $request->data()['template']['name'] === 'confirmacion_turno'
                 && count($this->parametrosDe($request)) === 8;
         });
+    }
+
+    public function test_cae_a_confirmacion_simple_si_pide_sena_pero_la_config_esta_incompleta(): void
+    {
+        Http::fake([
+            'graph.facebook.com/*' => Http::response(['messages' => [['id' => 'wamid.FALLBACK1']]], 200),
+        ]);
+        Log::spy();
+
+        // whatsapp_pide_sena quedó en true por una edición directa de DB,
+        // pero sin monto — reserva_turno_sena renderizaría "$0,00".
+        $user = User::factory()->create([
+            'is_exempt' => true,
+            'telefono' => '+543765111111',
+            'confirmacion_automatica' => true,
+            'whatsapp_pide_sena' => true,
+            'sena_monto' => null,
+            'whatsapp_sena_titular' => 'Kimberley Faustino',
+            'whatsapp_sena_alias' => 'Kim1710',
+        ]);
+
+        $turno = $this->crearTurno($user);
+
+        (new EnviarMensajeConfirmacion($turno->id))->handle(app(CloudApiService::class));
+
+        Http::assertSent(function ($request) {
+            return $request->data()['template']['name'] === 'confirmacion_turno'
+                && count($this->parametrosDe($request)) === 8;
+        });
+
+        Log::shouldHaveReceived('warning')->once();
+
+        $this->assertSame(
+            1,
+            WhatsappMensaje::where('turno_id', $turno->id)->where('tipo', 'confirmacion')->count(),
+        );
     }
 
     public function test_los_guards_previos_cortan_antes_de_elegir_la_plantilla_de_sena(): void
