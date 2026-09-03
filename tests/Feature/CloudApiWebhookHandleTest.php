@@ -98,10 +98,71 @@ class CloudApiWebhookHandleTest extends TestCase
         $mensaje = $this->crearMensaje($user, 'wamid.ABC789');
 
         $this->postSigned($this->statusPayload('wamid.ABC789', 'failed', [
-            ['code' => 131026, 'title' => 'Message undeliverable'],
+            [
+                'code' => 131026,
+                'title' => 'Message undeliverable',
+                'message' => 'Message undeliverable',
+                'error_data' => ['details' => 'Message Undeliverable.'],
+            ],
         ]))->assertOk();
 
-        $this->assertSame('failed', $mensaje->fresh()->status);
+        $fresco = $mensaje->fresh();
+        $this->assertSame('failed', $fresco->status);
+        $this->assertSame(131026, $fresco->error_code);
+        $this->assertSame('Message undeliverable', $fresco->error_titulo);
+        $this->assertSame('Message Undeliverable.', $fresco->error_detalle);
+    }
+
+    public function test_failed_sin_errores_deja_los_campos_de_error_en_null(): void
+    {
+        $user = User::factory()->create();
+        $mensaje = $this->crearMensaje($user, 'wamid.NO-ERR');
+
+        $this->postSigned($this->statusPayload('wamid.NO-ERR', 'failed'))->assertOk();
+
+        $fresco = $mensaje->fresh();
+        $this->assertSame('failed', $fresco->status);
+        $this->assertNull($fresco->error_code);
+        $this->assertNull($fresco->error_titulo);
+        $this->assertNull($fresco->error_detalle);
+    }
+
+    public function test_failed_sin_error_data_cae_al_message_para_el_detalle(): void
+    {
+        $user = User::factory()->create();
+        $mensaje = $this->crearMensaje($user, 'wamid.NO-DATA');
+
+        $this->postSigned($this->statusPayload('wamid.NO-DATA', 'failed', [
+            ['code' => 131047, 'title' => 'Re-engagement message', 'message' => 'More than 24 hours have passed'],
+        ]))->assertOk();
+
+        $fresco = $mensaje->fresh();
+        $this->assertSame('failed', $fresco->status);
+        $this->assertSame(131047, $fresco->error_code);
+        $this->assertSame('Re-engagement message', $fresco->error_titulo);
+        $this->assertSame('More than 24 hours have passed', $fresco->error_detalle);
+    }
+
+    public function test_recordatorio_failed_tambien_persiste_el_error(): void
+    {
+        $user = User::factory()->create();
+        $mensaje = WhatsappMensaje::create([
+            'user_id' => $user->id,
+            'numero' => '5493765123456',
+            'mensaje' => 'texto',
+            'tipo' => 'recordatorio',
+            'message_id' => 'wamid.REC-FAIL',
+            'status' => 'pending',
+        ]);
+
+        $this->postSigned($this->statusPayload('wamid.REC-FAIL', 'failed', [
+            ['code' => 131026, 'title' => 'Message undeliverable', 'error_data' => ['details' => 'Message Undeliverable.']],
+        ]))->assertOk();
+
+        $fresco = $mensaje->fresh();
+        $this->assertSame('failed', $fresco->status);
+        $this->assertSame(131026, $fresco->error_code);
+        $this->assertSame('Message Undeliverable.', $fresco->error_detalle);
     }
 
     public function test_firma_invalida_devuelve_404_y_no_toca_el_registro(): void

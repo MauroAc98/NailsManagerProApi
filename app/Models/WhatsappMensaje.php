@@ -21,11 +21,15 @@ class WhatsappMensaje extends Model
         'status_event_at',
         'respuesta_api',
         'status_code',
+        'error_code',
+        'error_titulo',
+        'error_detalle',
     ];
 
     protected $casts = [
         'respuesta_api'   => 'array',
         'status_code'     => 'integer',
+        'error_code'      => 'integer',
         // Entero Unix crudo (epoch de Meta), NO 'datetime' — ver comentario
         // en la migración add_status_event_at: evita un bug de timezone
         // real entre escritura/lectura del cast datetime de Eloquent.
