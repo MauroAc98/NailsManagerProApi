@@ -104,7 +104,11 @@ class IngresoController extends Controller
         return [
             'fecha'       => "{$required}|date",
             'monto'       => "{$required}|numeric|gt:0",
-            'categoria'   => [$required, Rule::in(Ingreso::CATEGORIAS)],
+            // Se valida contra la lista personalizada del usuario (resuelta
+            // por el accessor User::categorias_ingreso, que cae al set de
+            // fábrica Ingreso::CATEGORIAS si nunca la editó). La columna
+            // ingresos.categoria sigue siendo string libre.
+            'categoria'   => [$required, Rule::in($request->user()->categorias_ingreso)],
             'descripcion' => 'nullable|string|max:255',
         ];
     }

@@ -279,4 +279,49 @@ class IngresoCrudTest extends TestCase
 
         $this->assertDatabaseHas('ingresos', ['id' => $ingresoAjeno->id]);
     }
+
+    public function test_acepta_una_categoria_custom_del_usuario(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $user->update(['categorias_ingreso' => ['servicios', 'productos']]);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson('/api/ingresos', [
+                'fecha' => '2026-08-01',
+                'monto' => 1200,
+                'categoria' => 'servicios',
+            ])
+            ->assertCreated()
+            ->assertJsonFragment(['categoria' => 'servicios']);
+    }
+
+    public function test_rechaza_una_categoria_fuera_de_la_lista_del_usuario(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $user->update(['categorias_ingreso' => ['servicios', 'productos']]);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson('/api/ingresos', [
+                'fecha' => '2026-08-01',
+                'monto' => 1200,
+                'categoria' => 'venta_productos',
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['categoria']);
+
+        $this->assertDatabaseCount('ingresos', 0);
+    }
+
+    public function test_usuario_sin_lista_custom_sigue_usando_los_defaults(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson('/api/ingresos', [
+                'fecha' => '2026-08-01',
+                'monto' => 1200,
+                'categoria' => 'venta_productos',
+            ])
+            ->assertCreated();
+    }
 }
