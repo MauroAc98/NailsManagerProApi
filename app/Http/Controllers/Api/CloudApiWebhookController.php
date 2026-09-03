@@ -206,10 +206,23 @@ class CloudApiWebhookController extends Controller
             return;
         }
 
-        $registro->update([
+        $datos = [
             'status' => $nuevoStatus,
             'status_event_at' => $eventoTimestamp ?? $registro->status_event_at,
-        ]);
+        ];
+
+        // Un status 'failed' de Meta trae la razón real de la no-entrega en
+        // `errors[]` (normalmente un solo elemento). Se persiste en la fila
+        // además de loguearla. Aplica a cualquier `tipo` (confirmacion y
+        // recordatorio pasan por acá). Un 'failed' no se recupera en la
+        // práctica, así que un 'delivered'/'read' posterior — que no debería
+        // llegar — no limpia estos campos a propósito: se deja la evidencia
+        // del fallo.
+        if ($nuevoStatus === 'failed') {
+            $datos += $this->extraerCamposError($status);
+        }
+
+        $registro->update($datos);
 
         // Un fallo al escribir el log no debe tumbar la respuesta 200 que ya
         // se va a devolver — el estado ya quedó persistido arriba.
@@ -229,5 +242,34 @@ class CloudApiWebhookController extends Controller
         } catch (\Throwable $e) {
             // no-op: el estado ya se guardó, el log es best-effort
         }
+    }
+
+    /**
+     * Extrae code / title / detalle del primer elemento de `errors[]` de un
+     * status 'failed' de Meta. Null-safe en todos los accesos; el detalle cae
+     * a `errors[0].message` cuando no hay `error_data.details`. Trunca a los
+     * límites de las columnas (255 / 500) para no reventar el INSERT en
+     * Postgres si Meta manda un texto largo.
+     *
+     * @return array{error_code: int|null, error_titulo: string|null, error_detalle: string|null}
+     */
+    private function extraerCamposError(array $status): array
+    {
+        $errores = $status['errors'] ?? null;
+        $primero = is_array($errores) ? ($errores[0] ?? null) : null;
+
+        if (! is_array($primero)) {
+            return ['error_code' => null, 'error_titulo' => null, 'error_detalle' => null];
+        }
+
+        $codigo = $primero['code'] ?? null;
+        $titulo = $primero['title'] ?? null;
+        $detalle = $primero['error_data']['details'] ?? $primero['message'] ?? null;
+
+        return [
+            'error_code' => is_numeric($codigo) ? (int) $codigo : null,
+            'error_titulo' => $titulo !== null ? mb_substr((string) $titulo, 0, 255) : null,
+            'error_detalle' => $detalle !== null ? mb_substr((string) $detalle, 0, 500) : null,
+        ];
     }
 }
