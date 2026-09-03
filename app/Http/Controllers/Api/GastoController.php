@@ -105,7 +105,11 @@ class GastoController extends Controller
         return [
             'fecha'          => "{$required}|date",
             'monto'          => "{$required}|numeric|gt:0",
-            'categoria'      => [$required, Rule::in(Gasto::CATEGORIAS)],
+            // Se valida contra la lista personalizada del usuario (resuelta
+            // por el accessor User::categorias_gasto, que cae al set de
+            // fábrica Gasto::CATEGORIAS si nunca la editó). La columna
+            // gastos.categoria sigue siendo string libre.
+            'categoria'      => [$required, Rule::in($request->user()->categorias_gasto)],
             'descripcion'    => 'nullable|string|max:255',
             'profesional_id' => [
                 'nullable',

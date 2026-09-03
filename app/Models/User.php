@@ -38,6 +38,8 @@ class User extends Authenticatable
         'notificaciones_vistas_at',
         'debe_cambiar_password',
         'locale',
+        'categorias_gasto',
+        'categorias_ingreso',
     ];
 
     protected $hidden = [
@@ -50,6 +52,11 @@ class User extends Authenticatable
     protected $appends = [
         'whatsapp_requiere_envio_manual',
         'logo_url',
+        // Forzadas al JSON aunque la columna sea null (accessor resuelve al
+        // set de fábrica) o aunque el modelo recién creado todavía no la
+        // tenga en $attributes. El frontend siempre espera un array.
+        'categorias_gasto',
+        'categorias_ingreso',
     ];
 
     protected $attributes = [
@@ -107,6 +114,59 @@ class User extends Authenticatable
                 ? Storage::disk('public')->url($this->logo_path)
                 : null,
         );
+    }
+
+    // ── Categorías personalizadas de gastos / ingresos ───────────
+    // Cada usuario guarda su propio set como columna JSON plana (mismo
+    // criterio que recordatorio_automatico, locale, etc.). La columna es
+    // nullable: null significa "nunca lo personalizó" y al LEER resuelve
+    // al set de fábrica (Gasto::CATEGORIAS / Ingreso::CATEGORIAS) — el
+    // default es el set inicial, no el único posible. El frontend siempre
+    // recibe un array concreto, nunca null.
+    //
+    // Se usan accessor+mutator (no un cast 'array') justamente porque la
+    // lectura tiene que resolver el default cuando la columna es null.
+    //
+    // El get lee siempre del raw $attributes (no del $value que recibe): al
+    // estar la key en $appends, Eloquent invoca el accessor con $value=null
+    // durante la serialización aunque la columna tenga datos — leer de
+    // $attributes evita ese falso null.
+    protected function categoriasGasto(): Attribute
+    {
+        return Attribute::make(
+            get: fn ($value, array $attributes) => self::resolverCategorias(
+                $attributes['categorias_gasto'] ?? null,
+                Gasto::CATEGORIAS,
+            ),
+            set: fn ($value) => self::codificarCategorias($value),
+        );
+    }
+
+    protected function categoriasIngreso(): Attribute
+    {
+        return Attribute::make(
+            get: fn ($value, array $attributes) => self::resolverCategorias(
+                $attributes['categorias_ingreso'] ?? null,
+                Ingreso::CATEGORIAS,
+            ),
+            set: fn ($value) => self::codificarCategorias($value),
+        );
+    }
+
+    private static function resolverCategorias(?string $value, array $default): array
+    {
+        if ($value === null) {
+            return $default;
+        }
+
+        $decoded = json_decode($value, true);
+
+        return is_array($decoded) && $decoded !== [] ? array_values($decoded) : $default;
+    }
+
+    private static function codificarCategorias($value): ?string
+    {
+        return $value === null ? null : json_encode(array_values($value));
     }
 
     // ── Relaciones ───────────────────────────────────────────────

@@ -344,4 +344,50 @@ class GastoCrudTest extends TestCase
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['profesional_id']);
     }
+
+    public function test_acepta_una_categoria_custom_del_usuario(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $user->update(['categorias_gasto' => ['sueldos', 'impuestos', 'insumos']]);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson('/api/gastos', [
+                'fecha' => '2026-08-01',
+                'monto' => 800,
+                'categoria' => 'sueldos',
+            ])
+            ->assertCreated()
+            ->assertJsonFragment(['categoria' => 'sueldos']);
+    }
+
+    public function test_rechaza_una_categoria_fuera_de_la_lista_del_usuario(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $user->update(['categorias_gasto' => ['sueldos', 'impuestos']]);
+
+        // 'insumos' es un default de fábrica, pero este usuario ya no lo tiene.
+        $this->actingAs($user, 'sanctum')
+            ->postJson('/api/gastos', [
+                'fecha' => '2026-08-01',
+                'monto' => 800,
+                'categoria' => 'insumos',
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['categoria']);
+
+        $this->assertDatabaseCount('gastos', 0);
+    }
+
+    public function test_usuario_sin_lista_custom_sigue_usando_los_defaults(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson('/api/gastos', [
+                'fecha' => '2026-08-01',
+                'monto' => 800,
+                'categoria' => 'insumos',
+            ])
+            ->assertCreated();
+    }
 }
