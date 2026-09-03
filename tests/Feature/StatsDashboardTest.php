@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Cliente;
 use App\Models\Gasto;
+use App\Models\Ingreso;
 use App\Models\Profesional;
 use App\Models\Servicio;
 use App\Models\Turno;
@@ -255,5 +256,143 @@ class StatsDashboardTest extends TestCase
             ->assertOk();
 
         $this->assertSame(250, (int) $response->json('gastos'));
+    }
+
+    // ── Ingresos (agenda + otros) ────────────────────────────────
+
+    public function test_ingresos_agenda_espeja_ganancias_y_compat_se_mantiene(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $profesional = Profesional::create(['user_id' => $user->id, 'nombre' => 'Jefa', 'activo' => true]);
+        $cliente = Cliente::create(['user_id' => $user->id, 'nombre' => 'Cliente Test', 'telefono' => '3765252395']);
+        $servicio = Servicio::create(['user_id' => $user->id, 'nombre' => 'Manicura', 'duracion_minutos' => 30, 'activo' => true]);
+
+        $turno = $this->crearTurno($user, $profesional, $cliente, [$servicio], '2026-07-10 10:00:00');
+        $turno->servicios()->updateExistingPivot($servicio->id, ['precio' => 1000]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/stats/dashboard?desde=2026-07-01&hasta=2026-07-31')
+            ->assertOk();
+
+        $this->assertSame(1000, (int) $response->json('ganancias'));
+        $this->assertSame(1000, (int) $response->json('ingresos_agenda'));
+        $this->assertSame($response->json('ganancias'), $response->json('ingresos_agenda'));
+    }
+
+    public function test_suma_ingresos_otros_del_rango(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+
+        Ingreso::create(['user_id' => $user->id, 'fecha' => '2026-07-10', 'monto' => 400, 'categoria' => 'venta_productos']);
+        Ingreso::create(['user_id' => $user->id, 'fecha' => '2026-07-20', 'monto' => 150, 'categoria' => 'otros']);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/stats/dashboard?desde=2026-07-01&hasta=2026-07-31')
+            ->assertOk();
+
+        $this->assertSame(550, (int) $response->json('ingresos_otros'));
+    }
+
+    public function test_ingresos_otros_respeta_los_bordes_del_rango_de_fechas(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+
+        Ingreso::create(['user_id' => $user->id, 'fecha' => '2026-07-01', 'monto' => 100, 'categoria' => 'venta_productos']);
+        Ingreso::create(['user_id' => $user->id, 'fecha' => '2026-07-31', 'monto' => 200, 'categoria' => 'alquiler_espacio']);
+        Ingreso::create(['user_id' => $user->id, 'fecha' => '2026-06-30', 'monto' => 999, 'categoria' => 'otros']);
+        Ingreso::create(['user_id' => $user->id, 'fecha' => '2026-08-01', 'monto' => 999, 'categoria' => 'otros']);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/stats/dashboard?desde=2026-07-01&hasta=2026-07-31')
+            ->assertOk();
+
+        $this->assertSame(300, (int) $response->json('ingresos_otros'));
+    }
+
+    public function test_ingresos_otros_solo_cuenta_los_del_usuario(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $otroUsuario = User::factory()->create(['is_exempt' => true]);
+
+        Ingreso::create(['user_id' => $user->id, 'fecha' => '2026-07-10', 'monto' => 100, 'categoria' => 'otros']);
+        Ingreso::create(['user_id' => $otroUsuario->id, 'fecha' => '2026-07-10', 'monto' => 999, 'categoria' => 'otros']);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/stats/dashboard?desde=2026-07-01&hasta=2026-07-31')
+            ->assertOk();
+
+        $this->assertSame(100, (int) $response->json('ingresos_otros'));
+    }
+
+    public function test_desglosa_ingresos_otros_por_categoria_con_las_tres_categorias(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+
+        Ingreso::create(['user_id' => $user->id, 'fecha' => '2026-07-10', 'monto' => 400, 'categoria' => 'venta_productos']);
+        Ingreso::create(['user_id' => $user->id, 'fecha' => '2026-07-11', 'monto' => 100, 'categoria' => 'venta_productos']);
+        Ingreso::create(['user_id' => $user->id, 'fecha' => '2026-07-20', 'monto' => 250, 'categoria' => 'otros']);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/stats/dashboard?desde=2026-07-01&hasta=2026-07-31')
+            ->assertOk();
+
+        $porCategoria = collect($response->json('ingresos_otros_por_categoria'));
+
+        // Siempre las 3 categorías del enum, incluso las que quedaron en 0.
+        $this->assertCount(3, $porCategoria);
+        $this->assertSame(
+            ['venta_productos', 'alquiler_espacio', 'otros'],
+            $porCategoria->pluck('categoria')->all()
+        );
+        $this->assertSame(500, (int) $porCategoria->firstWhere('categoria', 'venta_productos')['monto']);
+        $this->assertSame(0, (int) $porCategoria->firstWhere('categoria', 'alquiler_espacio')['monto']);
+        $this->assertSame(250, (int) $porCategoria->firstWhere('categoria', 'otros')['monto']);
+    }
+
+    public function test_ganancia_neta_recalculada_con_ingresos_agenda_mas_otros_menos_gastos(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $profesional = Profesional::create(['user_id' => $user->id, 'nombre' => 'Jefa', 'activo' => true]);
+        $cliente = Cliente::create(['user_id' => $user->id, 'nombre' => 'Cliente Test', 'telefono' => '3765252395']);
+        $servicio = Servicio::create(['user_id' => $user->id, 'nombre' => 'Manicura', 'duracion_minutos' => 30, 'activo' => true]);
+
+        $turno = $this->crearTurno($user, $profesional, $cliente, [$servicio], '2026-07-10 10:00:00');
+        $turno->servicios()->updateExistingPivot($servicio->id, ['precio' => 1000]);
+
+        Ingreso::create(['user_id' => $user->id, 'fecha' => '2026-07-12', 'monto' => 500, 'categoria' => 'venta_productos']);
+        Gasto::create(['user_id' => $user->id, 'fecha' => '2026-07-15', 'monto' => 300, 'categoria' => 'insumos']);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/stats/dashboard?desde=2026-07-01&hasta=2026-07-31')
+            ->assertOk();
+
+        // 1000 (agenda) + 500 (otros) - 300 (gastos) = 1200
+        $this->assertSame(1200, (int) $response->json('ganancia_neta'));
+    }
+
+    public function test_ingresos_otros_van_a_cero_cuando_se_filtra_por_profesional(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $empleada = Profesional::create(['user_id' => $user->id, 'nombre' => 'Empleada', 'activo' => true]);
+        $cliente = Cliente::create(['user_id' => $user->id, 'nombre' => 'Cliente Test', 'telefono' => '3765252395']);
+        $servicio = Servicio::create(['user_id' => $user->id, 'nombre' => 'Manicura', 'duracion_minutos' => 30, 'activo' => true]);
+
+        $turno = $this->crearTurno($user, $empleada, $cliente, [$servicio], '2026-07-10 10:00:00');
+        $turno->servicios()->updateExistingPivot($servicio->id, ['precio' => 800]);
+
+        Ingreso::create(['user_id' => $user->id, 'fecha' => '2026-07-12', 'monto' => 500, 'categoria' => 'venta_productos']);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson("/api/stats/dashboard?desde=2026-07-01&hasta=2026-07-31&profesional_id={$empleada->id}")
+            ->assertOk();
+
+        // Los ingresos "otros" no tienen profesional -> 0 al filtrar.
+        $this->assertSame(0, (int) $response->json('ingresos_otros'));
+        $porCategoria = collect($response->json('ingresos_otros_por_categoria'));
+        $this->assertCount(3, $porCategoria);
+        $this->assertSame(0, (int) $porCategoria->sum(fn ($c) => (int) $c['monto']));
+        // La agenda sí se sigue filtrando por profesional.
+        $this->assertSame(800, (int) $response->json('ingresos_agenda'));
+        $this->assertSame(800, (int) $response->json('ganancia_neta'));
     }
 }

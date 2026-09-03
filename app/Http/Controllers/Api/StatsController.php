@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Gasto;
+use App\Models\Ingreso;
 use App\Models\Turno;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -40,6 +41,7 @@ class StatsController extends Controller
 
         $ganancias = $turnosCompletados->flatMap(fn (Turno $t) => $t->servicios)->sum('pivot.precio');
         $gastos = $this->gastosDelRango($user, $request);
+        $ingresosOtros = $this->ingresosOtrosDelRango($user, $request);
 
         return response()->json([
             'total_turnos' => $turnosValidos->count(),
@@ -50,9 +52,15 @@ class StatsController extends Controller
             ],
             'servicios_mas_pedidos' => $this->serviciosMasPedidos($turnosValidos),
             'clientes' => $this->clientesNuevasVsRecurrentes($user, $turnosValidos, $request->desde, $request->hasta),
+            // 'ganancias' se mantiene con el mismo valor (turnos completados en
+            // el rango) por compatibilidad con builds del frontend ya
+            // desplegados. 'ingresos_agenda' es el nombre nuevo del mismo dato.
             'ganancias' => $ganancias,
+            'ingresos_agenda' => $ganancias,
+            'ingresos_otros' => $ingresosOtros['total'],
+            'ingresos_otros_por_categoria' => $ingresosOtros['por_categoria'],
             'gastos' => $gastos,
-            'ganancia_neta' => $ganancias - $gastos,
+            'ganancia_neta' => $ganancias + $ingresosOtros['total'] - $gastos,
             'ganancias_por_servicio' => $this->gananciasPorServicio($turnosCompletados),
             'ganancias_por_dia' => $this->gananciasPorDia($turnosCompletados),
             'turnos_por_estado_por_dia_semana' => $this->turnosPorEstadoPorDiaSemana($todos),
@@ -143,6 +151,49 @@ class StatsController extends Controller
         }
 
         return (float) $query->sum('monto');
+    }
+
+    // Ingresos "otros" (no de agenda): venta de productos, alquiler de
+    // espacio, etc. A diferencia de los gastos, un ingreso NO tiene
+    // profesional asociado — no hay una columna profesional_id en la tabla.
+    // Por eso, cuando el dashboard se filtra por profesional_id, estos
+    // ingresos se reportan en 0: atribuir un ingreso del salón a una sola
+    // profesional inflaría su aporte, y repartirlo sería arbitrario. La
+    // agenda (ingresos_agenda / ganancias) sí sigue filtrada por profesional
+    // porque los turnos sí tienen profesional_id.
+    //
+    // El desglose por categoría siempre devuelve las 3 categorías del enum
+    // (incluso en 0), igual que turnosPorEstadoPorDiaSemana con los 7 días:
+    // es un conjunto chico y fijo, y al frontend le conviene una estructura
+    // estable para dibujar el desglose sin rellenar huecos.
+    private function ingresosOtrosDelRango($user, Request $request): array
+    {
+        if ($request->filled('profesional_id')) {
+            return [
+                'total' => 0.0,
+                'por_categoria' => $this->ingresosPorCategoria(collect()),
+            ];
+        }
+
+        $ingresos = Ingreso::delUsuario($user)
+            ->whereBetween('fecha', [$request->desde, $request->hasta])
+            ->get(['categoria', 'monto']);
+
+        return [
+            'total' => (float) $ingresos->sum('monto'),
+            'por_categoria' => $this->ingresosPorCategoria($ingresos),
+        ];
+    }
+
+    private function ingresosPorCategoria($ingresos): array
+    {
+        return collect(Ingreso::CATEGORIAS)
+            ->map(fn (string $categoria) => [
+                'categoria' => $categoria,
+                'monto' => (float) $ingresos->where('categoria', $categoria)->sum('monto'),
+            ])
+            ->values()
+            ->all();
     }
 
     // Tope defensivo de buckets — evita respuestas enormes si alguien manda
