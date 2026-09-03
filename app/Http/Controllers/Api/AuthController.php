@@ -144,10 +144,41 @@ class AuthController extends Controller
             'fcm_token'               => 'sometimes|nullable|string',
             'password'                => 'sometimes|string|min:8|confirmed',
             'locale'                  => 'sometimes|nullable|in:es,pt-BR,en',
+            // Categorías personalizadas de gastos / ingresos. Lista completa
+            // (reemplaza el set actual del usuario), 1..30 ítems, cada nombre
+            // string no vacío de hasta 40 chars y sin repetir. regex:/\S/
+            // rechaza strings de puro espacio que trim() dejaría vacíos.
+            'categorias_gasto'        => 'sometimes|array|min:1|max:30',
+            'categorias_gasto.*'      => 'required|string|max:40|distinct|regex:/\S/',
+            'categorias_ingreso'      => 'sometimes|array|min:1|max:30',
+            'categorias_ingreso.*'    => 'required|string|max:40|distinct|regex:/\S/',
         ]);
 
         if (isset($data['password'])) {
             $data['password'] = bcrypt($data['password']);
+        }
+
+        // Normaliza cada categoría igual que un campo de línea simple: recorta
+        // los extremos y colapsa espacios internos. Tras normalizar puede
+        // aparecer un duplicado que `distinct` (que mira el valor crudo) no
+        // detectó — se rechaza con un error sobre el campo.
+        foreach (['categorias_gasto', 'categorias_ingreso'] as $campoCategorias) {
+            if (! array_key_exists($campoCategorias, $data)) {
+                continue;
+            }
+
+            $normalizadas = array_map(
+                fn (string $nombre) => trim(preg_replace('/\s+/u', ' ', $nombre)),
+                $data[$campoCategorias],
+            );
+
+            if (count(array_unique($normalizadas)) !== count($normalizadas)) {
+                throw ValidationException::withMessages([
+                    $campoCategorias => ['No se permiten categorías repetidas.'],
+                ]);
+            }
+
+            $data[$campoCategorias] = array_values($normalizadas);
         }
 
         // Los envíos automáticos de WhatsApp (confirmación/recordatorio) ya
