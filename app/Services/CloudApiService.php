@@ -45,10 +45,10 @@ class CloudApiService
         $this->apiVersion = config('services.whatsapp_cloud.api_version') ?? '';
     }
 
-    private function headers(): array
+    private function headersCon(string $token): array
     {
         return [
-            'Authorization' => "Bearer {$this->token}",
+            'Authorization' => "Bearer {$token}",
             'Content-Type' => 'application/json',
         ];
     }
@@ -68,13 +68,27 @@ class CloudApiService
     /**
      * Envía un mensaje de plantilla aprobada por Meta.
      * $parametros va en el mismo orden que las variables {{1}}, {{2}}... del cuerpo.
+     *
+     * $token/$phoneNumberId permiten enviar por el número propio de un
+     * tenant (ver User::credencialesWhatsapp) en vez del número compartido
+     * del constructor. Ambos son opcionales y `string`, así que los callers
+     * DEBEN pasarlos por argumento nombrado (`token:`, `phoneNumberId:`) —
+     * una transposición posicional entre dos strings sería silenciosa.
      */
-    public function enviarPlantilla(string $numero, string $template, string $idioma, array $parametros): CloudApiEnvioResultado
-    {
+    public function enviarPlantilla(
+        string $numero,
+        string $template,
+        string $idioma,
+        array $parametros,
+        ?string $token = null,
+        ?string $phoneNumberId = null,
+    ): CloudApiEnvioResultado {
         $numero = $this->normalizarNumero($numero);
+        $tokenEfectivo = $token ?? $this->token;
+        $numeroEfectivo = $phoneNumberId ?? $this->phoneNumberId;
 
-        $response = Http::withHeaders($this->headers())
-            ->post("https://graph.facebook.com/{$this->apiVersion}/{$this->phoneNumberId}/messages", [
+        $response = Http::withHeaders($this->headersCon($tokenEfectivo))
+            ->post("https://graph.facebook.com/{$this->apiVersion}/{$numeroEfectivo}/messages", [
                 'messaging_product' => 'whatsapp',
                 'to' => $numero,
                 'type' => 'template',
@@ -179,7 +193,7 @@ class CloudApiService
     public function sembrarSalud(): ?array
     {
         try {
-            $response = Http::withHeaders($this->headers())
+            $response = Http::withHeaders($this->headersCon($this->token))
                 ->timeout(5)
                 ->get("https://graph.facebook.com/{$this->apiVersion}/{$this->phoneNumberId}", [
                     'fields' => 'quality_rating',
