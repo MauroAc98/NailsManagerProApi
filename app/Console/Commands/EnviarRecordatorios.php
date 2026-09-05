@@ -97,6 +97,11 @@ class EnviarRecordatorios extends Command
 
             $this->info("  → {$user->name}: {$turnos->count()} turno(s)");
 
+            // Resuelto una vez por negocio, no por turno: cada negocio manda
+            // TODOS sus recordatorios de esta corrida por su propio número
+            // (o el compartido, si no tiene conexión) — nunca mezclado.
+            $credenciales = $user->credencialesWhatsapp();
+
             foreach ($turnos as $turno) {
                 $cliente = $turno->cliente;
 
@@ -132,6 +137,8 @@ class EnviarRecordatorios extends Command
                         WhatsappTemplate::nombrePlantillaMeta('recordatorio'),
                         'es_AR',
                         WhatsappTemplate::parametrosCloudApi('recordatorio', $cliente, $turno, $user),
+                        token: $credenciales['token'],
+                        phoneNumberId: $credenciales['phone_number_id'],
                     );
                     $messageId = $resultado->messageId;
 
@@ -140,7 +147,7 @@ class EnviarRecordatorios extends Command
                         'user_id' => $user->id,
                         'turno_id' => $turno->id,
                         'numero' => $numero,
-                        'provider' => 'cloud_api',
+                        'provider' => $credenciales['provider'],
                         'mensaje' => $mensaje,
                         'tipo' => 'recordatorio',
                         'message_id' => $messageId,
