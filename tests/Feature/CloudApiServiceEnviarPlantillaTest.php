@@ -74,4 +74,70 @@ class CloudApiServiceEnviarPlantillaTest extends TestCase
         $this->assertSame(400, $resultado->statusCode);
         $this->assertSame(['error' => ['message' => 'Invalid parameter']], $resultado->respuesta);
     }
+
+    // §Design "flat optional params, named arguments mandatory": pasar
+    // token/phoneNumberId por argumento nombrado debe pegarle a ESE número
+    // con ESE token, no al compartido resuelto en el constructor.
+    public function test_con_token_y_phone_number_id_override_pega_al_numero_del_tenant(): void
+    {
+        config([
+            'services.whatsapp_cloud.token' => 'token-compartido',
+            'services.whatsapp_cloud.phone_number_id' => '1315423274987306',
+            'services.whatsapp_cloud.api_version' => 'v26.0',
+        ]);
+
+        Http::fake([
+            'graph.facebook.com/*' => Http::response([
+                'messages' => [['id' => 'wamid.TENANT1']],
+            ], 200),
+        ]);
+
+        $resultado = app(CloudApiService::class)->enviarPlantilla(
+            '5493765123456',
+            'recordatorio_turno',
+            'es_AR',
+            ['Martina', 'Nails Studio', '20/08/2026', '15:30', 'manicura semipermanente', '3765000000'],
+            token: 'token-de-tenant',
+            phoneNumberId: '999888777666555',
+        );
+
+        $this->assertSame('wamid.TENANT1', $resultado->messageId);
+
+        Http::assertSent(function ($request) {
+            return $request->url() === 'https://graph.facebook.com/v26.0/999888777666555/messages'
+                && $request->hasHeader('Authorization', 'Bearer token-de-tenant')
+                && ! $request->hasHeader('Authorization', 'Bearer token-compartido');
+        });
+    }
+
+    // Sin overrides el comportamiento debe seguir siendo byte-idéntico al
+    // de hoy: null resuelve al token/número compartido del constructor.
+    public function test_sin_overrides_el_comportamiento_es_identico_al_de_hoy(): void
+    {
+        config([
+            'services.whatsapp_cloud.token' => 'token-compartido',
+            'services.whatsapp_cloud.phone_number_id' => '1315423274987306',
+            'services.whatsapp_cloud.api_version' => 'v26.0',
+        ]);
+
+        Http::fake([
+            'graph.facebook.com/*' => Http::response([
+                'messages' => [['id' => 'wamid.COMPARTIDO1']],
+            ], 200),
+        ]);
+
+        $resultado = app(CloudApiService::class)->enviarPlantilla(
+            '5493765123456',
+            'recordatorio_turno',
+            'es_AR',
+            ['Martina', 'Nails Studio', '20/08/2026', '15:30', 'manicura semipermanente', '3765000000'],
+        );
+
+        $this->assertSame('wamid.COMPARTIDO1', $resultado->messageId);
+
+        Http::assertSent(function ($request) {
+            return $request->url() === 'https://graph.facebook.com/v26.0/1315423274987306/messages'
+                && $request->hasHeader('Authorization', 'Bearer token-compartido');
+        });
+    }
 }

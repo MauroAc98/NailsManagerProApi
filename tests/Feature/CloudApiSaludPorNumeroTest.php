@@ -2,7 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Models\User;
+use App\Models\WhatsappConnection;
 use App\Services\CloudApiService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Tests\TestCase;
 
@@ -13,6 +16,8 @@ use Tests\TestCase;
  */
 class CloudApiSaludPorNumeroTest extends TestCase
 {
+    use RefreshDatabase;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -75,5 +80,36 @@ class CloudApiSaludPorNumeroTest extends TestCase
         Cache::forever(CloudApiService::CACHE_KEY_SALUD, ['quality_rating' => 'RED']);
 
         $this->assertTrue(app(CloudApiService::class)->estaSaludable('numero-nunca-sembrado'));
+    }
+
+    // §Requirement "Health check reflects the number actually used": un
+    // negocio con conexión propia debe quedar gateado por la salud de SU
+    // número, no por la del número compartido — incluso cuando divergen.
+    public function test_criterio_de_envio_manual_de_un_negocio_conectado_lee_la_clave_de_su_propio_numero(): void
+    {
+        config(['services.whatsapp_cloud.calidad_bloqueante' => ['RED']]);
+        Cache::forever(CloudApiService::CACHE_KEY_SALUD, ['quality_rating' => 'RED']);
+        Cache::forever(CloudApiService::CACHE_KEY_SALUD.':777888999', ['quality_rating' => 'GREEN']);
+
+        $user = User::factory()->create([
+            'telefono' => '3765000000',
+            'direccion' => 'Calle Falsa 123',
+            'locale' => 'es',
+        ]);
+
+        WhatsappConnection::create([
+            'user_id' => $user->id,
+            'waba_id' => '111111111111111',
+            'phone_number_id' => '777888999',
+            'display_phone_number' => '5491122334455',
+            'verified_name' => 'Negocio Demo',
+            'access_token' => 'EAAG-secreto-de-tenant',
+            'token_expires_at' => null,
+        ]);
+
+        // El compartido está en rojo, pero el número propio del negocio
+        // está en verde — el negocio conectado NO debe requerir envío
+        // manual por ese motivo.
+        $this->assertFalse($user->fresh()->whatsapp_requiere_envio_manual);
     }
 }
