@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Models\WhatsappConnection;
 use App\Services\CloudApiService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
@@ -138,6 +139,34 @@ class WhatsappRequiereEnvioManualTest extends TestCase
             ->getJson('/api/auth/me')
             ->assertOk()
             ->assertJson(['whatsapp_requiere_envio_manual' => false]);
+    }
+
+    // §Design "Gate invariant": expirada es un criterio más de
+    // criterioRequiereEnvioManualWhatsapp, con todo lo demás sano.
+    public function test_true_con_conexion_propia_expirada_y_todo_lo_demas_sano(): void
+    {
+        Cache::forever(CloudApiService::CACHE_KEY_SALUD, ['quality_rating' => 'GREEN']);
+
+        $user = User::factory()->create([
+            'telefono' => '3765000000',
+            'direccion' => 'Calle Falsa 123',
+            'locale' => 'es',
+        ]);
+
+        WhatsappConnection::create([
+            'user_id' => $user->id,
+            'waba_id' => '111111111111111',
+            'phone_number_id' => '222222222222222',
+            'display_phone_number' => '5491122334455',
+            'verified_name' => 'Negocio Demo',
+            'access_token' => 'EAAG-secreto-de-tenant',
+            'token_expires_at' => now()->subMinute()->timestamp,
+        ]);
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJson(['whatsapp_requiere_envio_manual' => true]);
     }
 
     public function test_no_hace_llamadas_http_al_evaluar_el_criterio_en_un_request(): void

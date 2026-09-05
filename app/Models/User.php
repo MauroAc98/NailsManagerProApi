@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\HasApiTokens;
@@ -252,19 +253,52 @@ class User extends Authenticatable
         return $this->hasMany(WhatsappMensaje::class);
     }
 
+    /**
+     * Invariante de credenciales (§diseño): devuelve credenciales
+     * compartidas (nulls) SI Y SOLO SI no existe whatsappConnection. Una
+     * fila existente SIEMPRE devuelve el token/número propio del negocio,
+     * incluso si está expirada — estructuralmente imposible facturarle a
+     * Turnetto el envío de un negocio conectado. El caso "expirada" no cae
+     * al número compartido: el gate de criterioRequiereEnvioManualWhatsapp()
+     * corta el envío antes de que estas credenciales se usen para mandar
+     * nada; esta llamada solo deja constancia en el log.
+     *
+     * @return array{token: ?string, phone_number_id: ?string, provider: string}
+     */
+    public function credencialesWhatsapp(): array
+    {
+        $conexion = $this->whatsappConnection;
+
+        if ($conexion === null) {
+            return ['token' => null, 'phone_number_id' => null, 'provider' => 'cloud_api'];
+        }
+
+        if (! $conexion->estaVigente()) {
+            Log::warning('whatsapp.tenant.token_expirado_en_envio', ['user_id' => $this->id]);
+        }
+
+        return [
+            'token' => $conexion->access_token,
+            'phone_number_id' => $conexion->phone_number_id,
+            'provider' => 'cloud_api_tenant',
+        ];
+    }
+
     // ── Envío manual de confirmación (fallback) ────────────────────
     // Cloud API no tiene concepto de "conexión" — el flag es true por
     // cualquiera de estas razones: (a) falta el teléfono de contacto de la
     // profesional (no se puede armar la variable {{6}} de la plantilla),
     // (b) falta la dirección de la profesional (también es un parámetro
     // de la plantilla — si falta, Meta rechaza el envío completo), (c) el
-    // locale es pt-BR (no hay plantilla aprobada en portugués todavía), o
-    // (d) el número de Cloud API compartido está señalado como no
+    // locale es pt-BR (no hay plantilla aprobada en portugués todavía),
+    // (d) el número que este negocio usa para enviar (propio si tiene
+    // whatsappConnection, compartido si no) está señalado como no
     // saludable por Meta (ver CloudApiService::estaSaludable — señal
-    // cacheada, actualizada por webhook, global a todas las cuentas que
-    // comparten el número). En cualquiera de los cuatro casos, el
-    // frontend ofrece mandar el mensaje a mano por wa.me en vez de
-    // depender del envío automático.
+    // cacheada, actualizada por webhook, por número), o (e) el negocio
+    // tiene whatsappConnection propia pero su token está expirado — nunca
+    // cae al número compartido, falla en voz alta. En cualquiera de los
+    // cinco casos, el frontend ofrece mandar el mensaje a mano por wa.me
+    // en vez de depender del envío automático.
     public function getWhatsappRequiereEnvioManualAttribute(): bool
     {
         return $this->criterioRequiereEnvioManualWhatsapp();
@@ -284,6 +318,10 @@ class User extends Authenticatable
             return true;
         }
 
-        return ! app(CloudApiService::class)->estaSaludable();
+        if ($this->whatsappConnection !== null && ! $this->whatsappConnection->estaVigente()) {
+            return true;
+        }
+
+        return ! app(CloudApiService::class)->estaSaludable($this->whatsappConnection?->phone_number_id);
     }
 }
