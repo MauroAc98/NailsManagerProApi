@@ -186,6 +186,56 @@ class AdminUsoWhatsappPorSalonTest extends TestCase
         $response->assertJsonCount(0, 'salones');
     }
 
+    // §Requirement "Split shared vs. own-number usage counters".
+    public function test_negocio_con_historial_solo_de_numero_compartido_cuenta_todo_bajo_el_contador_compartido(): void
+    {
+        $user = User::factory()->create();
+
+        $this->crearMensaje($user->id, '5493765000001', '2026-08-05 10:00:00', 'cloud_api');
+        $this->crearMensaje($user->id, '5493765000001', '2026-08-06 10:01:00', 'cloud_api');
+
+        $response = $this->actingAs($this->admin, 'admin')
+            ->getJson('/api/admin/whatsapp/uso-por-salon?desde=2026-08-01&hasta=2026-08-31')
+            ->assertOk();
+
+        $response->assertJsonFragment([
+            'user_id' => $user->id,
+            'mensajes_totales' => 2,
+            'mensajes_compartido' => 2,
+            'mensajes_propios' => 0,
+            'conversaciones_estimadas' => 2,
+            'conversaciones_compartido' => 2,
+            'conversaciones_propias' => 0,
+        ]);
+    }
+
+    public function test_negocio_con_historial_mixto_reporta_ambos_contadores_por_separado(): void
+    {
+        $user = User::factory()->create();
+
+        // Compartido: mismo número, 2 mensajes dentro de la ventana -> 1 conversación.
+        $this->crearMensaje($user->id, '5493765000001', '2026-08-05 10:00:00', 'cloud_api');
+        $this->crearMensaje($user->id, '5493765000001', '2026-08-05 10:30:00', 'cloud_api');
+
+        // Propio: mismo número de tenant, 2 mensajes fuera de la ventana -> 2 conversaciones.
+        $this->crearMensaje($user->id, '5493765000002', '2026-08-10 10:00:00', 'cloud_api_tenant');
+        $this->crearMensaje($user->id, '5493765000002', '2026-08-11 10:01:00', 'cloud_api_tenant');
+
+        $response = $this->actingAs($this->admin, 'admin')
+            ->getJson('/api/admin/whatsapp/uso-por-salon?desde=2026-08-01&hasta=2026-08-31')
+            ->assertOk();
+
+        $response->assertJsonFragment([
+            'user_id' => $user->id,
+            'mensajes_totales' => 4,
+            'mensajes_compartido' => 2,
+            'mensajes_propios' => 2,
+            'conversaciones_estimadas' => 3,
+            'conversaciones_compartido' => 1,
+            'conversaciones_propias' => 2,
+        ]);
+    }
+
     public function test_provider_por_defecto_es_evolution(): void
     {
         $user = User::factory()->create();

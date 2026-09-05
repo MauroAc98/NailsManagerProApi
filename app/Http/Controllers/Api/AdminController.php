@@ -13,6 +13,7 @@ use App\Services\AdminAudit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
@@ -352,38 +353,37 @@ class AdminController extends Controller
             ? Carbon::parse($request->query('hasta'))->endOfDay()
             : now()->endOfDay();
 
-        $mensajes = WhatsappMensaje::where('provider', 'cloud_api')
+        // 'cloud_api' = número compartido de todo el SaaS; 'cloud_api_tenant'
+        // = número propio de cada negocio conectado (ver
+        // User::credencialesWhatsapp). Filas anteriores a este cambio son
+        // todas 'cloud_api' y se siguen contando bajo el contador
+        // compartido — no hay reatribución retroactiva.
+        $mensajes = WhatsappMensaje::whereIn('provider', ['cloud_api', 'cloud_api_tenant'])
             ->whereBetween('created_at', [$desde, $hasta])
             ->orderBy('created_at')
-            ->get(['user_id', 'numero', 'created_at']);
+            ->get(['user_id', 'numero', 'provider', 'created_at']);
 
         $porUsuario = $mensajes->groupBy('user_id');
 
         $nombres = User::whereIn('id', $porUsuario->keys())->pluck('name', 'id');
 
         $salones = $porUsuario->map(function ($mensajesDelUsuario, $userId) use ($nombres) {
-            $conversaciones = 0;
+            $porProvider = $mensajesDelUsuario->groupBy('provider');
+            $compartidos = $porProvider->get('cloud_api', collect());
+            $propios = $porProvider->get('cloud_api_tenant', collect());
 
-            foreach ($mensajesDelUsuario->groupBy('numero') as $mensajesDelNumero) {
-                $inicioVentana = null;
-
-                foreach ($mensajesDelNumero as $mensaje) {
-                    // diffInHours() en Carbon 3 devuelve el valor CON SIGNO por
-                    // default (a diferencia de Carbon 2) — sin absolute:true acá
-                    // daba negativo y la comparación ">= 24" nunca abría una
-                    // conversación nueva.
-                    if ($inicioVentana === null || $mensaje->created_at->diffInHours($inicioVentana, absolute: true) >= 24) {
-                        $conversaciones++;
-                        $inicioVentana = $mensaje->created_at;
-                    }
-                }
-            }
+            $conversacionesCompartido = $this->contarConversaciones($compartidos);
+            $conversacionesPropias = $this->contarConversaciones($propios);
 
             return [
                 'user_id' => (int) $userId,
                 'nombre' => $nombres[$userId] ?? null,
                 'mensajes_totales' => $mensajesDelUsuario->count(),
-                'conversaciones_estimadas' => $conversaciones,
+                'mensajes_compartido' => $compartidos->count(),
+                'mensajes_propios' => $propios->count(),
+                'conversaciones_estimadas' => $conversacionesCompartido + $conversacionesPropias,
+                'conversaciones_compartido' => $conversacionesCompartido,
+                'conversaciones_propias' => $conversacionesPropias,
             ];
         })
             ->sortByDesc('conversaciones_estimadas')
@@ -394,6 +394,32 @@ class AdminController extends Controller
             'hasta' => $hasta->toDateString(),
             'salones' => $salones,
         ]);
+    }
+
+    /**
+     * Ventana de conversación estimada (24hs) por número de destino, dentro
+     * de un mismo conjunto de mensajes (ya filtrado por provider).
+     */
+    private function contarConversaciones(Collection $mensajes): int
+    {
+        $conversaciones = 0;
+
+        foreach ($mensajes->groupBy('numero') as $mensajesDelNumero) {
+            $inicioVentana = null;
+
+            foreach ($mensajesDelNumero as $mensaje) {
+                // diffInHours() en Carbon 3 devuelve el valor CON SIGNO por
+                // default (a diferencia de Carbon 2) — sin absolute:true acá
+                // daba negativo y la comparación ">= 24" nunca abría una
+                // conversación nueva.
+                if ($inicioVentana === null || $mensaje->created_at->diffInHours($inicioVentana, absolute: true) >= 24) {
+                    $conversaciones++;
+                    $inicioVentana = $mensaje->created_at;
+                }
+            }
+        }
+
+        return $conversaciones;
     }
 
     /**
