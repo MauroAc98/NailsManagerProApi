@@ -15,6 +15,8 @@ class UpdatePerfilSenaRequeridaTest extends TestCase
         return User::factory()->create(array_merge([
             'is_exempt' => true,
             'direccion' => 'Av. Siempre Viva 742',
+            'latitud' => -27.4692,
+            'longitud' => -58.8306,
             'whatsapp_pide_sena' => true,
             'sena_monto' => 5000,
             'whatsapp_sena_titular' => 'Kimberley Faustino',
@@ -26,7 +28,12 @@ class UpdatePerfilSenaRequeridaTest extends TestCase
 
     public function test_activar_sena_con_datos_completos_se_permite(): void
     {
-        $user = User::factory()->create(['is_exempt' => true, 'whatsapp_pide_sena' => false]);
+        $user = User::factory()->create([
+            'is_exempt' => true,
+            'whatsapp_pide_sena' => false,
+            'latitud' => -27.4692,
+            'longitud' => -58.8306,
+        ]);
 
         $this->actingAs($user, 'sanctum')
             ->putJson('/api/perfil', [
@@ -87,6 +94,107 @@ class UpdatePerfilSenaRequeridaTest extends TestCase
             ->assertJsonValidationErrors('whatsapp_sena_alias');
     }
 
+    // §Decision #691: los 3 toggles (confirmacion_automatica,
+    // recordatorio_automatico Y whatsapp_pide_sena) quedan bloqueados por
+    // igual sin ubicación cargada — mismo trato que faltaDireccion hoy.
+    public function test_activar_sena_sin_ubicacion_cargada_es_rechazado(): void
+    {
+        $user = User::factory()->create([
+            'is_exempt' => true,
+            'whatsapp_pide_sena' => false,
+            'latitud' => null,
+            'longitud' => null,
+        ]);
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson('/api/perfil', [
+                'whatsapp_pide_sena' => true,
+                'sena_monto' => 5000,
+                'whatsapp_sena_titular' => 'Kimberley Faustino',
+                'whatsapp_sena_alias' => 'Kim1710',
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('latitud');
+
+        $this->assertFalse($user->fresh()->whatsapp_pide_sena);
+    }
+
+    public function test_activar_sena_cargando_ubicacion_en_el_mismo_request_se_permite(): void
+    {
+        $user = User::factory()->create([
+            'is_exempt' => true,
+            'whatsapp_pide_sena' => false,
+            'latitud' => null,
+            'longitud' => null,
+        ]);
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson('/api/perfil', [
+                'whatsapp_pide_sena' => true,
+                'latitud' => -27.4692,
+                'longitud' => -58.8306,
+                'sena_monto' => 5000,
+                'whatsapp_sena_titular' => 'Kimberley Faustino',
+                'whatsapp_sena_alias' => 'Kim1710',
+            ])
+            ->assertOk();
+
+        $this->assertTrue($user->fresh()->whatsapp_pide_sena);
+    }
+
+    public function test_activar_confirmacion_automatica_sin_ubicacion_cargada_es_rechazado(): void
+    {
+        $user = User::factory()->create([
+            'is_exempt' => true,
+            'confirmacion_automatica' => false,
+            'latitud' => null,
+            'longitud' => null,
+        ]);
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson('/api/perfil', ['confirmacion_automatica' => true])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('latitud');
+
+        $this->assertFalse($user->fresh()->confirmacion_automatica);
+    }
+
+    public function test_activar_recordatorio_automatico_sin_ubicacion_cargada_es_rechazado(): void
+    {
+        $user = User::factory()->create([
+            'is_exempt' => true,
+            'recordatorio_automatico' => false,
+            'latitud' => null,
+            'longitud' => null,
+        ]);
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson('/api/perfil', ['recordatorio_automatico' => true])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('latitud');
+
+        $this->assertFalse($user->fresh()->recordatorio_automatico);
+    }
+
+    public function test_apagar_automatico_sin_ubicacion_sigue_permitido(): void
+    {
+        // El escape hatch `&& !currentValue` también aplica a latitud: un
+        // salón que ya tenía el toggle prendido (de antes de este guard)
+        // tiene que poder apagarlo aunque no tenga ubicación cargada.
+        $user = User::factory()->create([
+            'is_exempt' => true,
+            'confirmacion_automatica' => true,
+            'latitud' => null,
+            'longitud' => null,
+        ]);
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson('/api/perfil', ['confirmacion_automatica' => false])
+            ->assertOk();
+
+        $this->assertFalse($user->fresh()->confirmacion_automatica);
+    }
+
     public function test_activar_sena_sin_direccion_cargada_es_rechazado(): void
     {
         // direccion es el parámetro fijo {{6}} de reserva_turno_sena — si
@@ -108,7 +216,13 @@ class UpdatePerfilSenaRequeridaTest extends TestCase
 
     public function test_activar_sena_cargando_direccion_en_el_mismo_request_se_permite(): void
     {
-        $user = User::factory()->create(['is_exempt' => true, 'direccion' => null, 'whatsapp_pide_sena' => false]);
+        $user = User::factory()->create([
+            'is_exempt' => true,
+            'direccion' => null,
+            'whatsapp_pide_sena' => false,
+            'latitud' => -27.4692,
+            'longitud' => -58.8306,
+        ]);
 
         $this->actingAs($user, 'sanctum')
             ->putJson('/api/perfil', [

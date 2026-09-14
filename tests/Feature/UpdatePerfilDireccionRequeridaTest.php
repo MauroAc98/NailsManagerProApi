@@ -36,7 +36,13 @@ class UpdatePerfilDireccionRequeridaTest extends TestCase
 
     public function test_activar_confirmacion_automatica_con_direccion_ya_cargada_se_permite(): void
     {
-        $user = User::factory()->create(['is_exempt' => true, 'direccion' => 'Av. Siempre Viva 742', 'confirmacion_automatica' => false]);
+        $user = User::factory()->create([
+            'is_exempt' => true,
+            'direccion' => 'Av. Siempre Viva 742',
+            'confirmacion_automatica' => false,
+            'latitud' => -27.4692,
+            'longitud' => -58.8306,
+        ]);
 
         $this->actingAs($user, 'sanctum')
             ->putJson('/api/perfil', ['confirmacion_automatica' => true])
@@ -47,7 +53,13 @@ class UpdatePerfilDireccionRequeridaTest extends TestCase
 
     public function test_activar_confirmacion_automatica_cargando_direccion_en_el_mismo_request_se_permite(): void
     {
-        $user = User::factory()->create(['is_exempt' => true, 'direccion' => null, 'confirmacion_automatica' => false]);
+        $user = User::factory()->create([
+            'is_exempt' => true,
+            'direccion' => null,
+            'confirmacion_automatica' => false,
+            'latitud' => -27.4692,
+            'longitud' => -58.8306,
+        ]);
 
         $this->actingAs($user, 'sanctum')
             ->putJson('/api/perfil', ['confirmacion_automatica' => true, 'direccion' => 'Av. Siempre Viva 742'])
