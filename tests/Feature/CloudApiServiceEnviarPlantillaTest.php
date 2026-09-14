@@ -140,4 +140,73 @@ class CloudApiServiceEnviarPlantillaTest extends TestCase
                 && $request->hasHeader('Authorization', 'Bearer token-compartido');
         });
     }
+
+    // §Design D7/Slice B: el header LOCATION va primero en `components`,
+    // seguido del body existente — Meta arma la tarjeta de mapa a partir
+    // de components[0].
+    public function test_con_ubicacion_agrega_el_header_location_antes_del_body(): void
+    {
+        Http::fake([
+            'graph.facebook.com/*' => Http::response([
+                'messages' => [['id' => 'wamid.MAPA1']],
+            ], 200),
+        ]);
+
+        app(CloudApiService::class)->enviarPlantilla(
+            '5493765123456',
+            'confirmacion_turno_mapa',
+            'es_AR',
+            ['Martina', 'Nails Studio', '20/08/2026', '15:30', 'manicura semipermanente', 'Av. Siempre Viva 742', 'Male', '3765000000'],
+            ubicacion: [
+                'latitude' => '-27.4692',
+                'longitude' => '-58.8306',
+                'name' => 'Nails Studio',
+                'address' => 'Av. Siempre Viva 742',
+            ],
+        );
+
+        Http::assertSent(function ($request) {
+            $componentes = $request->data()['template']['components'];
+
+            return count($componentes) === 2
+                && $componentes[0] === [
+                    'type' => 'header',
+                    'parameters' => [[
+                        'type' => 'location',
+                        'location' => [
+                            'latitude' => '-27.4692',
+                            'longitude' => '-58.8306',
+                            'name' => 'Nails Studio',
+                            'address' => 'Av. Siempre Viva 742',
+                        ],
+                    ]],
+                ]
+                && $componentes[1]['type'] === 'body';
+        });
+    }
+
+    // Sin `ubicacion`, el comportamiento sigue siendo byte-idéntico al de
+    // hoy: solo el component `body`, sin ninguna key `header`.
+    public function test_sin_ubicacion_no_agrega_ningun_header(): void
+    {
+        Http::fake([
+            'graph.facebook.com/*' => Http::response([
+                'messages' => [['id' => 'wamid.SINMAPA1']],
+            ], 200),
+        ]);
+
+        app(CloudApiService::class)->enviarPlantilla(
+            '5493765123456',
+            'confirmacion_turno',
+            'es_AR',
+            ['Martina', 'Nails Studio', '20/08/2026', '15:30', 'manicura semipermanente', 'Av. Siempre Viva 742', 'Male', '3765000000'],
+        );
+
+        Http::assertSent(function ($request) {
+            $componentes = $request->data()['template']['components'];
+
+            return count($componentes) === 1
+                && $componentes[0]['type'] === 'body';
+        });
+    }
 }
