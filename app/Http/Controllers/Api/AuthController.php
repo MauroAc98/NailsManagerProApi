@@ -129,6 +129,11 @@ class AuthController extends Controller
             'name'                    => 'sometimes|string|max:255',
             'telefono'                => 'sometimes|nullable|string|max:30',
             'direccion'               => 'sometimes|nullable|string|max:255',
+            // required_with solo no alcanza: con nullable, {latitud: -27.4,
+            // longitud: null} pasa esta regla porque la key longitud SÍ está
+            // presente. El guard explícito de abajo cubre ese caso.
+            'latitud'                 => 'sometimes|nullable|numeric|between:-90,90|required_with:longitud',
+            'longitud'                => 'sometimes|nullable|numeric|between:-180,180|required_with:latitud',
             'recordatorio_automatico' => 'sometimes|boolean',
             'confirmacion_automatica' => 'sometimes|boolean',
             'hora_recordatorio'       => 'sometimes|string|in:18:00,19:00,20:00,21:00,22:00',
@@ -156,6 +161,25 @@ class AuthController extends Controller
 
         if (isset($data['password'])) {
             $data['password'] = bcrypt($data['password']);
+        }
+
+        // Guard de par de coordenadas: latitud y longitud tienen que llegar
+        // ambas o ninguna. required_with (arriba) no alcanza porque con
+        // nullable la key SÍ está presente aunque valga null. Se evalúa el
+        // estado FINAL (valor de la request ?? valor actual del usuario)
+        // para no rechazar una edición que solo toca una de las dos cuando
+        // la otra ya estaba guardada de antes.
+        $tocaUbicacion = array_key_exists('latitud', $data) || array_key_exists('longitud', $data);
+
+        if ($tocaUbicacion) {
+            $latFinal = array_key_exists('latitud', $data) ? $data['latitud'] : $user->latitud;
+            $lonFinal = array_key_exists('longitud', $data) ? $data['longitud'] : $user->longitud;
+
+            if (is_null($latFinal) !== is_null($lonFinal)) {
+                throw ValidationException::withMessages([
+                    'latitud' => ['Guardá la ubicación completa: faltan coordenadas.'],
+                ]);
+            }
         }
 
         // Normaliza cada categoría igual que un campo de línea simple: recorta
