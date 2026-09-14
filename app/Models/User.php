@@ -24,6 +24,8 @@ class User extends Authenticatable
         'password',
         'telefono',
         'direccion',
+        'latitud',
+        'longitud',
         'logo_path',
         'is_exempt',
         'recordatorio_automatico',
@@ -75,6 +77,12 @@ class User extends Authenticatable
             'recordatorio_automatico' => 'boolean',
             'confirmacion_automatica' => 'boolean',
             'sena_monto'              => 'decimal:2',
+            // float (no decimal:N, a diferencia de sena_monto): decimal:N
+            // serializa a string en el JSON, y el picker del frontend
+            // necesita consumir user.latitud/longitud como number directo.
+            // 10 dígitos significativos entran holgados en un float64.
+            'latitud'                 => 'float',
+            'longitud'                => 'float',
             'whatsapp_pide_sena'      => 'boolean',
             'debe_cambiar_password'   => 'boolean',
             'notificaciones_vistas_at' => 'datetime',
