@@ -10,14 +10,58 @@ namespace App\Models;
 final class WhatsappTemplate
 {
     // ── Cloud API: nombre de plantilla Meta por tipo ──────────────
-    public static function nombrePlantillaMeta(string $tipo): string
+    // $conUbicacion es un flag, no un $tipo nuevo: $tipo también es la key
+    // de parametrosCloudApi/mensajeLegible, y agregar variantes tipo
+    // "confirmacion_mapa" fanearía esos dos switch también. El default
+    // false mantiene todos los call sites existentes compilando y
+    // comportándose igual.
+    public static function nombrePlantillaMeta(string $tipo, bool $conUbicacion = false): string
     {
-        return match ($tipo) {
+        $base = match ($tipo) {
             'recordatorio' => 'recordatorio_turno',
             'confirmacion' => 'confirmacion_turno',
             'reserva_sena' => 'reserva_turno_sena',
             default => '',
         };
+
+        return ($base !== '' && $conUbicacion) ? "{$base}_mapa" : $base;
+    }
+
+    // ── Cloud API: header LOCATION (solo cuando hay coordenadas) ───
+    // is_numeric cubre tanto el float del cast como el edge case de un
+    // valor crudo no casteado; el par 0.0/0.0 se trata como "sin cargar"
+    // (mismo criterio que esUbicacionValida() en el frontend).
+    public static function tieneUbicacion(User $user): bool
+    {
+        return is_numeric($user->latitud) && is_numeric($user->longitud)
+            && ((float) $user->latitud !== 0.0 || (float) $user->longitud !== 0.0);
+    }
+
+    public static function headerUbicacionCloudApi(User $user): ?array
+    {
+        if (! static::tieneUbicacion($user)) {
+            return null;
+        }
+
+        $header = [
+            'latitude' => (string) $user->latitud,
+            'longitude' => (string) $user->longitud,
+        ];
+
+        // name/address se omiten si quedan vacíos: un parámetro de
+        // plantilla vacío es un 400 de Meta conocido (ver comentario
+        // arriba, en parametrosCloudApi).
+        $nombre = static::unaLinea($user->name);
+        if ($nombre !== '') {
+            $header['name'] = $nombre;
+        }
+
+        $direccion = static::unaLinea($user->direccion);
+        if ($direccion !== '') {
+            $header['address'] = $direccion;
+        }
+
+        return $header;
     }
 
     // ── Cloud API: parámetros ordenados {{1}}..{{8}} ───────────────
@@ -123,7 +167,7 @@ final class WhatsappTemplate
     // múltiples) a un solo espacio y recorta los bordes. {{8}} viaja como
     // parámetro de plantilla Meta: si llega con un \n, Meta rechaza el envío
     // completo (400) y la deduplicación bloquea el reintento.
-    private static function unaLinea(?string $valor): string
+    public static function unaLinea(?string $valor): string
     {
         return trim(preg_replace('/\s+/', ' ', $valor ?? ''));
     }
