@@ -120,13 +120,19 @@ class EnviarMensajeConfirmacion implements ShouldQueue
         $numero = $cloudApiService->normalizarNumero($cliente->telefono);
         $credenciales = $user->credencialesWhatsapp();
 
+        // El nombre de plantilla y el header salen del MISMO flag: nunca
+        // pueden desacoplarse (una `_mapa` sin header, o un header sin
+        // `_mapa`, es exactamente el bug que este acople evita).
+        $conUbicacion = WhatsappTemplate::tieneUbicacion($user);
+
         $resultado = $cloudApiService->enviarPlantilla(
             $numero,
-            WhatsappTemplate::nombrePlantillaMeta($templateTipo),
+            WhatsappTemplate::nombrePlantillaMeta($templateTipo, $conUbicacion),
             'es_AR',
             WhatsappTemplate::parametrosCloudApi($templateTipo, $cliente, $turno, $user),
             token: $credenciales['token'],
             phoneNumberId: $credenciales['phone_number_id'],
+            ubicacion: WhatsappTemplate::headerUbicacionCloudApi($user),
         );
         $messageId = $resultado->messageId;
 

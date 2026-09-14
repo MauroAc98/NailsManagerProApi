@@ -131,14 +131,19 @@ class EnviarRecordatorios extends Command
                 $mensaje = WhatsappTemplate::mensajeLegible('recordatorio', $cliente, $turno, $user);
                 $numero = $this->cloudApiService->normalizarNumero($cliente->telefono);
 
+                // Misma derivación que EnviarMensajeConfirmacion: nombre de
+                // plantilla y header salen del mismo flag, nunca desacoplados.
+                $conUbicacion = WhatsappTemplate::tieneUbicacion($user);
+
                 try {
                     $resultado = $this->cloudApiService->enviarPlantilla(
                         $numero,
-                        WhatsappTemplate::nombrePlantillaMeta('recordatorio'),
+                        WhatsappTemplate::nombrePlantillaMeta('recordatorio', $conUbicacion),
                         'es_AR',
                         WhatsappTemplate::parametrosCloudApi('recordatorio', $cliente, $turno, $user),
                         token: $credenciales['token'],
                         phoneNumberId: $credenciales['phone_number_id'],
+                        ubicacion: WhatsappTemplate::headerUbicacionCloudApi($user),
                     );
                     $messageId = $resultado->messageId;
 

@@ -222,10 +222,22 @@ class AuthController extends Controller
             $confirmacionFinal = $data['confirmacion_automatica'] ?? $user->confirmacion_automatica;
             $recordatorioFinal = $data['recordatorio_automatico'] ?? $user->recordatorio_automatico;
             $direccionFinal = array_key_exists('direccion', $data) ? $data['direccion'] : $user->direccion;
+            $latFinalAuto = array_key_exists('latitud', $data) ? $data['latitud'] : $user->latitud;
+            $lonFinalAuto = array_key_exists('longitud', $data) ? $data['longitud'] : $user->longitud;
 
             if (($confirmacionFinal || $recordatorioFinal) && blank($direccionFinal)) {
                 throw ValidationException::withMessages([
                     'direccion' => ['Cargá tu dirección antes de activar los envíos automáticos de WhatsApp.'],
+                ]);
+            }
+
+            // §Decision #691: el mismo gate de "falta ubicación" que ya
+            // aplica a la seña (más abajo) bloquea también estos dos
+            // toggles — ningún salón puede activar ningún envío automático
+            // sin haber cargado lat/long primero.
+            if (($confirmacionFinal || $recordatorioFinal) && (is_null($latFinalAuto) || is_null($lonFinalAuto))) {
+                throw ValidationException::withMessages([
+                    'latitud' => ['Marcá tu ubicación en el mapa antes de activar los envíos automáticos de WhatsApp.'],
                 ]);
             }
         }
@@ -254,6 +266,12 @@ class AuthController extends Controller
                 // direccion es el parámetro fijo {{6}} de reserva_turno_sena.
                 if (blank($valorFinal('direccion'))) {
                     $errores['direccion'] = ['Cargá tu dirección antes de pedir la seña en las confirmaciones.'];
+                }
+
+                // §Decision #691: mismo gate de ubicación que los toggles
+                // automáticos — sin lat/long no se puede pedir seña.
+                if (is_null($valorFinal('latitud')) || is_null($valorFinal('longitud'))) {
+                    $errores['latitud'] = ['Marcá tu ubicación en el mapa antes de pedir la seña en las confirmaciones.'];
                 }
 
                 if (blank($valorFinal('whatsapp_sena_titular'))) {
