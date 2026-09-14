@@ -74,6 +74,13 @@ class CloudApiService
      * del constructor. Ambos son opcionales y `string`, así que los callers
      * DEBEN pasarlos por argumento nombrado (`token:`, `phoneNumberId:`) —
      * una transposición posicional entre dos strings sería silenciosa.
+     *
+     * $ubicacion (agregado último, con default, para no romper los call
+     * sites existentes) es también named-arg only: el array crudo de
+     * `location` (latitude/longitude/name/address, dominio del caller —
+     * ver WhatsappTemplate::headerUbicacionCloudApi). Cuando no es null se
+     * antepone un component `header` al `body`; el shape del payload de
+     * Meta queda encapsulado acá adentro.
      */
     public function enviarPlantilla(
         string $numero,
@@ -82,10 +89,29 @@ class CloudApiService
         array $parametros,
         ?string $token = null,
         ?string $phoneNumberId = null,
+        ?array $ubicacion = null,
     ): CloudApiEnvioResultado {
         $numero = $this->normalizarNumero($numero);
         $tokenEfectivo = $token ?? $this->token;
         $numeroEfectivo = $phoneNumberId ?? $this->phoneNumberId;
+
+        $componentes = [];
+        if ($ubicacion !== null) {
+            $componentes[] = [
+                'type' => 'header',
+                'parameters' => [[
+                    'type' => 'location',
+                    'location' => $ubicacion,
+                ]],
+            ];
+        }
+        $componentes[] = [
+            'type' => 'body',
+            'parameters' => array_map(
+                fn (string $valor) => ['type' => 'text', 'text' => $valor],
+                $parametros
+            ),
+        ];
 
         $response = Http::withHeaders($this->headersCon($tokenEfectivo))
             ->post("https://graph.facebook.com/{$this->apiVersion}/{$numeroEfectivo}/messages", [
@@ -95,13 +121,7 @@ class CloudApiService
                 'template' => [
                     'name' => $template,
                     'language' => ['code' => $idioma],
-                    'components' => [[
-                        'type' => 'body',
-                        'parameters' => array_map(
-                            fn (string $valor) => ['type' => 'text', 'text' => $valor],
-                            $parametros
-                        ),
-                    ]],
+                    'components' => $componentes,
                 ],
             ]);
 
