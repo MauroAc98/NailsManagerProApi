@@ -37,8 +37,6 @@ final class WhatsappTemplate
             && ((float) $user->latitud !== 0.0 || (float) $user->longitud !== 0.0);
     }
 
-    private const ADDRESS_TARJETA_UBICACION = 'Ubicación en el mapa';
-
     public static function headerUbicacionCloudApi(User $user): ?array
     {
         if (! static::tieneUbicacion($user)) {
@@ -52,17 +50,19 @@ final class WhatsappTemplate
 
         // name se omite si queda vacío: un parámetro de plantilla vacío es
         // un 400 de Meta conocido (ver comentario arriba, en
-        // parametrosCloudApi). `address`, en cambio, es OBLIGATORIO para
-        // Meta en el componente location (sin él: 100 "Parameter 'address'
-        // is mandatory"), así que siempre va — pero con un texto fijo y no
-        // con el campo dirección del negocio, que ya viaja en el cuerpo del
-        // mensaje ({{6}}) y el negocio no quiere repetido en la tarjeta.
+        // parametrosCloudApi). `address` es OBLIGATORIO para Meta (sin él:
+        // 100 "Parameter 'address' is mandatory"), y además Google Maps arma
+        // la búsqueda al tocar la tarjeta con ese texto (address + name), no
+        // con lat/long — un texto libre, sea la dirección escrita o una
+        // frase fija, se geocodifica "en cualquier lado". Por eso va
+        // "lat,lon": Maps lo resuelve como un punto exacto. La dirección
+        // escrita ya viaja en el cuerpo del mensaje ({{6}}).
         $nombre = static::unaLinea($user->name);
         if ($nombre !== '') {
             $header['name'] = $nombre;
         }
 
-        $header['address'] = self::ADDRESS_TARJETA_UBICACION;
+        $header['address'] = $header['latitude'].','.$header['longitude'];
 
         return $header;
     }

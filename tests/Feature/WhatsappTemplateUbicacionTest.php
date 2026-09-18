@@ -39,24 +39,23 @@ class WhatsappTemplateUbicacionTest extends TestCase
         $this->assertNull(WhatsappTemplate::headerUbicacionCloudApi($user));
     }
 
-    public function test_header_ubicacion_manda_un_address_neutro_y_nunca_la_direccion_escrita(): void
+    public function test_header_ubicacion_usa_las_coordenadas_como_address_y_nunca_la_direccion_escrita(): void
     {
-        // Meta exige `address` en el componente location (sin él responde
-        // 100 "Parameter 'address' is mandatory"), pero el texto libre del
-        // campo dirección ya viaja en el cuerpo ({{6}}): en la tarjeta va un
-        // texto fijo, no la dirección del negocio.
+        // Meta exige `address`, y Google Maps arma la búsqueda con ese texto
+        // (address + name), no con lat/long: un texto libre geocodifica "en
+        // cualquier lado". "lat,lon" es un formato que Maps resuelve como un
+        // punto exacto. La dirección escrita ya viaja en el cuerpo ({{6}}).
         $user = User::factory()->create([
-            'latitud' => -27.4692,
-            'longitud' => -58.8306,
+            'latitud' => -27.4333825,
+            'longitud' => -55.9110309,
             'direccion' => "Av. Siempre Viva 742
 Entre Piso 1",
         ]);
 
         $header = WhatsappTemplate::headerUbicacionCloudApi($user);
 
-        $this->assertSame('Ubicación en el mapa', $header['address']);
+        $this->assertSame('-27.4333825,-55.9110309', $header['address']);
         $this->assertStringNotContainsString('Siempre Viva', $header['address']);
-        $this->assertSame('-27.4692', $header['latitude']);
     }
 
     public function test_header_ubicacion_incluye_address_aunque_no_haya_direccion_cargada(): void
@@ -69,7 +68,7 @@ Entre Piso 1",
 
         $header = WhatsappTemplate::headerUbicacionCloudApi($user);
 
-        $this->assertNotSame('', $header['address']);
+        $this->assertSame('-27.4692,-58.8306', $header['address']);
     }
 
     public function test_header_ubicacion_omite_name_vacio(): void
