@@ -39,8 +39,11 @@ class WhatsappTemplateUbicacionTest extends TestCase
         $this->assertNull(WhatsappTemplate::headerUbicacionCloudApi($user));
     }
 
-    public function test_header_ubicacion_colapsa_saltos_de_linea_en_la_direccion(): void
+    public function test_header_ubicacion_nunca_incluye_la_direccion_escrita_por_el_negocio(): void
     {
+        // La tarjeta de ubicación de WhatsApp muestra el pin del mapa; el
+        // texto libre del campo dirección ya viaja en el cuerpo ({{6}}) y
+        // duplicarlo en la tarjeta no es lo que el negocio quiere.
         $user = User::factory()->create([
             'latitud' => -27.4692,
             'longitud' => -58.8306,
@@ -49,22 +52,21 @@ class WhatsappTemplateUbicacionTest extends TestCase
 
         $header = WhatsappTemplate::headerUbicacionCloudApi($user);
 
-        $this->assertSame('Av. Siempre Viva 742 Entre Piso 1', $header['address']);
+        $this->assertArrayNotHasKey('address', $header);
+        $this->assertSame('-27.4692', $header['latitude']);
     }
 
-    public function test_header_ubicacion_omite_name_y_address_vacios(): void
+    public function test_header_ubicacion_omite_name_vacio(): void
     {
         $user = User::factory()->create([
             'latitud' => -27.4692,
             'longitud' => -58.8306,
             'name' => '',
-            'direccion' => null,
         ]);
 
         $header = WhatsappTemplate::headerUbicacionCloudApi($user);
 
         $this->assertArrayNotHasKey('name', $header);
-        $this->assertArrayNotHasKey('address', $header);
         $this->assertSame('-27.4692', $header['latitude']);
         $this->assertSame('-58.8306', $header['longitude']);
     }
