@@ -57,6 +57,17 @@ class TurnoController extends Controller
             );
         }
 
+        // Combinable con cualquiera de los filtros de arriba (buscar,
+        // servicio_id, fecha/desde-hasta/mes) — todos son `if` independientes
+        // que se van AND-eando sobre el mismo $query, no un switch exclusivo.
+        // Permite "turnos de Ana con clienta X" o "todos los turnos de Ana,
+        // cualquier fecha" (sin fecha/desde-hasta, esto último trae pasado y
+        // futuro). Ya viene scopeado a la cuenta por Turno::delUsuario($user)
+        // arriba, así que no hace falta validar tenencia de profesional_id acá.
+        if ($request->filled('profesional_id')) {
+            $query->where('profesional_id', $request->integer('profesional_id'));
+        }
+
         $turnos = $query->orderBy('fecha_hora')->get()->map(function ($turno) {
             $turno->estado_visual = $this->calcularEstadoVisual($turno);
             // whatsapp_mensajes trae respuesta_api/message_id/numero — datos internos
