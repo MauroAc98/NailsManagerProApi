@@ -39,21 +39,37 @@ class WhatsappTemplateUbicacionTest extends TestCase
         $this->assertNull(WhatsappTemplate::headerUbicacionCloudApi($user));
     }
 
-    public function test_header_ubicacion_nunca_incluye_la_direccion_escrita_por_el_negocio(): void
+    public function test_header_ubicacion_manda_un_address_neutro_y_nunca_la_direccion_escrita(): void
     {
-        // La tarjeta de ubicación de WhatsApp muestra el pin del mapa; el
-        // texto libre del campo dirección ya viaja en el cuerpo ({{6}}) y
-        // duplicarlo en la tarjeta no es lo que el negocio quiere.
+        // Meta exige `address` en el componente location (sin él responde
+        // 100 "Parameter 'address' is mandatory"), pero el texto libre del
+        // campo dirección ya viaja en el cuerpo ({{6}}): en la tarjeta va un
+        // texto fijo, no la dirección del negocio.
         $user = User::factory()->create([
             'latitud' => -27.4692,
             'longitud' => -58.8306,
-            'direccion' => "Av. Siempre Viva 742\nEntre Piso 1",
+            'direccion' => "Av. Siempre Viva 742
+Entre Piso 1",
         ]);
 
         $header = WhatsappTemplate::headerUbicacionCloudApi($user);
 
-        $this->assertArrayNotHasKey('address', $header);
+        $this->assertSame('Ubicación en el mapa', $header['address']);
+        $this->assertStringNotContainsString('Siempre Viva', $header['address']);
         $this->assertSame('-27.4692', $header['latitude']);
+    }
+
+    public function test_header_ubicacion_incluye_address_aunque_no_haya_direccion_cargada(): void
+    {
+        $user = User::factory()->create([
+            'latitud' => -27.4692,
+            'longitud' => -58.8306,
+            'direccion' => null,
+        ]);
+
+        $header = WhatsappTemplate::headerUbicacionCloudApi($user);
+
+        $this->assertNotSame('', $header['address']);
     }
 
     public function test_header_ubicacion_omite_name_vacio(): void
