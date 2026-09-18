@@ -48,17 +48,15 @@ final class WhatsappTemplate
             'longitude' => (string) $user->longitud,
         ];
 
-        // name/address se omiten si quedan vacíos: un parámetro de
-        // plantilla vacío es un 400 de Meta conocido (ver comentario
-        // arriba, en parametrosCloudApi).
+        // name se omite si queda vacío: un parámetro de plantilla vacío es
+        // un 400 de Meta conocido (ver comentario arriba, en
+        // parametrosCloudApi). `address` NO se manda a propósito: la tarjeta
+        // muestra el pin del mapa y el texto libre del campo dirección ya
+        // viaja en el cuerpo del mensaje ({{6}}) — repetirlo en la tarjeta
+        // no es lo que el negocio quiere (feedback de producción).
         $nombre = static::unaLinea($user->name);
         if ($nombre !== '') {
             $header['name'] = $nombre;
-        }
-
-        $direccion = static::unaLinea($user->direccion);
-        if ($direccion !== '') {
-            $header['address'] = $direccion;
         }
 
         return $header;
