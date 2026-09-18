@@ -461,7 +461,12 @@ class TurnoController extends Controller
         $user = $request->user();
         $turno = Turno::delUsuario($user)->findOrFail($id);
 
-        if (Carbon::parse($turno->fecha_hora)->isPast()) {
+        // "Ya pasó" = ya TERMINÓ, no ya empezó: un turno en curso (empezó pero
+        // no terminó) tiene que poder cancelarse — es el caso de la clienta
+        // que nunca llegó y el turno se arrancó solo. Un turno finalizado
+        // (completado) ya se atendió, aunque siga dentro de su duración.
+        $fin = Carbon::parse($turno->fecha_hora)->addMinutes((int) $turno->duracion_total_minutos);
+        if ($fin->isPast() || $turno->estado === 'completado') {
             return response()->json([
                 'message' => 'No se pueden cancelar turnos que ya pasaron.',
             ], 422);
