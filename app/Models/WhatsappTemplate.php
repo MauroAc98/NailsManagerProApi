@@ -37,6 +37,8 @@ final class WhatsappTemplate
             && ((float) $user->latitud !== 0.0 || (float) $user->longitud !== 0.0);
     }
 
+    private const ADDRESS_TARJETA_UBICACION = 'Ubicación en el mapa';
+
     public static function headerUbicacionCloudApi(User $user): ?array
     {
         if (! static::tieneUbicacion($user)) {
@@ -50,14 +52,17 @@ final class WhatsappTemplate
 
         // name se omite si queda vacío: un parámetro de plantilla vacío es
         // un 400 de Meta conocido (ver comentario arriba, en
-        // parametrosCloudApi). `address` NO se manda a propósito: la tarjeta
-        // muestra el pin del mapa y el texto libre del campo dirección ya
-        // viaja en el cuerpo del mensaje ({{6}}) — repetirlo en la tarjeta
-        // no es lo que el negocio quiere (feedback de producción).
+        // parametrosCloudApi). `address`, en cambio, es OBLIGATORIO para
+        // Meta en el componente location (sin él: 100 "Parameter 'address'
+        // is mandatory"), así que siempre va — pero con un texto fijo y no
+        // con el campo dirección del negocio, que ya viaja en el cuerpo del
+        // mensaje ({{6}}) y el negocio no quiere repetido en la tarjeta.
         $nombre = static::unaLinea($user->name);
         if ($nombre !== '') {
             $header['name'] = $nombre;
         }
+
+        $header['address'] = self::ADDRESS_TARJETA_UBICACION;
 
         return $header;
     }
