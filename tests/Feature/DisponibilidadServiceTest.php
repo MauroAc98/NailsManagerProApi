@@ -134,8 +134,9 @@ class DisponibilidadServiceTest extends TestCase
         $this->crearSlot($this->user, $ana, '10:30');
         $this->turno($ana, '11:00', 30); // [11:00, 11:30)
 
-        // 90 min: 09:00 libre; 10:30 -> [10:30,12:00) pisa el turno de 11:00
-        $this->assertSame(['09:00'], $this->horas($this->calcular([$a, $b], $ana)));
+        // rango 09:00-10:30, paso 30. 90 min: 09:00 y 09:30 (termina 11:00, adyacente) libres;
+        // 10:00 y 10:30 pisan el turno de 11:00
+        $this->assertSame(['09:00', '09:30'], $this->horas($this->calcular([$a, $b], $ana)));
     }
 
     public function test_turnos_cancelados_no_bloquean(): void
@@ -251,7 +252,8 @@ class DisponibilidadServiceTest extends TestCase
         $ahora = $this->ahora();
         $this->reserva('14:00:00', 30, $ahora->copy()->subMinutes(5));
 
-        $this->assertSame(['15:00'], $this->horas($this->calcular([$s], null, $ahora)));
+        // Bea: rango 14:00-15:00; el hold [14:00,14:30) saca 14:00 y deja 14:30 (adyacente)
+        $this->assertSame(['14:30', '15:00'], $this->horas($this->calcular([$s], null, $ahora)));
     }
 
     public function test_una_reserva_pendiente_vieja_se_ignora(): void
@@ -282,12 +284,138 @@ class DisponibilidadServiceTest extends TestCase
     {
         $ana = $this->crearProfesional($this->user, 'Ana');
         $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
-        foreach (['10:00', '10:59', '11:00', '12:00'] as $h) {
+        foreach (['10:00', '12:00'] as $h) {
             $this->crearSlot($this->user, $ana, $h);
         }
 
         $ahora = Carbon::parse(self::FECHA . ' 09:00:00');
 
-        $this->assertSame(['11:00', '12:00'], $this->horas($this->calcular([$s], $ana, $ahora, 120)));
+        $this->assertSame(['11:00', '11:30', '12:00'], $this->horas($this->calcular([$s], $ana, $ahora, 120)));
+    }
+
+    // -- rango [min,max] con grilla ----------------------------------
+
+    public function test_ofrece_horarios_entre_medio_dentro_del_rango(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
+        $this->crearSlot($this->user, $ana, '09:00');
+        $this->crearSlot($this->user, $ana, '12:00');
+
+        $this->assertSame(
+            ['09:00', '09:30', '10:00', '10:30', '11:00', '11:30', '12:00'],
+            $this->horas($this->calcular([$s], $ana)),
+        );
+    }
+
+    public function test_el_paso_es_configurable(): void
+    {
+        config(['reservas.paso_minutos' => 15]);
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
+        $this->crearSlot($this->user, $ana, '09:00');
+        $this->crearSlot($this->user, $ana, '10:00');
+
+        $this->assertSame(['09:00', '09:15', '09:30', '09:45', '10:00'], $this->horas($this->calcular([$s], $ana)));
+    }
+
+    public function test_la_grilla_se_alinea_al_minimo_del_rango(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
+        $this->crearSlot($this->user, $ana, '09:10');
+        $this->crearSlot($this->user, $ana, '10:45');
+
+        // 09:10, 09:40, 10:10, 10:40 (el proximo, 11:10, excede el maximo)
+        $this->assertSame(['09:10', '09:40', '10:10', '10:40'], $this->horas($this->calcular([$s], $ana)));
+    }
+
+    public function test_un_turno_saca_los_candidatos_que_lo_pisan_con_limites_exactos(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $s = $this->crearServicio($this->user, 'S', 60, true, $ana);
+        $this->crearSlot($this->user, $ana, '09:00');
+        $this->crearSlot($this->user, $ana, '12:00');
+        $this->turno($ana, '10:00', 90); // [10:00, 11:30)
+
+        // 60 min: 09:00 -> [9,10) adyacente OK; 09:30 -> [9:30,10:30) pisa; 10:00-11:00 pisan;
+        // 11:30 -> [11:30,12:30) adyacente OK; 12:00 OK
+        $this->assertSame(['09:00', '11:30', '12:00'], $this->horas($this->calcular([$s], $ana)));
+    }
+
+    public function test_servicio_de_90_min_pierde_las_0930_si_hay_turno_a_las_10(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $s = $this->crearServicio($this->user, 'S', 90, true, $ana);
+        $this->crearSlot($this->user, $ana, '09:00');
+        $this->crearSlot($this->user, $ana, '09:30');
+        $this->turno($ana, '10:00', 60);
+
+        // 09:00 -> [9:00,10:30) pisa; 09:30 pisa
+        $this->assertSame([], $this->calcular([$s], $ana));
+    }
+
+    public function test_profesional_con_un_solo_slot_ofrece_solo_esa_hora(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
+        $this->crearSlot($this->user, $ana, '15:00');
+
+        $this->assertSame(['15:00'], $this->horas($this->calcular([$s], $ana)));
+    }
+
+    public function test_el_inicio_debe_estar_en_el_rango_pero_el_fin_puede_pasarse_del_maximo(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $s = $this->crearServicio($this->user, 'S', 120, true, $ana);
+        $this->crearSlot($this->user, $ana, '17:00');
+        $this->crearSlot($this->user, $ana, '18:00');
+
+        // 18:00 termina 20:00, fuera del rango, pero solo se exige el inicio (regla de la agenda interna)
+        $this->assertSame(['17:00', '17:30', '18:00'], $this->horas($this->calcular([$s], $ana)));
+    }
+
+    public function test_dos_profesionales_con_rangos_distintos_bajo_cualquiera(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $bea = $this->crearProfesional($this->user, 'Bea');
+        $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
+        $bea->servicios()->attach($s->id);
+        $this->crearSlot($this->user, $ana, '09:00');
+        $this->crearSlot($this->user, $ana, '10:00');
+        $this->crearSlot($this->user, $bea, '09:30');
+        $this->crearSlot($this->user, $bea, '11:00');
+
+        $this->assertSame([
+            ['hora' => '09:00', 'profesional_ids' => [$ana->id]],
+            ['hora' => '09:30', 'profesional_ids' => [$ana->id, $bea->id]],
+            ['hora' => '10:00', 'profesional_ids' => [$ana->id, $bea->id]],
+            ['hora' => '10:30', 'profesional_ids' => [$bea->id]],
+            ['hora' => '11:00', 'profesional_ids' => [$bea->id]],
+        ], $this->calcular([$s]));
+    }
+
+    public function test_nunca_ofrece_fuera_del_rango(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
+        $this->crearSlot($this->user, $ana, '10:00');
+        $this->crearSlot($this->user, $ana, '11:00');
+
+        $horas = $this->horas($this->calcular([$s], $ana));
+        $this->assertSame('10:00', min($horas));
+        $this->assertSame('11:00', max($horas));
+    }
+
+    public function test_el_hold_pisa_horarios_intermedios(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
+        $this->crearSlot($this->user, $ana, '14:00');
+        $this->crearSlot($this->user, $ana, '15:00');
+        $ahora = $this->ahora();
+        $this->reserva('14:30:00', 60, $ahora->copy()->subMinutes(2)); // [14:30, 15:30)
+
+        $this->assertSame(['14:00'], $this->horas($this->calcular([$s], $ana, $ahora)));
     }
 }

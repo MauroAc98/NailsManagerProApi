@@ -6,6 +6,10 @@ return [
     // mas adelante pasa a ser configurable por salon).
     'anticipacion_minutos' => (int) env('RESERVAS_ANTICIPACION_MINUTOS', 120),
 
+    // Paso (minutos) de la grilla de horarios ofrecidos dentro del rango de
+    // atencion (minimo a maximo de los slots), alineada al minimo.
+    'paso_minutos' => (int) env('RESERVAS_PASO_MINUTOS', 30),
+
     // Ventana (minutos) durante la cual una reserva web pending_payment bloquea
     // el horario. Todavia no hay job de expiracion: las reservas mas viejas que
     // esta ventana se ignoran al calcular disponibilidad.

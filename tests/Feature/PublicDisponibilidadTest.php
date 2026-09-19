@@ -83,6 +83,22 @@ class PublicDisponibilidadTest extends TestCase
             ->assertJsonPath('slots', [['hora' => '11:00', 'profesional_ids' => [$ana->id]]]);
     }
 
+    public function test_ofrece_horarios_entre_los_slots_configurados(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
+        $this->crearSlot($this->user, $ana, '12:00');
+        $this->crearSlot($this->user, $ana, '13:00');
+
+        $this->getJson($this->url("fecha=2099-06-11&servicio_ids[]={$s->id}"))
+            ->assertOk()
+            ->assertJsonPath('slots', [
+                ['hora' => '12:00', 'profesional_ids' => [$ana->id]],
+                ['hora' => '12:30', 'profesional_ids' => [$ana->id]],
+                ['hora' => '13:00', 'profesional_ids' => [$ana->id]],
+            ]);
+    }
+
     public function test_fecha_pasada_da_422(): void
     {
         $ana = $this->crearProfesional($this->user, 'Ana');
