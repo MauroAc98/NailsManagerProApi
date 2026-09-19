@@ -7,10 +7,18 @@ use App\Models\Servicio;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class ServicioController extends Controller
 {
+    // Tope server-side de fotos por servicio para el portafolio. Mismo
+    // criterio de defensa en profundidad que
+    // ProfesionalController::MAX_FOTOS_HISTORIA_PRECIOS: no confiar en que
+    // el cliente respete el límite.
+    private const MAX_FOTOS_SERVICIO = 12;
+
     // ─────────────────────────────────────────────
     // GET /api/servicios
     // ─────────────────────────────────────────────
@@ -177,5 +185,91 @@ class ServicioController extends Controller
         });
 
         return response()->json(Servicio::delUsuario($request->user())->orderBy('orden')->get());
+    }
+
+    // ─────────────────────────────────────────────
+    // POST /api/servicios/{id}/fotos
+    // Agrega una foto al portafolio de este servicio. Devuelve el Servicio
+    // completo — mismo criterio que
+    // ProfesionalController::subirHistoriaPreciosFoto.
+    // ─────────────────────────────────────────────
+    public function subirFoto(Request $request, int $id): JsonResponse
+    {
+        // mimes explícito (no solo 'image'): la regla 'image' de Laravel
+        // acepta SVG, que puede traer <script> embebido — mismo riesgo que
+        // AuthController::subirLogo, ver comentario ahí.
+        $request->validate([
+            'imagen' => 'required|image|mimes:jpeg,png,jpg,webp,gif,bmp|max:5120', // 5MB
+        ]);
+
+        $servicio = Servicio::delUsuario($request->user())->findOrFail($id);
+
+        $cantidadActual = $servicio->fotos()->count();
+
+        if ($cantidadActual >= self::MAX_FOTOS_SERVICIO) {
+            throw ValidationException::withMessages([
+                'imagen' => ['Ya alcanzaste el máximo de ' . self::MAX_FOTOS_SERVICIO . ' fotos para este servicio.'],
+            ]);
+        }
+
+        $path = $request->file('imagen')->store('servicio_fotos', 'public');
+
+        // El próximo 'orden' se calcula desde el máximo existente, no desde
+        // el conteo de filas — mismo criterio que
+        // ProfesionalController::subirHistoriaPreciosFoto (ver comentario
+        // ahí sobre el flujo de "reemplazar" = delete + re-upload).
+        $siguienteOrden = ($servicio->fotos()->max('orden') ?? -1) + 1;
+
+        $servicio->fotos()->create([
+            'path'  => $path,
+            'orden' => $siguienteOrden,
+        ]);
+
+        return response()->json($servicio->load('fotos'));
+    }
+
+    // ─────────────────────────────────────────────
+    // DELETE /api/servicios/{id}/fotos/{fotoId}
+    // Borra una foto del portafolio — fila y archivo del disco, mismo
+    // criterio que ProfesionalController::borrarHistoriaPreciosFoto.
+    // ─────────────────────────────────────────────
+    public function borrarFoto(Request $request, int $id, int $fotoId): JsonResponse
+    {
+        $servicio = Servicio::delUsuario($request->user())->findOrFail($id);
+
+        $foto = $servicio->fotos()->findOrFail($fotoId);
+
+        Storage::disk('public')->delete($foto->getRawOriginal('path'));
+        $foto->delete();
+
+        return response()->json($servicio->load('fotos'));
+    }
+
+    // ─────────────────────────────────────────────
+    // PATCH /api/servicios/{id}/fotos/reordenar
+    // ─────────────────────────────────────────────
+    public function reordenarFotos(Request $request, int $id): JsonResponse
+    {
+        $servicio = Servicio::delUsuario($request->user())->findOrFail($id);
+
+        $data = $request->validate([
+            'ids'   => 'required|array|min:1',
+            'ids.*' => [
+                'integer',
+                Rule::exists('servicio_fotos', 'id')->where(
+                    fn($q) => $q->where('servicio_id', $servicio->id)
+                ),
+            ],
+        ]);
+
+        DB::transaction(function () use ($servicio, $data) {
+            foreach ($data['ids'] as $index => $fotoId) {
+                $servicio->fotos()
+                    ->where('id', $fotoId)
+                    ->update(['orden' => $index]);
+            }
+        });
+
+        return response()->json($servicio->load('fotos'));
     }
 }

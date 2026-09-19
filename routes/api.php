@@ -112,6 +112,9 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
     // Servicios
     Route::patch('servicios/reordenar', [ServicioController::class, 'reordenar']);
     Route::apiResource('servicios', ServicioController::class);
+    Route::post('servicios/{id}/fotos', [ServicioController::class, 'subirFoto']);
+    Route::delete('servicios/{id}/fotos/{fotoId}', [ServicioController::class, 'borrarFoto']);
+    Route::patch('servicios/{id}/fotos/reordenar', [ServicioController::class, 'reordenarFotos']);
 
     // Categorías de servicio
     Route::apiResource('categorias-servicio', CategoriaServicioController::class);
