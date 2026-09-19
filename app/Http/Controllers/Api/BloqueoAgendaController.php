@@ -77,4 +77,17 @@ class BloqueoAgendaController extends Controller
 
         return response()->json($bloqueo, 201);
     }
+
+    // ─────────────────────────────────────────────
+    // DELETE /api/bloqueos/{id}
+    // No hay update: editar un bloqueo es borrar + recrear, así el
+    // invariante dia-completo-o-parcial se valida en un solo lugar (store).
+    // ─────────────────────────────────────────────
+    public function destroy(Request $request, int $id): JsonResponse
+    {
+        $bloqueo = BloqueoAgenda::delUsuario($request->user())->findOrFail($id);
+        $bloqueo->delete();
+
+        return response()->json(['message' => 'Bloqueo eliminado correctamente.']);
+    }
 }

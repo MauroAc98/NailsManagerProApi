@@ -117,9 +117,9 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
     Route::apiResource('categorias-servicio', CategoriaServicioController::class);
 
     // Bloqueos de agenda (dias no laborables puntuales, por profesional o
-    // para todo el salon) — solo index/store por ahora, destroy se agrega
-    // en el proximo commit de esta misma feature.
-    Route::apiResource('bloqueos', BloqueoAgendaController::class)->only(['index', 'store']);
+    // para todo el salon). Sin update: editar = borrar + recrear (ver
+    // BloqueoAgendaController::destroy).
+    Route::apiResource('bloqueos', BloqueoAgendaController::class)->only(['index', 'store', 'destroy']);
 
     // Gastos
     Route::apiResource('gastos', GastoController::class);
