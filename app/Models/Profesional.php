@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
 
 class Profesional extends Model
@@ -19,6 +20,7 @@ class Profesional extends Model
         'fondo_historia_path',
         'historia_precios_template_id',
         'historia_precios_nota',
+        'dias_atencion',
     ];
 
     protected $appends = ['fondo_historia_url', 'nombre_completo'];
@@ -32,7 +34,23 @@ class Profesional extends Model
             // — validado en ProfesionalController (store/update), la
             // estructura interna la define el frontend (useHistoriaPrecios).
             'historia_precios_nota'  => 'array',
+            // Enteros 0-6 (convencion Carbon: 0=domingo..6=sabado), deduplicados
+            // y ordenados en ProfesionalController::store/update. NULL = atiende
+            // todos los dias (default, sin backfill) — ver atiendeEl().
+            'dias_atencion'          => 'array',
         ];
+    }
+
+    // Verdadero si esta profesional atiende el dia de la semana de $fecha.
+    // NULL (default, sin configurar) = atiende todos los dias — preserva el
+    // comportamiento actual para cuentas que nunca tocaron este campo.
+    public function atiendeEl(Carbon $fecha): bool
+    {
+        if ($this->dias_atencion === null) {
+            return true;
+        }
+
+        return in_array($fecha->dayOfWeek, $this->dias_atencion, true);
     }
 
     // URL pública del fondo fijo guardado para "generar historia", o null si
