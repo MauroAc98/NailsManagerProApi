@@ -334,6 +334,13 @@ class PublicReservasHoldsTest extends TestCase
         $this->getJson("/api/public/{$this->user->slug}/disponibilidad?fecha=" . self::FECHA . "&servicio_ids[]={$this->servicio->id}")->assertOk();
     }
 
+    public function test_la_ruta_vieja_post_reservas_ya_no_existe(): void
+    {
+        $this->postJson($this->url(), ['nombre_completo' => 'X', 'telefono' => self::TEL, 'servicio_ids' => [$this->servicio->id], 'fecha' => self::FECHA, 'slot_hora' => '10:00'])
+            ->assertNotFound();
+        $this->assertSame(0, ReservaWeb::count());
+    }
+
     public function test_el_flag_esta_apagado_por_defecto(): void
     {
         $this->assertFalse((bool) (include base_path('config/reservas.php'))['creacion_habilitada']);

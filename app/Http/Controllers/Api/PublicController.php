@@ -3,18 +3,14 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\PagoSena;
 use App\Models\Profesional;
-use App\Models\ReservaWeb;
 use App\Models\CategoriaServicio;
 use App\Models\Servicio;
-use App\Models\Turno;
 use App\Models\User;
 use App\Services\Reservas\DisponibilidadService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 
 class PublicController extends Controller
 {
@@ -251,141 +247,5 @@ class PublicController extends Controller
         }
 
         return response()->json(['dias' => $dias]);
-    }
-
-    // ─────────────────────────────────────────────
-    // POST /api/public/{slug}/reservas
-    // Crear una reserva desde la web pública
-    // ─────────────────────────────────────────────
-    public function store(Request $request, string $slug): JsonResponse
-    {
-        // TODO(reserva-online slice 3): quitar este guard temporal (y el flag
-        // config('reservas.creacion_habilitada')). La creacion todavia no
-        // tiene MP, lock ni profesional; se apaga hasta que este completa.
-        if (! config('reservas.creacion_habilitada')) {
-            return response()->json([
-                'message' => 'La reserva online todavía no está disponible.',
-            ], 503);
-        }
-
-        $user = $this->getProfesional($slug);
-
-        $data = $request->validate([
-            'nombre_completo' => 'required|string|max:200',
-            'telefono'        => ['required', 'string', 'regex:/^\+[1-9]\d{7,14}$/'],
-            'servicio_ids'    => 'required|array|min:1',
-            'servicio_ids.*'  => 'integer',
-            'fecha'           => 'required|date|after_or_equal:today',
-            'slot_hora'       => 'required|date_format:H:i',
-        ]);
-
-        // Verificar que los servicios pertenecen a esta profesional
-        $servicios = Servicio::where('user_id', $user->id)
-            ->whereIn('id', $data['servicio_ids'])
-            ->where('activo', true)
-            ->get();
-
-        if ($servicios->count() !== count($data['servicio_ids'])) {
-            return response()->json([
-                'message' => 'Uno o más servicios no son válidos.',
-            ], 422);
-        }
-
-        $duracionTotal = $servicios->sum('duracion_minutos');
-
-        // Verificar que el slot sigue disponible
-        $slotOcupado = $this->slotEstaOcupado(
-            $user->id,
-            $data['fecha'],
-            $data['slot_hora'],
-            $duracionTotal,
-        );
-
-        if ($slotOcupado) {
-            return response()->json([
-                'message' => 'El horario seleccionado ya no está disponible. Por favor elegí otro.',
-            ], 422);
-        }
-
-        // Crear la reserva
-        $reserva = ReservaWeb::create([
-            'user_id'                => $user->id,
-            'nombre_completo'        => $data['nombre_completo'],
-            'telefono'               => $data['telefono'],
-            'servicio_ids'           => $data['servicio_ids'],
-            'fecha'                  => $data['fecha'],
-            'slot_hora'              => $data['slot_hora'],
-            'duracion_total_minutos' => $duracionTotal,
-            'estado'                 => 'pending_payment',
-        ]);
-
-        // Si la profesional tiene seña configurada, crear preferencia de MP
-        if ($user->sena_monto > 0 && $user->mpCredentials) {
-            $pagoSena = PagoSena::create([
-                'reserva_web_id'   => $reserva->id,
-                'mp_preference_id' => 'pending',
-                'monto'            => $user->sena_monto,
-                'estado'           => 'pendiente',
-            ]);
-
-            // TODO: integrar SDK de Mercado Pago para generar la preference
-            // $preference = MPService::crearPreference($user, $reserva, $pagoSena);
-            // $pagoSena->update(['mp_preference_id' => $preference->id]);
-
-            return response()->json([
-                'message'        => 'Reserva creada. Completá el pago de la seña para confirmar.',
-                'reserva_id'     => $reserva->id,
-                'sena_monto'     => $user->sena_monto,
-                'mp_preference'  => null, // ← se completa cuando integres MP
-            ], 201);
-        }
-
-        // Sin seña — la reserva queda pendiente de aprobación manual
-        return response()->json([
-            'message'    => 'Reserva recibida. Te avisaremos cuando sea confirmada.',
-            'reserva_id' => $reserva->id,
-        ], 201);
-    }
-
-    // ─────────────────────────────────────────────
-    // Helper privado — verifica si un slot está ocupado
-    // ─────────────────────────────────────────────
-    private function slotEstaOcupado(
-        int $userId,
-        string $fecha,
-        string $slotHora,
-        int $duracion,
-    ): bool {
-        $slotCarbon  = Carbon::parse("{$fecha} {$slotHora}");
-        $slotMinutos = $slotCarbon->hour * 60 + $slotCarbon->minute;
-        $slotFin     = $slotMinutos + $duracion;
-
-        // Verificar contra turnos confirmados
-        $turnoOcupado = Turno::where('user_id', $userId)
-            ->confirmados()
-            ->whereDate('fecha_hora', $fecha)
-            ->get(['fecha_hora', 'duracion_total_minutos'])
-            ->contains(function ($turno) use ($slotMinutos, $slotFin) {
-                $inicio = Carbon::parse($turno->fecha_hora);
-                $inicioMin = $inicio->hour * 60 + $inicio->minute;
-                $finMin    = $inicioMin + $turno->duracion_total_minutos;
-
-                return $slotMinutos < $finMin && $slotFin > $inicioMin;
-            });
-
-        if ($turnoOcupado) return true;
-
-        // Verificar contra reservas pendientes
-        return ReservaWeb::where('user_id', $userId)
-            ->pendientes()
-            ->where('fecha', $fecha)
-            ->get(['slot_hora', 'duracion_total_minutos'])
-            ->contains(function ($reserva) use ($slotMinutos, $slotFin) {
-                $inicio    = Carbon::parse($reserva->slot_hora);
-                $inicioMin = $inicio->hour * 60 + $inicio->minute;
-                $finMin    = $inicioMin + $reserva->duracion_total_minutos;
-
-                return $slotMinutos < $finMin && $slotFin > $inicioMin;
-            });
     }
 }
