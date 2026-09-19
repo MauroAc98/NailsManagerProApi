@@ -2,6 +2,7 @@
 
 namespace App\Services\Reservas;
 
+use App\Models\BloqueoAgenda;
 use App\Models\Profesional;
 use App\Models\ReservaWeb;
 use App\Models\SlotDisponible;
@@ -44,6 +45,7 @@ class DisponibilidadService
         $holds = $this->holdsVigentes($user, $fecha, $fecha, $ahora);
         $ocupacion = $this->turnosDelRango($user, $fecha, $fecha, $profesionales->pluck('id')->all());
         $slotsPorProfesional = $this->slotsPorProfesional($user, $profesionales);
+        $bloqueos = $this->bloqueosDelRango($user, $fecha, $fecha);
 
         return $this->calcularDia(
             $fecha,
@@ -53,6 +55,7 @@ class DisponibilidadService
             $holds[$fecha] ?? [],
             $ocupacion,
             $ahora->copy()->addMinutes($anticipacionMinutos),
+            $bloqueos[$fecha] ?? null,
         );
     }
 
@@ -85,13 +88,14 @@ class DisponibilidadService
         $holds = $this->holdsVigentes($user, $desde, $hasta, $ahora);
         $ocupacion = $this->turnosDelRango($user, $desde, $hasta, $profesionales->pluck('id')->all());
         $slotsPorProfesional = $this->slotsPorProfesional($user, $profesionales);
+        $bloqueos = $this->bloqueosDelRango($user, $desde, $hasta);
 
         $resultado = [];
         $dia = Carbon::parse($desde)->startOfDay();
         $ultimo = Carbon::parse($hasta)->startOfDay();
         while ($dia->lte($ultimo)) {
             $fecha = $dia->format('Y-m-d');
-            $libres = $this->calcularDia($fecha, $duracion, $profesionales, $slotsPorProfesional, $holds[$fecha] ?? [], $ocupacion, $minimo);
+            $libres = $this->calcularDia($fecha, $duracion, $profesionales, $slotsPorProfesional, $holds[$fecha] ?? [], $ocupacion, $minimo, $bloqueos[$fecha] ?? null);
             if ($libres !== []) {
                 $resultado[$fecha] = count($libres);
             }
@@ -113,6 +117,7 @@ class DisponibilidadService
         array $holds, // profesional_id => intervalos de holds vivos ese dia
         array $ocupacion,
         Carbon $minimo,
+        ?array $bloqueos = null, // ['diaCompleto' => [profId|0 => true], 'parcial' => [profId|0 => intervalos]] de ESE dia
     ): array {
         // Candidatos = EXACTAMENTE los slots activos configurados de cada profesional
         // (sin grilla ni horarios intermedios). Se ofrece un inicio si la duracion
@@ -120,11 +125,19 @@ class DisponibilidadService
         $porHora = [];
 
         $diaDeLaSemana = Carbon::parse($fecha);
+        $diaCompleto = $bloqueos['diaCompleto'] ?? [];
+        $parcial = $bloqueos['parcial'] ?? [];
 
         foreach ($profesionales as $prof) {
             if (! $prof->atiendeEl($diaDeLaSemana)) {
                 continue;
             }
+            // 0 = bloqueo salon-wide (aplica a todas las profesionales).
+            if (isset($diaCompleto[0]) || isset($diaCompleto[$prof->id])) {
+                continue;
+            }
+
+            $bloqueosParciales = array_merge($parcial[0] ?? [], $parcial[$prof->id] ?? []);
 
             foreach ($slotsPorProfesional[$prof->id] ?? [] as $hora) {
                 $inicio = Carbon::parse("{$fecha} {$hora}");
@@ -137,6 +150,9 @@ class DisponibilidadService
                     continue;
                 }
                 if ($this->solapaAlguno($ocupacion[$prof->id] ?? [], $inicio, $fin)) {
+                    continue;
+                }
+                if ($this->solapaAlguno($bloqueosParciales, $inicio, $fin)) {
                     continue;
                 }
 
@@ -268,6 +284,40 @@ class DisponibilidadService
         }
 
         return $holds;
+    }
+
+    /**
+     * Bloqueos del rango, agrupados por fecha. Cada fecha trae dos listas
+     * separadas por profesional_id (0 = salon-wide, aplica a todas):
+     * 'diaCompleto' (ambos horarios null) marca profesionales/dia
+     * completamente excluidos; 'parcial' (ambos horarios presentes) trae
+     * los intervalos a mergear con holds/turnos en solapaAlguno().
+     *
+     * @return array<string, array{diaCompleto: array<int,bool>, parcial: array<int, array<int, array{0: Carbon, 1: Carbon}>>}>
+     */
+    private function bloqueosDelRango(User $user, string $desde, string $hasta): array
+    {
+        $bloqueos = BloqueoAgenda::delUsuario($user)
+            ->whereDate('fecha', '>=', $desde)
+            ->whereDate('fecha', '<=', $hasta)
+            ->get();
+
+        $resultado = [];
+        foreach ($bloqueos as $bloqueo) {
+            $fecha = $bloqueo->fecha->format('Y-m-d');
+            $profId = $bloqueo->profesional_id ?? 0;
+
+            if ($bloqueo->hora_desde === null || $bloqueo->hora_hasta === null) {
+                $resultado[$fecha]['diaCompleto'][$profId] = true;
+                continue;
+            }
+
+            $inicio = Carbon::parse("{$fecha} {$bloqueo->hora_desde}");
+            $fin = Carbon::parse("{$fecha} {$bloqueo->hora_hasta}");
+            $resultado[$fecha]['parcial'][$profId][] = [$inicio, $fin];
+        }
+
+        return $resultado;
     }
 
     /** @return array{0: string, 1: array{0: Carbon, 1: Carbon}} */
