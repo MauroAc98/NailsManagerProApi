@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\StatsController;
 use App\Http\Controllers\Api\GastoController;
 use App\Http\Controllers\Api\IngresoController;
 use App\Http\Controllers\Api\CategoriaServicioController;
+use App\Http\Controllers\Api\BloqueoAgendaController;
 use App\Http\Controllers\Api\WhatsappConnectionAdminController;
 use Illuminate\Support\Facades\Route;
 
@@ -114,6 +115,11 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
 
     // Categorías de servicio
     Route::apiResource('categorias-servicio', CategoriaServicioController::class);
+
+    // Bloqueos de agenda (dias no laborables puntuales, por profesional o
+    // para todo el salon). Sin update: editar = borrar + recrear (ver
+    // BloqueoAgendaController::destroy).
+    Route::apiResource('bloqueos', BloqueoAgendaController::class)->only(['index', 'store', 'destroy']);
 
     // Gastos
     Route::apiResource('gastos', GastoController::class);
