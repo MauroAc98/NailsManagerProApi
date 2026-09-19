@@ -46,6 +46,31 @@ class ProfesionalController extends Controller
         ];
     }
 
+    // Reglas de validacion para 'dias_atencion' (dias de la semana que la
+    // profesional atiende), compartidas entre store/update. `sometimes`
+    // porque omitir el campo tiene significado propio: en store, deja el
+    // default NULL (atiende todos los dias); en update, no lo toca.
+    private function reglasDiasAtencion(): array
+    {
+        return [
+            'dias_atencion'   => 'sometimes|nullable|array',
+            'dias_atencion.*' => 'integer|between:0,6',
+        ];
+    }
+
+    // Dedup + sort de 'dias_atencion' para no persistir representaciones
+    // divergentes del mismo conjunto de dias (ver Design > Risks).
+    private function normalizarDiasAtencion(array $data): ?array
+    {
+        if (! array_key_exists('dias_atencion', $data) || $data['dias_atencion'] === null) {
+            return null;
+        }
+
+        $dias = collect($data['dias_atencion'])->unique()->sort()->values()->all();
+
+        return $dias;
+    }
+
     // ─────────────────────────────────────────────
     // GET /api/profesionales
     // ─────────────────────────────────────────────
@@ -76,6 +101,7 @@ class ProfesionalController extends Controller
                     fn($q) => $q->where('user_id', $request->user()->id)
                 ),
             ],
+            ...$this->reglasDiasAtencion(),
         ]);
 
         $profesional = $request->user()->profesionales()->create([
@@ -84,6 +110,7 @@ class ProfesionalController extends Controller
             'color'                         => $data['color'] ?? null,
             'activo'                        => true,
             'historia_precios_template_id'  => $data['historia_precios_template_id'] ?? null,
+            'dias_atencion'                 => $this->normalizarDiasAtencion($data),
         ]);
 
         if (array_key_exists('servicio_ids', $data)) {
@@ -112,6 +139,7 @@ class ProfesionalController extends Controller
                 ),
             ],
             ...$this->reglasHistoriaPreciosNota(),
+            ...$this->reglasDiasAtencion(),
         ]);
 
         $profesional = Profesional::delUsuario($request->user())->findOrFail($id);
@@ -130,6 +158,10 @@ class ProfesionalController extends Controller
                 $profesional->historia_precios_nota ?? [],
                 $data['historia_precios_nota']
             );
+        }
+
+        if (array_key_exists('dias_atencion', $data) && $data['dias_atencion'] !== null) {
+            $data['dias_atencion'] = $this->normalizarDiasAtencion($data);
         }
 
         $profesional->update(collect($data)->except('servicio_ids')->all());
