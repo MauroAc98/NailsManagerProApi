@@ -7,6 +7,7 @@ use App\Jobs\EnviarMensajeConfirmacion;
 use App\Models\Profesional;
 use App\Models\Servicio;
 use App\Models\SlotDisponible;
+use App\Models\ReservaWeb;
 use App\Models\Turno;
 use App\Models\User;
 use App\Models\WhatsappMensaje;
@@ -321,6 +322,10 @@ class TurnoController extends Controller
             ], 422);
         }
 
+        if ($this->hayHoldVivo($profesional->id, $data['fecha_hora'], $duracionTotal)) {
+            return $this->respuestaHoldVivo();
+        }
+
         // ── Crear turno ──────────────────────────────────────────
         $turno = Turno::create([
             'user_id' => $user->id,
@@ -429,6 +434,10 @@ class TurnoController extends Controller
             return response()->json([
                 'message' => "Las {$fechaHora->format('H:i')} cae dentro del turno de {$nombreCliente} ({$serviciosChoque}, {$horaChoque} - {$finChoque}). Elegí otro horario.",
             ], 422);
+        }
+
+        if ($this->hayHoldVivo($profesional->id, $data['fecha_hora'], $duracionTotal)) {
+            return $this->respuestaHoldVivo();
         }
 
         $cambioDeFecha = Carbon::parse($turno->fecha_hora)->toDateString() !== $fechaHora->toDateString();
@@ -894,6 +903,37 @@ class TurnoController extends Controller
         }
 
         return $query->first();
+    }
+
+    // ─────────────────────────────────────────────
+    // Helper — ¿hay una reserva online EN CURSO (hold vivo) de esa
+    // profesional que pise [fecha_hora, +duracion)? Vivo = held/pending_payment
+    // con expira_en futuro (epoch); un hold vencido no bloquea aunque el job
+    // de expiracion todavia no haya corrido. Semi-abierto, por profesional.
+    // ─────────────────────────────────────────────
+    private function hayHoldVivo(int $profesionalId, string $fechaHora, int $duracion): bool
+    {
+        $inicio = Carbon::parse($fechaHora);
+        $fin = $inicio->copy()->addMinutes($duracion);
+
+        return ReservaWeb::where('profesional_id', $profesionalId)
+            ->vivos(Carbon::now()->timestamp)
+            ->whereDate('fecha', $inicio->toDateString())
+            ->get()
+            ->contains(function (ReservaWeb $r) use ($inicio, $fin) {
+                $desde = Carbon::parse(substr((string) $r->getRawOriginal('fecha'), 0, 10) . ' ' . $r->getRawOriginal('slot_hora'));
+                $hasta = $desde->copy()->addMinutes((int) $r->duracion_total_minutos);
+
+                return $desde->lt($fin) && $hasta->gt($inicio);
+            });
+    }
+
+    private function respuestaHoldVivo(): JsonResponse
+    {
+        return response()->json([
+            'message' => 'Una clienta está reservando ese horario en este momento. Probá en unos minutos o elegí otro horario.',
+            'code' => 'slot_held',
+        ], 422);
     }
 
     // ─────────────────────────────────────────────
