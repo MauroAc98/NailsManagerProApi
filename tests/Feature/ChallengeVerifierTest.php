@@ -55,22 +55,30 @@ class ChallengeVerifierTest extends TestCase
         $this->assertFalse((new TurnstileVerifier())->verificar('tok', '9.9.9.9'));
     }
 
-    public function test_falla_cerrado_sin_token_sin_secret_con_5xx_y_con_timeout(): void
+    public function test_falla_cerrado_sin_token_o_sin_secret_y_no_llama_a_cloudflare(): void
     {
         Http::fake([self::URL => Http::response(['success' => true])]);
+
         $this->assertFalse((new TurnstileVerifier())->verificar(null, '1.1.1.1'));
         $this->assertFalse((new TurnstileVerifier())->verificar('', '1.1.1.1'));
-        Http::assertNothingSent();
 
         config(['services.turnstile.secret' => '']);
         $this->assertFalse((new TurnstileVerifier())->verificar('tok', '1.1.1.1'));
+
         Http::assertNothingSent();
+    }
 
-        config(['services.turnstile.secret' => 'sekret']);
+    public function test_falla_cerrado_con_5xx(): void
+    {
         Http::fake([self::URL => Http::response('boom', 500)]);
-        $this->assertFalse((new TurnstileVerifier())->verificar('tok', '1.1.1.1'));
 
+        $this->assertFalse((new TurnstileVerifier())->verificar('tok', '1.1.1.1'));
+    }
+
+    public function test_falla_cerrado_con_timeout(): void
+    {
         Http::fake([self::URL => fn () => throw new ConnectionException('timeout')]);
+
         $this->assertFalse((new TurnstileVerifier())->verificar('tok', '1.1.1.1'));
     }
 }
