@@ -11,6 +11,7 @@ use Closure;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -33,6 +34,7 @@ class HoldService
         private DisponibilidadService $disponibilidad,
         private PoliticaHold $politica,
         private ExpirarHoldsService $expirar,
+        private ReputacionService $reputacion,
     ) {
     }
 
@@ -102,6 +104,194 @@ class HoldService
         ]);
 
         throw ReservaPublicaException::slotTaken();
+    }
+
+    // ─────────────────────────────────────────────
+    // Datos de contacto
+    // ─────────────────────────────────────────────
+
+    /**
+     * Completa nombre/apellido/whatsapp/nota de un hold vivo. Aca aparece el
+     * telefono, asi que recien ahora aplican cooldown y verificacion (ambos
+     * liberan el hold). No mueve la expiracion.
+     *
+     * @throws ReservaPublicaException not_found | hold_expired | already_confirmed | phone_cooldown | verification_required
+     */
+    public function guardarDatos(User $user, string $token, string $nombre, string $apellido, string $whatsapp, ?string $nota, Carbon $ahora): HoldResultado
+    {
+        $this->expirarLazy($user, $token, $ahora);
+        $reserva = DB::transaction(function () use ($user, $token, $nombre, $apellido, $whatsapp, $nota, $ahora) {
+            $reserva = $this->cargarVivo($user, $token, $ahora);
+            $phoneHash = $this->reputacion->hashTelefono($whatsapp);
+
+            $espera = $this->reputacion->cooldownRestante($user->id, $phoneHash, $ahora->timestamp);
+            if ($espera > 0) {
+                $this->cerrar($reserva, 'cooldown');
+                Log::info('reserva.abuse.cooldown', $this->contexto($reserva) + ['motivo' => 'phone_cooldown']);
+
+                return ReservaPublicaException::phoneCooldown($espera);
+            }
+
+            if (config('reservas.verificacion_habilitada')
+                && $this->reputacion->necesitaVerificacion($user->id, $reserva->device_hash, $phoneHash, $ahora->timestamp)) {
+                $this->cerrar($reserva, 'verificacion');
+                Log::info('reserva.abuse.verification_required', $this->contexto($reserva) + ['motivo' => 'verification_required']);
+
+                return ReservaPublicaException::verificationRequired();
+            }
+
+            // El mismo telefono desde otro dispositivo: queda solo el hold mas reciente.
+            ReservaWeb::where('user_id', $user->id)->where('id', '!=', $reserva->id)->vivos($ahora->timestamp)->whereNotNull('telefono')->get()
+                ->filter(fn (ReservaWeb $otra) => $this->reputacion->hashTelefono((string) $otra->telefono) === $phoneHash)
+                ->each(function (ReservaWeb $otra) {
+                    $this->cerrar($otra, 'telefono_duplicado');
+                    Log::info('reserva.hold.released', $this->contexto($otra) + ['motivo' => 'telefono_duplicado']);
+                });
+
+            $reserva->update([
+                'nombre' => $nombre,
+                'apellido' => $apellido,
+                'nombre_completo' => trim("{$nombre} {$apellido}"),
+                'telefono' => $whatsapp,
+                'nota' => $nota,
+            ]);
+
+            return $reserva;
+        });
+
+        // El cierre por abuso se persiste (commit) y recien despues se informa el error.
+        if ($reserva instanceof ReservaPublicaException) {
+            throw $reserva;
+        }
+
+        return new HoldResultado($reserva);
+    }
+
+    // ─────────────────────────────────────────────
+    // Pago
+    // ─────────────────────────────────────────────
+
+    /**
+     * Pasa a pending_payment y extiende la expiracion UNA sola vez a
+     * max(actual, ahora + ventana de pago). Idempotente. Es un STUB de checkout
+     * hasta la slice de Mercado Pago.
+     *
+     * @throws ReservaPublicaException not_found | hold_expired | datos_required
+     */
+    public function iniciarPago(User $user, string $token, Carbon $ahora): HoldResultado
+    {
+        $this->expirarLazy($user, $token, $ahora);
+
+        return DB::transaction(function () use ($user, $token, $ahora) {
+            $reserva = $this->cargar($user, $token, $ahora);
+
+            if ($reserva->estado === 'confirmed') {
+                return new HoldResultado($reserva, true);
+            }
+            if (! in_array($reserva->estado, ReservaWeb::ESTADOS_BLOQUEANTES, true)) {
+                throw ReservaPublicaException::holdExpired();
+            }
+            if (! $reserva->nombre || ! $reserva->telefono) {
+                throw ReservaPublicaException::datosRequired();
+            }
+            if ($reserva->pago_extendido) {
+                return new HoldResultado($reserva, true);
+            }
+
+            $reserva->update([
+                'estado' => 'pending_payment',
+                'pago_extendido' => true,
+                'expira_en' => max((int) $reserva->expira_en, $ahora->timestamp + $this->politica->pagoMinutos((bool) $reserva->alta_ocupacion) * 60),
+            ]);
+            Log::info('reserva.hold.extended', $this->contexto($reserva) + ['motivo' => 'pago_iniciado']);
+
+            return new HoldResultado($reserva);
+        });
+    }
+
+    // ─────────────────────────────────────────────
+    // Liberar / estado
+    // ─────────────────────────────────────────────
+
+    /**
+     * Libera un hold vivo (cancelled/liberada). Idempotente; NO penaliza. Un
+     * hold ya vencido queda expirado (con su reputacion); uno confirmado es 409.
+     *
+     * @throws ReservaPublicaException not_found | already_confirmed
+     */
+    public function liberar(User $user, string $token, Carbon $ahora): void
+    {
+        DB::transaction(function () use ($user, $token, $ahora) {
+            $reserva = $this->cargar($user, $token, $ahora);
+
+            if ($reserva->estado === 'confirmed') {
+                throw ReservaPublicaException::yaConfirmada();
+            }
+            if (in_array($reserva->estado, ReservaWeb::ESTADOS_BLOQUEANTES, true)) {
+                $this->cerrar($reserva, 'liberada');
+                Log::info('reserva.hold.released', $this->contexto($reserva) + ['motivo' => 'liberada']);
+            }
+        });
+    }
+
+    /** Estado actual (con expiracion lazy: un hold vencido se lee como expired). */
+    public function estado(User $user, string $token, Carbon $ahora): ReservaWeb
+    {
+        return DB::transaction(fn () => $this->cargar($user, $token, $ahora));
+    }
+
+    // ─────────────────────────────────────────────
+    // Helpers
+    // ─────────────────────────────────────────────
+
+    /** Busca por token (del salon), toma la fila con lock y aplica la expiracion lazy. */
+    private function cargar(User $user, string $token, Carbon $ahora): ReservaWeb
+    {
+        $reserva = ReservaWeb::where('user_id', $user->id)->where('public_token', $token)->lockForUpdate()->first();
+        if (! $reserva) {
+            throw ReservaPublicaException::notFound();
+        }
+
+        if (in_array($reserva->estado, ReservaWeb::ESTADOS_BLOQUEANTES, true)
+            && $reserva->expira_en !== null && $reserva->expira_en <= $ahora->timestamp) {
+            $this->expirar->expirarUna($reserva, $ahora->timestamp);
+            $reserva->refresh();
+        }
+
+        return $reserva;
+    }
+
+    /** Como cargar(), pero exige que siga vivo (held / pending_payment). */
+    private function cargarVivo(User $user, string $token, Carbon $ahora): ReservaWeb
+    {
+        $reserva = $this->cargar($user, $token, $ahora);
+
+        if ($reserva->estado === 'confirmed') {
+            throw ReservaPublicaException::yaConfirmada();
+        }
+        if (! in_array($reserva->estado, ReservaWeb::ESTADOS_BLOQUEANTES, true)) {
+            throw ReservaPublicaException::holdExpired();
+        }
+
+        return $reserva;
+    }
+
+    /**
+     * Expira (y penaliza) el hold si ya vencio, FUERA de la transaccion del
+     * caller: si el caller despues lanza (410), el vencimiento no se revierte.
+     */
+    private function expirarLazy(User $user, string $token, Carbon $ahora): void
+    {
+        $reserva = ReservaWeb::where('user_id', $user->id)->where('public_token', $token)->first();
+        if ($reserva && in_array($reserva->estado, ReservaWeb::ESTADOS_BLOQUEANTES, true)
+            && $reserva->expira_en !== null && $reserva->expira_en <= $ahora->timestamp) {
+            $this->expirar->expirarUna($reserva, $ahora->timestamp);
+        }
+    }
+
+    private function cerrar(ReservaWeb $reserva, string $motivo): void
+    {
+        $reserva->update(['estado' => 'cancelled', 'motivo_cierre' => $motivo]);
     }
 
     /**
