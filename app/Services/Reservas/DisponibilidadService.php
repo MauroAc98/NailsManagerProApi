@@ -154,7 +154,7 @@ class DisponibilidadService
      *
      * @return Collection<int, Profesional>
      */
-    private function profesionalesCandidatas(User $user, ?Profesional $profesional, array $servicioIds): Collection
+    public function profesionalesCandidatas(User $user, ?Profesional $profesional, array $servicioIds): Collection
     {
         $query = Profesional::where('user_id', $user->id)->where('activo', true)->orderBy('id');
         if ($profesional) {
@@ -166,6 +166,17 @@ class DisponibilidadService
 
             return count(array_diff($servicioIds, $ofrecidos)) === 0;
         })->values();
+    }
+
+    /**
+     * Horas 'HH:MM' de los slots activos de UNA profesional (mismas reglas que
+     * la disponibilidad: los slots legacy sin profesional van a la por defecto).
+     *
+     * @return array<int, string>
+     */
+    public function horasActivas(User $user, Profesional $profesional): array
+    {
+        return $this->slotsPorProfesional($user, collect([$profesional]))[$profesional->id] ?? [];
     }
 
     /**
