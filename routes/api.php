@@ -22,10 +22,10 @@ use Illuminate\Support\Facades\Route;
 // Rutas públicas — sin autenticación
 // ─────────────────────────────────────────────
 Route::prefix('public/{slug}')->group(function () {
-    Route::get('info',           [PublicController::class, 'info']);
+    Route::get('info',           [PublicController::class, 'info'])->middleware('throttle:60,1');
     Route::get('branding',       [PublicController::class, 'branding']);
-    Route::get('servicios',      [PublicController::class, 'servicios']);
-    Route::get('disponibilidad', [PublicController::class, 'disponibilidad']);
+    Route::get('servicios',      [PublicController::class, 'servicios'])->middleware('throttle:60,1');
+    Route::get('disponibilidad', [PublicController::class, 'disponibilidad'])->middleware('throttle:60,1');
     Route::post('reservas',      [PublicController::class, 'store'])->middleware('throttle:10,1');
 });
 
