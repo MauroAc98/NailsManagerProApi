@@ -166,6 +166,15 @@ class PublicController extends Controller
     // ─────────────────────────────────────────────
     public function store(Request $request, string $slug): JsonResponse
     {
+        // TODO(reserva-online slice 3): quitar este guard temporal (y el flag
+        // config('reservas.creacion_habilitada')). La creacion todavia no
+        // tiene MP, lock ni profesional; se apaga hasta que este completa.
+        if (! config('reservas.creacion_habilitada')) {
+            return response()->json([
+                'message' => 'La reserva online todavía no está disponible.',
+            ], 503);
+        }
+
         $user = $this->getProfesional($slug);
 
         $data = $request->validate([
