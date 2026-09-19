@@ -119,7 +119,13 @@ class DisponibilidadService
         // total entra sin pisar turnos ni holds vivos de ESA profesional, ni el lead time.
         $porHora = [];
 
+        $diaDeLaSemana = Carbon::parse($fecha);
+
         foreach ($profesionales as $prof) {
+            if (! $prof->atiendeEl($diaDeLaSemana)) {
+                continue;
+            }
+
             foreach ($slotsPorProfesional[$prof->id] ?? [] as $hora) {
                 $inicio = Carbon::parse("{$fecha} {$hora}");
                 $fin = $inicio->copy()->addMinutes($duracion);
