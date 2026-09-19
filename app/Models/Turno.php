@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 
 class Turno extends Model
 {
@@ -59,6 +60,25 @@ class Turno extends Model
     {
         return $query->whereDate('fecha_hora', '>=', $desde)
             ->whereDate('fecha_hora', '<=', $hasta);
+    }
+
+    /**
+     * Turnos cuyo intervalo [fecha_hora, fecha_hora + duracion) se solapa con
+     * [$inicio, $fin) (semi-abierto: los intervalos adyacentes NO se solapan).
+     * Componer con confirmados() / where('profesional_id', ...) segun el caso.
+     *
+     * Produccion es PostgreSQL; la rama sqlite existe solo para la suite de tests.
+     */
+    public function scopeSolapaCon($query, \DateTimeInterface|string $inicio, \DateTimeInterface|string $fin)
+    {
+        $inicio = Carbon::parse($inicio)->format('Y-m-d H:i:s');
+        $fin = Carbon::parse($fin)->format('Y-m-d H:i:s');
+
+        $finExistente = $query->getConnection()->getDriverName() === 'sqlite'
+            ? "datetime(fecha_hora, '+' || duracion_total_minutos || ' minutes')"
+            : "fecha_hora + (duracion_total_minutos || ' minutes')::interval";
+
+        return $query->whereRaw("fecha_hora < ? AND {$finExistente} > ?", [$fin, $inicio]);
     }
 
     // ── Helpers de estado ────────────────────────────────────────

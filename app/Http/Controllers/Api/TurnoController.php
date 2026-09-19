@@ -887,10 +887,7 @@ class TurnoController extends Controller
             ->confirmados()
             ->delaFecha($fecha)
             ->with(['cliente', 'servicios'])
-            ->whereRaw(
-                "fecha_hora < ? AND fecha_hora + (duracion_total_minutos || ' minutes')::interval > ?",
-                [$fin, $inicio]
-            );
+            ->solapaCon($inicio, $fin);
 
         if ($excluirId) {
             $query->where('id', '!=', $excluirId);
