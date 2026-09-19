@@ -2,7 +2,10 @@
 
 namespace App\Providers;
 
+use App\Services\Reservas\ChallengeVerifier;
+use App\Services\Reservas\NullChallengeVerifier;
 use App\Services\Reservas\NullVerificadorWhatsapp;
+use App\Services\Reservas\TurnstileVerifier;
 use App\Services\Reservas\VerificadorWhatsapp;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -18,6 +21,11 @@ class AppServiceProvider extends ServiceProvider
     {
         // Verificacion de WhatsApp: stub por defecto (todavia no hay proveedor).
         $this->app->bind(VerificadorWhatsapp::class, NullVerificadorWhatsapp::class);
+
+        // Reto anti-bot: Null salvo que reservas.challenge.habilitado este encendido.
+        $this->app->bind(ChallengeVerifier::class, fn () => config('reservas.challenge.habilitado')
+            ? new TurnstileVerifier()
+            : new NullChallengeVerifier());
     }
 
     /**
