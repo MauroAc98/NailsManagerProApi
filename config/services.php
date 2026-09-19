@@ -65,6 +65,12 @@ return [
         'graph_version' => env('WHATSAPP_ES_GRAPH_VERSION', env('WHATSAPP_CLOUD_API_VERSION', 'v26.0')),
     ],
 
+    // Cloudflare Turnstile (reto anti-bot de la reserva online). Solo se usa si
+    // RESERVAS_CHALLENGE_HABILITADO=true.
+    'turnstile' => [
+        'secret' => env('TURNSTILE_SECRET'),
+    ],
+
     'frontend_url' => env('FRONTEND_URL'),
 
 ];

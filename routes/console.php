@@ -15,3 +15,5 @@ Schedule::command('recordatorios:enviar')
     ->appendOutputTo(storage_path('logs/recordatorios.log'));
 
 Schedule::command('suscripciones:marcar-vencidas')->daily();
+
+Schedule::command('reservas:expirar-holds')->everyMinute()->withoutOverlapping();

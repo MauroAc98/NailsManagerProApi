@@ -14,8 +14,10 @@ use Illuminate\Support\Collection;
  * Calcula los horarios libres de un salon para una fecha y un conjunto de
  * servicios, por profesional.
  *
- * "Ahora", anticipacion minima y ventana de holds llegan por parametro para
- * poder testear sin depender del reloj.
+ * "Ahora" y anticipacion minima llegan por parametro para poder testear sin
+ * depender del reloj. Un hold (reservas_web held/pending_payment) bloquea solo
+ * a SU profesional mientras expira_en (epoch) sea futuro; el estado nunca se
+ * confia solo (el job de expiracion solo ordena).
  */
 class DisponibilidadService
 {
@@ -31,7 +33,6 @@ class DisponibilidadService
         ?Profesional $profesional,
         Carbon $ahora,
         int $anticipacionMinutos,
-        int $ventanaPagoMinutos,
     ): array {
         $servicioIds = $servicios->pluck('id')->all();
 
@@ -40,7 +41,7 @@ class DisponibilidadService
             return [];
         }
 
-        $holds = $this->holdsVigentes($user, $fecha, $fecha, $ahora, $ventanaPagoMinutos);
+        $holds = $this->holdsVigentes($user, $fecha, $fecha, $ahora);
         $ocupacion = $this->turnosDelRango($user, $fecha, $fecha, $profesionales->pluck('id')->all());
         $slotsPorProfesional = $this->slotsPorProfesional($user, $profesionales);
 
@@ -73,7 +74,6 @@ class DisponibilidadService
         ?Profesional $profesional,
         Carbon $ahora,
         int $anticipacionMinutos,
-        int $ventanaPagoMinutos,
     ): array {
         $profesionales = $this->profesionalesCandidatas($user, $profesional, $servicios->pluck('id')->all());
         if ($profesionales->isEmpty()) {
@@ -82,7 +82,7 @@ class DisponibilidadService
 
         $duracion = (int) $servicios->sum('duracion_minutos');
         $minimo = $ahora->copy()->addMinutes($anticipacionMinutos);
-        $holds = $this->holdsVigentes($user, $desde, $hasta, $ahora, $ventanaPagoMinutos);
+        $holds = $this->holdsVigentes($user, $desde, $hasta, $ahora);
         $ocupacion = $this->turnosDelRango($user, $desde, $hasta, $profesionales->pluck('id')->all());
         $slotsPorProfesional = $this->slotsPorProfesional($user, $profesionales);
 
@@ -110,13 +110,13 @@ class DisponibilidadService
         int $duracion,
         Collection $profesionales,
         array $slotsPorProfesional,
-        array $holds,
+        array $holds, // profesional_id => intervalos de holds vivos ese dia
         array $ocupacion,
         Carbon $minimo,
     ): array {
         // Candidatos = EXACTAMENTE los slots activos configurados de cada profesional
         // (sin grilla ni horarios intermedios). Se ofrece un inicio si la duracion
-        // total entra sin pisar turnos de ESA profesional, holds ni el lead time.
+        // total entra sin pisar turnos ni holds vivos de ESA profesional, ni el lead time.
         $porHora = [];
 
         foreach ($profesionales as $prof) {
@@ -127,7 +127,7 @@ class DisponibilidadService
                 if ($inicio->lt($minimo)) {
                     continue;
                 }
-                if ($this->solapaAlguno($holds, $inicio, $fin)) {
+                if ($this->solapaAlguno($holds[$prof->id] ?? [], $inicio, $fin)) {
                     continue;
                 }
                 if ($this->solapaAlguno($ocupacion[$prof->id] ?? [], $inicio, $fin)) {
@@ -154,7 +154,7 @@ class DisponibilidadService
      *
      * @return Collection<int, Profesional>
      */
-    private function profesionalesCandidatas(User $user, ?Profesional $profesional, array $servicioIds): Collection
+    public function profesionalesCandidatas(User $user, ?Profesional $profesional, array $servicioIds): Collection
     {
         $query = Profesional::where('user_id', $user->id)->where('activo', true)->orderBy('id');
         if ($profesional) {
@@ -166,6 +166,17 @@ class DisponibilidadService
 
             return count(array_diff($servicioIds, $ofrecidos)) === 0;
         })->values();
+    }
+
+    /**
+     * Horas 'HH:MM' de los slots activos de UNA profesional (mismas reglas que
+     * la disponibilidad: los slots legacy sin profesional van a la por defecto).
+     *
+     * @return array<int, string>
+     */
+    public function horasActivas(User $user, Profesional $profesional): array
+    {
+        return $this->slotsPorProfesional($user, collect([$profesional]))[$profesional->id] ?? [];
     }
 
     /**
@@ -229,32 +240,97 @@ class DisponibilidadService
     }
 
     /**
-     * Reservas web pending_payment creadas dentro de la ventana de pago,
-     * agrupadas por fecha. No tienen profesional_id, asi que bloquean el
-     * horario para todas.
+     * Holds vivos (held/pending_payment con expira_en futuro) del rango,
+     * agrupados por fecha y por profesional_id. Filas sin profesional_id
+     * (legacy) no bloquean a nadie.
      *
-     * TODO(reserva-online): reservas_web aun no tiene profesional_id; cuando lo
-     * tenga (slice posterior) el hold debe bloquear solo a su profesional.
-     *
-     * @return array<string, array<int, array{0: Carbon, 1: Carbon}>> fecha => intervalos
+     * @return array<string, array<int, array<int, array{0: Carbon, 1: Carbon}>>> fecha => profesional_id => intervalos
      */
-    private function holdsVigentes(User $user, string $desde, string $hasta, Carbon $ahora, int $ventanaMinutos): array
+    private function holdsVigentes(User $user, string $desde, string $hasta, Carbon $ahora): array
     {
         $reservas = ReservaWeb::where('user_id', $user->id)
-            ->pendientes()
+            ->vivos($ahora->timestamp)
+            ->whereNotNull('profesional_id')
             ->whereDate('fecha', '>=', $desde)
             ->whereDate('fecha', '<=', $hasta)
-            ->where('created_at', '>=', $ahora->copy()->subMinutes($ventanaMinutos)->format('Y-m-d H:i:s'))
             ->get();
 
         $holds = [];
         foreach ($reservas as $reserva) {
-            $fecha = substr((string) $reserva->getRawOriginal('fecha'), 0, 10);
-            $inicio = Carbon::parse($fecha . ' ' . $reserva->getRawOriginal('slot_hora'));
-            $holds[$fecha][] = [$inicio, $inicio->copy()->addMinutes((int) $reserva->duracion_total_minutos)];
+            [$fecha, $intervalo] = $this->intervaloDeHold($reserva);
+            $holds[$fecha][$reserva->profesional_id][] = $intervalo;
         }
 
         return $holds;
+    }
+
+    /** @return array{0: string, 1: array{0: Carbon, 1: Carbon}} */
+    private function intervaloDeHold(ReservaWeb $reserva): array
+    {
+        $fecha = substr((string) $reserva->getRawOriginal('fecha'), 0, 10);
+        $inicio = Carbon::parse($fecha . ' ' . $reserva->getRawOriginal('slot_hora'));
+
+        return [$fecha, [$inicio, $inicio->copy()->addMinutes((int) $reserva->duracion_total_minutos)]];
+    }
+
+    /**
+     * Intervalos [inicio, fin) ocupados de UNA profesional un dia: turnos
+     * confirmados + holds vivos. Sirve a PoliticaHold (alta ocupacion) y a los
+     * chequeos de HoldService / ConfirmarReservaService.
+     *
+     * @return array<int, array{0: Carbon, 1: Carbon}> ordenados por inicio
+     */
+    public function ocupacionDelDia(int $profesionalId, string $fecha, Carbon $ahora, ?int $ignorarReservaId = null): array
+    {
+        $inicioDia = Carbon::parse("{$fecha} 00:00:00");
+        $finDia = $inicioDia->copy()->addDay();
+
+        $intervalos = [];
+        $turnos = Turno::where('profesional_id', $profesionalId)->confirmados()->solapaCon($inicioDia, $finDia)->get();
+        foreach ($turnos as $turno) {
+            $inicio = Carbon::parse($turno->getRawOriginal('fecha_hora'));
+            $intervalos[] = [$inicio, $inicio->copy()->addMinutes((int) $turno->duracion_total_minutos)];
+        }
+
+        $query = ReservaWeb::where('profesional_id', $profesionalId)
+            ->vivos($ahora->timestamp)
+            ->whereDate('fecha', $fecha);
+        if ($ignorarReservaId) {
+            $query->where('id', '!=', $ignorarReservaId);
+        }
+        foreach ($query->get() as $reserva) {
+            $intervalos[] = $this->intervaloDeHold($reserva)[1];
+        }
+
+        usort($intervalos, fn ($a, $b) => $a[0] <=> $b[0]);
+
+        return $intervalos;
+    }
+
+    /**
+     * Semantica semi-abierta: el intervalo [fecha hora, +duracion) no pisa
+     * ningun turno confirmado ni hold vivo de la profesional (ignorando
+     * $ignorarReservaId, p.ej. el propio hold) y, si $anticipacionMinutos no
+     * es null, arranca a partir de ahora + anticipacion. NO valida que la hora
+     * sea un slot activo: eso lo decide quien llama.
+     */
+    public function estaLibre(
+        int $profesionalId,
+        string $fecha,
+        string $hora,
+        int $duracion,
+        Carbon $ahora,
+        ?int $ignorarReservaId = null,
+        ?int $anticipacionMinutos = null,
+    ): bool {
+        $inicio = Carbon::parse("{$fecha} {$hora}");
+        $fin = $inicio->copy()->addMinutes($duracion);
+
+        if ($anticipacionMinutos !== null && $inicio->lt($ahora->copy()->addMinutes($anticipacionMinutos))) {
+            return false;
+        }
+
+        return ! $this->solapaAlguno($this->ocupacionDelDia($profesionalId, $fecha, $ahora, $ignorarReservaId), $inicio, $fin);
     }
 
     /** Solapamiento semi-abierto: los intervalos adyacentes no se pisan. */
