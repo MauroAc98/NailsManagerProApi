@@ -1,0 +1,43 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Casts\Attribute;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Storage;
+
+class ServicioFoto extends Model
+{
+    protected $table = 'servicio_fotos';
+
+    protected $fillable = [
+        'servicio_id',
+        'path',
+        'orden',
+    ];
+
+    protected $appends = ['url'];
+    protected $hidden  = ['path', 'servicio_id', 'created_at', 'updated_at'];
+
+    protected function casts(): array
+    {
+        return [
+            'orden' => 'integer',
+        ];
+    }
+
+    // URL pública de la foto — el frontend nunca ve la ruta relativa del
+    // disco 'public', solo la URL absoluta ya armada. Mismo criterio que
+    // HistoriaPrecioFoto::url.
+    protected function url(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => Storage::disk('public')->url($this->path),
+        );
+    }
+
+    public function servicio()
+    {
+        return $this->belongsTo(Servicio::class);
+    }
+}
