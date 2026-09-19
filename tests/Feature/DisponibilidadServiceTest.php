@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\BloqueoAgenda;
 use App\Models\Cliente;
 use App\Models\Profesional;
 use App\Models\ReservaWeb;
@@ -487,6 +488,71 @@ class DisponibilidadServiceTest extends TestCase
         $ana = $this->crearProfesional($this->user, 'Ana');
         $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
         $this->crearSlot($this->user, $ana, '10:00');
+
+        $this->assertSame(['10:00'], $this->horas($this->calcular([$s], $ana)));
+    }
+
+    // -- bloqueos de agenda -------------------------------------------
+
+    private function bloqueo(?Profesional $prof, string $fecha = self::FECHA, ?string $desde = null, ?string $hasta = null): BloqueoAgenda
+    {
+        return BloqueoAgenda::create([
+            'user_id' => $this->user->id,
+            'profesional_id' => $prof?->id,
+            'fecha' => $fecha,
+            'hora_desde' => $desde,
+            'hora_hasta' => $hasta,
+        ]);
+    }
+
+    public function test_un_bloqueo_de_dia_completo_excluye_solo_a_esa_profesional(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $bea = $this->crearProfesional($this->user, 'Bea');
+        $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
+        $bea->servicios()->attach($s->id);
+        $this->crearSlot($this->user, $ana, '10:00');
+        $this->crearSlot($this->user, $bea, '10:00');
+        $this->bloqueo($ana);
+
+        $this->assertSame(
+            [['hora' => '10:00', 'profesional_ids' => [$bea->id]]],
+            $this->calcular([$s]),
+        );
+    }
+
+    public function test_un_bloqueo_salon_wide_excluye_a_todas_las_profesionales(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $bea = $this->crearProfesional($this->user, 'Bea');
+        $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
+        $bea->servicios()->attach($s->id);
+        $this->crearSlot($this->user, $ana, '10:00');
+        $this->crearSlot($this->user, $bea, '10:00');
+        $this->bloqueo(null);
+
+        $this->assertSame([], $this->calcular([$s]));
+    }
+
+    public function test_un_bloqueo_parcial_excluye_solo_los_inicios_que_solapan_su_rango(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
+        foreach (['12:00', '13:00', '13:30', '18:00'] as $h) {
+            $this->crearSlot($this->user, $ana, $h);
+        }
+        $this->bloqueo($ana, self::FECHA, '13:00', '18:00'); // [13:00, 18:00)
+
+        // 12:00 -> [12:00,12:30) libre; 13:00/13:30 pisan el bloqueo; 18:00 adyacente al fin, libre
+        $this->assertSame(['12:00', '18:00'], $this->horas($this->calcular([$s], $ana)));
+    }
+
+    public function test_un_bloqueo_de_otra_fecha_no_afecta(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
+        $this->crearSlot($this->user, $ana, '10:00');
+        $this->bloqueo($ana, '2099-06-11');
 
         $this->assertSame(['10:00'], $this->horas($this->calcular([$s], $ana)));
     }
