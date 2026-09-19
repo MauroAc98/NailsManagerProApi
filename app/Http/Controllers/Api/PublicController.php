@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\PagoSena;
+use App\Models\Profesional;
 use App\Models\ReservaWeb;
 use App\Models\Servicio;
 use App\Models\Turno;
@@ -79,14 +80,28 @@ class PublicController extends Controller
     // GET /api/public/{slug}/servicios
     // Lista de servicios activos del estudio
     // ─────────────────────────────────────────────
-    public function servicios(string $slug): JsonResponse
+    public function servicios(Request $request, string $slug): JsonResponse
     {
         $user = $this->getProfesional($slug);
 
-        $servicios = Servicio::where('user_id', $user->id)
-            ->where('activo', true)
-            ->orderBy('nombre')
-            ->get(['id', 'nombre', 'duracion_minutos', 'precio']);
+        $query = Servicio::where('user_id', $user->id)->where('activo', true);
+
+        // Con profesional_id: solo los servicios que esa profesional ofrece
+        // (pivot profesional_servicio). 404 si es de otro salon o esta inactiva.
+        if ($request->filled('profesional_id')) {
+            $profesional = Profesional::resolverParaUsuario($user, (int) $request->query('profesional_id'));
+            $query->whereIn('id', $profesional->servicios()->pluck('servicios.id'));
+        }
+
+        $servicios = $query->orderBy('nombre')
+            ->get(['id', 'nombre', 'duracion_minutos', 'precio'])
+            ->map(fn ($s) => [
+                'id'               => $s->id,
+                'nombre'           => $s->nombre,
+                'duracion_minutos' => (int) $s->duracion_minutos,
+                'precio'           => $s->precio + 0,
+            ])
+            ->values();
 
         return response()->json($servicios);
     }
