@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\PagoSena;
 use App\Models\Profesional;
 use App\Models\ReservaWeb;
+use App\Models\CategoriaServicio;
 use App\Models\Servicio;
 use App\Models\Turno;
 use App\Models\User;
@@ -94,13 +95,27 @@ class PublicController extends Controller
             $query->whereIn('id', $profesional->servicios()->pluck('servicios.id'));
         }
 
-        $servicios = $query->orderBy('nombre')
-            ->get(['id', 'nombre', 'duracion_minutos', 'precio'])
+        // Solo categorias del propio salon (nunca se filtra la de otro tenant).
+        $categorias = CategoriaServicio::where('user_id', $user->id)->pluck('nombre', 'id');
+
+        $servicios = $query
+            ->get(['id', 'nombre', 'duracion_minutos', 'precio', 'categoria_id', 'orden'])
+            // Mismo orden que la lista del salon: categoria alfabetica, luego
+            // orden/id; sin categoria al final.
+            ->sortBy([
+                fn ($a, $b) => (isset($categorias[$a->categoria_id]) ? 0 : 1) <=> (isset($categorias[$b->categoria_id]) ? 0 : 1),
+                fn ($a, $b) => strcasecmp($categorias[$a->categoria_id] ?? '', $categorias[$b->categoria_id] ?? ''),
+                fn ($a, $b) => $a->orden <=> $b->orden,
+                fn ($a, $b) => $a->id <=> $b->id,
+            ])
             ->map(fn ($s) => [
                 'id'               => $s->id,
                 'nombre'           => $s->nombre,
                 'duracion_minutos' => (int) $s->duracion_minutos,
                 'precio'           => $s->precio + 0,
+                'categoria'        => isset($categorias[$s->categoria_id])
+                    ? ['id' => $s->categoria_id, 'nombre' => $categorias[$s->categoria_id]]
+                    : null,
             ])
             ->values();
 
