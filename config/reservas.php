@@ -6,19 +6,42 @@ return [
     // mas adelante pasa a ser configurable por salon).
     'anticipacion_minutos' => (int) env('RESERVAS_ANTICIPACION_MINUTOS', 120),
 
-    // Ventana (minutos) durante la cual una reserva web pending_payment bloquea
-    // el horario. Todavia no hay job de expiracion: las reservas mas viejas que
-    // esta ventana se ignoran al calcular disponibilidad.
-    'ventana_pago_minutos' => (int) env('RESERVAS_VENTANA_PAGO_MINUTOS', 15),
-
     // Ventana de reserva: dias hacia adelante (desde hoy) que se ofrecen.
     // La usa el endpoint de dias con disponibilidad para recortar el rango.
     'ventana_dias' => (int) env('RESERVAS_VENTANA_DIAS', 30),
 
-    // TODO(reserva-online slice 3): eliminar este flag y el guard en
-    // PublicController::store cuando la creacion de reservas este completa
-    // (MP, lock, profesional). Mientras tanto POST /api/public/{slug}/reservas
-    // responde 503 si esta apagado.
+    // Kill switch de los endpoints de ESCRITURA de la reserva online (holds,
+    // datos, pago, liberar, estado). Apagado => 503 {code: creation_disabled}.
+    // Las lecturas (disponibilidad) no dependen de este flag.
     'creacion_habilitada' => (bool) env('RESERVAS_CREACION_HABILITADA', false),
+
+    // ── Holds (slice 3) ──────────────────────────────────────────
+    // Minutos que un hold sin pagar bloquea el horario (normal / alta ocupacion).
+    'hold_minutos'      => (int) env('RESERVAS_HOLD_MINUTOS', 10),
+    'hold_minutos_alta' => (int) env('RESERVAS_HOLD_MINUTOS_ALTA', 5),
+
+    // Minutos disponibles para pagar una vez iniciado el pago (normal / alta).
+    'pago_minutos'      => (int) env('RESERVAS_PAGO_MINUTOS', 15),
+    'pago_minutos_alta' => (int) env('RESERVAS_PAGO_MINUTOS_ALTA', 10),
+
+    // Fraccion (0-1) de slots ocupados de la profesional ese dia a partir de la
+    // cual se considera "alta ocupacion" y se acortan los tiempos.
+    'ocupacion_alta_umbral' => (float) env('RESERVAS_OCUPACION_ALTA_UMBRAL', 0.7),
+
+    // ── Anti-abuso ───────────────────────────────────────────────
+    // Tras un hold vencido sin pago, el mismo telefono espera estos minutos.
+    'cooldown_telefono_minutos' => (int) env('RESERVAS_COOLDOWN_TELEFONO_MINUTOS', 30),
+
+    // Con >= umbral holds vencidos sin pago dentro de la ventana (horas) se
+    // exige verificar el WhatsApp. Solo se ENFORCEA con verificacion_habilitada.
+    'verificacion_habilitada'    => (bool) env('RESERVAS_VERIFICACION_HABILITADA', false),
+    'verificacion_umbral'        => (int) env('RESERVAS_VERIFICACION_UMBRAL', 2),
+    'verificacion_ventana_horas' => (int) env('RESERVAS_VERIFICACION_VENTANA_HORAS', 24),
+    'verificacion_validez_horas' => (int) env('RESERVAS_VERIFICACION_VALIDEZ_HORAS', 24),
+
+    // Reto anti-bot (Turnstile) al crear un hold. Apagado por defecto.
+    'challenge' => [
+        'habilitado' => (bool) env('RESERVAS_CHALLENGE_HABILITADO', false),
+    ],
 
 ];
