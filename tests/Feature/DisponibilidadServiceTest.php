@@ -557,6 +557,46 @@ class DisponibilidadServiceTest extends TestCase
         $this->assertSame(['10:00'], $this->horas($this->calcular([$s], $ana)));
     }
 
+    // -- regresion: dias_atencion/bloqueos no tocan turnos existentes --
+
+    public function test_marcar_no_laborable_un_dia_no_oculta_ni_cancela_un_turno_ya_confirmado(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
+        $this->crearSlot($this->user, $ana, '10:00');
+        $turno = $this->turno($ana, '10:00', 30);
+
+        // Se marca a Ana como no laborable ese dia de la semana DESPUES de
+        // confirmado el turno.
+        $diaDelTurno = Carbon::parse(self::FECHA)->dayOfWeek;
+        $ana->update(['dias_atencion' => array_values(array_diff(range(0, 6), [$diaDelTurno]))]);
+
+        // La disponibilidad para NUEVOS turnos deja de ofrecer ese horario...
+        $this->assertSame([], $this->calcular([$s], $ana));
+
+        // ...pero el turno ya confirmado sigue existiendo y reachable via
+        // Turno directo y ocupacionDelDia — ninguna de las dos vias fue
+        // tocada por dias_atencion/bloqueos_agenda.
+        $this->assertDatabaseHas('turnos', ['id' => $turno->id, 'estado' => 'confirmado']);
+        $ocupados = (new DisponibilidadService())->ocupacionDelDia($ana->id, self::FECHA, $this->ahora());
+        $this->assertCount(1, $ocupados);
+    }
+
+    public function test_bloquear_una_fecha_no_oculta_ni_cancela_un_turno_ya_confirmado_ese_dia(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
+        $this->crearSlot($this->user, $ana, '10:00');
+        $turno = $this->turno($ana, '10:00', 30);
+
+        $this->bloqueo($ana); // bloqueo de dia completo agregado DESPUES del turno
+
+        $this->assertSame([], $this->calcular([$s], $ana));
+        $this->assertDatabaseHas('turnos', ['id' => $turno->id, 'estado' => 'confirmado']);
+        $ocupados = (new DisponibilidadService())->ocupacionDelDia($ana->id, self::FECHA, $this->ahora());
+        $this->assertCount(1, $ocupados);
+    }
+
     public function test_el_hold_pisa_solo_los_slots_que_caen_en_su_rango(): void
     {
         $ana = $this->crearProfesional($this->user, 'Ana');
