@@ -463,6 +463,34 @@ class DisponibilidadServiceTest extends TestCase
         ], $this->calcular([$s]));
     }
 
+    // -- dias de atencion -------------------------------------------
+
+    public function test_una_profesional_no_trabaja_el_dia_de_la_semana_configurado(): void
+    {
+        // self::FECHA = 2099-06-10, un miércoles (dayOfWeek 3).
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $bea = $this->crearProfesional($this->user, 'Bea');
+        $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
+        $bea->servicios()->attach($s->id);
+        $ana->update(['dias_atencion' => [1, 2]]); // lunes y martes, no miércoles
+        $this->crearSlot($this->user, $ana, '10:00');
+        $this->crearSlot($this->user, $bea, '10:00');
+
+        $this->assertSame(
+            [['hora' => '10:00', 'profesional_ids' => [$bea->id]]],
+            $this->calcular([$s]),
+        );
+    }
+
+    public function test_una_profesional_sin_dias_atencion_configurados_trabaja_cualquier_dia(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
+        $this->crearSlot($this->user, $ana, '10:00');
+
+        $this->assertSame(['10:00'], $this->horas($this->calcular([$s], $ana)));
+    }
+
     public function test_el_hold_pisa_solo_los_slots_que_caen_en_su_rango(): void
     {
         $ana = $this->crearProfesional($this->user, 'Ana');
