@@ -23,8 +23,10 @@ class PublicController extends Controller
     {
         $user = User::where('slug', $slug)->firstOrFail();
 
-        if (!$user->activo) {
-            abort(403, 'Esta agenda no está disponible.');
+        // 404 (no 403) para no revelar que existe un negocio con
+        // suscripcion vencida/suspendida. Misma regla que CheckSubscription.
+        if ($user->suscripcionVencida()) {
+            abort(404);
         }
 
         return $user;
@@ -38,11 +40,18 @@ class PublicController extends Controller
     {
         $user = $this->getProfesional($slug);
 
+        $profesionales = $user->profesionales()
+            ->where('activo', true)
+            ->orderBy('id')
+            ->get(['id', 'nombre'])
+            ->map(fn ($p) => ['id' => $p->id, 'nombre' => $p->nombre])
+            ->values();
+
         return response()->json([
-            'name'      => $user->name,
-            'telefono'  => $user->telefono,
-            'direccion' => $user->direccion,
-            'slug'      => $user->slug,
+            'nombre'        => $user->name,
+            'logo_url'      => $user->logo_url,
+            'direccion'     => $user->direccion,
+            'profesionales' => $profesionales,
         ]);
     }
 
