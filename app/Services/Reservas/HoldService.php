@@ -38,6 +38,15 @@ class HoldService
     ) {
     }
 
+    /** Hold ya creado por este dispositivo con esta Idempotency-Key (o null). */
+    public function buscarReplay(User $user, string $deviceHash, string $idempotencyKey): ?ReservaWeb
+    {
+        return ReservaWeb::where('user_id', $user->id)
+            ->where('device_hash', $deviceHash)
+            ->where('idempotency_key', $idempotencyKey)
+            ->first();
+    }
+
     /**
      * @param  array<int, int>  $servicioIds
      * @throws ReservaPublicaException validation 422 | slot_taken 409
@@ -53,10 +62,7 @@ class HoldService
         string $idempotencyKey,
         Carbon $ahora,
     ): HoldResultado {
-        $replay = ReservaWeb::where('user_id', $user->id)
-            ->where('device_hash', $deviceHash)
-            ->where('idempotency_key', $idempotencyKey)
-            ->first();
+        $replay = $this->buscarReplay($user, $deviceHash, $idempotencyKey);
         if ($replay) {
             return new HoldResultado($replay, true);
         }

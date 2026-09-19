@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\TurnoController;
 use App\Http\Controllers\Api\ProfesionalController;
 use App\Http\Controllers\Api\ReservaWebController;
 use App\Http\Controllers\Api\PublicController;
+use App\Http\Controllers\Api\ReservaPublicaController;
 use App\Http\Controllers\Api\CloudApiWebhookController;
 use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\AdminAuthController;
@@ -28,6 +29,16 @@ Route::prefix('public/{slug}')->group(function () {
     Route::get('disponibilidad', [PublicController::class, 'disponibilidad'])->middleware('throttle:60,1');
     Route::get('disponibilidad/dias', [PublicController::class, 'disponibilidadDias'])->middleware('throttle:30,1');
     Route::post('reservas',      [PublicController::class, 'store'])->middleware('throttle:10,1');
+
+    // Reserva online (slice 3): escrituras detras del kill switch y del device token.
+    // Throttles con nombre (AppServiceProvider): por dispositivo / token / telefono, nunca por IP.
+    Route::middleware(['reservas.creacion', 'reservas.device'])->group(function () {
+        Route::post('reservas/holds',            [ReservaPublicaController::class, 'hold'])->middleware('throttle:reservas-hold');
+        Route::put('reservas/{token}/datos',     [ReservaPublicaController::class, 'datos'])->middleware('throttle:reservas-datos');
+        Route::post('reservas/{token}/pago',     [ReservaPublicaController::class, 'pago'])->middleware('throttle:reservas-pago');
+        Route::delete('reservas/{token}',        [ReservaPublicaController::class, 'destroy'])->middleware('throttle:reservas-estado');
+        Route::get('reservas/{token}',           [ReservaPublicaController::class, 'show'])->middleware('throttle:reservas-estado');
+    });
 });
 
 Route::get('support-info', [AuthController::class, 'supportInfo']);
