@@ -9,6 +9,7 @@ use App\Models\ReservaWeb;
 use App\Models\Servicio;
 use App\Models\Turno;
 use App\Models\User;
+use App\Services\Reservas\DisponibilidadService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Carbon;
@@ -110,69 +111,53 @@ class PublicController extends Controller
     // GET /api/public/{slug}/disponibilidad?fecha=
     // Slots disponibles para una fecha
     // ─────────────────────────────────────────────
-    public function disponibilidad(Request $request, string $slug): JsonResponse
+    public function disponibilidad(Request $request, string $slug, DisponibilidadService $disponibilidad): JsonResponse
     {
-        $request->validate([
-            'fecha' => 'required|date|after_or_equal:today',
+        $data = $request->validate([
+            'fecha'          => 'required|date_format:Y-m-d|after_or_equal:today',
+            'servicio_ids'   => 'required|array|min:1',
+            'servicio_ids.*' => 'integer',
+            'profesional_id' => 'nullable|integer',
         ]);
 
-        $user  = $this->getProfesional($slug);
-        $fecha = $request->fecha;
-        $ahora = Carbon::now();
-        $esHoy = $fecha === $ahora->toDateString();
-        $ahoraMinutos = $ahora->hour * 60 + $ahora->minute;
+        $user = $this->getProfesional($slug);
 
-        // Slots configurados por la profesional
-        $slots = $user->slotsDisponibles()->activos()->orderBy('hora')->get();
+        $ids = array_values(array_unique($data['servicio_ids']));
+        $servicios = Servicio::where('user_id', $user->id)
+            ->where('activo', true)
+            ->whereIn('id', $ids)
+            ->get();
 
-        // Turnos confirmados del día
-        $turnos = Turno::where('user_id', $user->id)
-            ->confirmados()
-            ->whereDate('fecha_hora', $fecha)
-            ->get(['fecha_hora', 'duracion_total_minutos']);
+        if ($servicios->count() !== count($ids)) {
+            return response()->json(['message' => 'Uno o más servicios no son válidos.'], 422);
+        }
 
-        // Reservas pendientes del día
-        $reservas = ReservaWeb::where('user_id', $user->id)
-            ->pendientes()
-            ->where('fecha', $fecha)
-            ->get(['slot_hora', 'duracion_total_minutos']);
+        $profesional = null;
+        if (!empty($data['profesional_id'])) {
+            // 404 si es de otro salon o esta inactiva.
+            $profesional = Profesional::resolverParaUsuario($user, (int) $data['profesional_id']);
+            $ofrecidos = $profesional->servicios()->pluck('servicios.id')->all();
 
-        $resultado = $slots->map(function ($slot) use ($turnos, $reservas, $esHoy, $ahoraMinutos) {
-            $slotCarbon  = Carbon::parse($slot->hora);
-            $slotMinutos = $slotCarbon->hour * 60 + $slotCarbon->minute;
-
-            // Bloqueo por hora pasada — comparación en minutos, no solo
-            // ->hour (ver mismo fix en TurnoController::disponibilidad).
-            if ($esHoy && $slotMinutos <= $ahoraMinutos) {
-                return ['hora' => $slotCarbon->format('H:i'), 'libre' => false];
+            if (count(array_diff($ids, $ofrecidos)) > 0) {
+                return response()->json(['message' => 'La profesional no ofrece todos los servicios elegidos.'], 422);
             }
+        }
 
-            // Bloqueo por turno confirmado
-            foreach ($turnos as $turno) {
-                $inicio = Carbon::parse($turno->fecha_hora);
-                $inicioMin = $inicio->hour * 60 + $inicio->minute;
-                $finMin    = $inicioMin + $turno->duracion_total_minutos;
+        $slots = $disponibilidad->calcular(
+            $user,
+            $data['fecha'],
+            $servicios,
+            $profesional,
+            Carbon::now(),
+            (int) config('reservas.anticipacion_minutos', 120),
+            (int) config('reservas.ventana_pago_minutos', 15),
+        );
 
-                if ($slotMinutos >= $inicioMin && $slotMinutos < $finMin) {
-                    return ['hora' => $slotCarbon->format('H:i'), 'libre' => false];
-                }
-            }
-
-            // Bloqueo por reserva pendiente
-            foreach ($reservas as $reserva) {
-                $inicioReserva = Carbon::parse($reserva->slot_hora);
-                $inicioMin     = $inicioReserva->hour * 60 + $inicioReserva->minute;
-                $finMin        = $inicioMin + $reserva->duracion_total_minutos;
-
-                if ($slotMinutos >= $inicioMin && $slotMinutos < $finMin) {
-                    return ['hora' => $slotCarbon->format('H:i'), 'libre' => false];
-                }
-            }
-
-            return ['hora' => $slotCarbon->format('H:i'), 'libre' => true];
-        });
-
-        return response()->json($resultado->values());
+        return response()->json([
+            'fecha'                  => $data['fecha'],
+            'duracion_total_minutos' => (int) $servicios->sum('duracion_minutos'),
+            'slots'                  => $slots,
+        ]);
     }
 
     // ─────────────────────────────────────────────
