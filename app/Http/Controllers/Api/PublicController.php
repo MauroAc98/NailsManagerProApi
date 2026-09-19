@@ -4,10 +4,13 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\PagoSena;
+use App\Models\Profesional;
 use App\Models\ReservaWeb;
+use App\Models\CategoriaServicio;
 use App\Models\Servicio;
 use App\Models\Turno;
 use App\Models\User;
+use App\Services\Reservas\DisponibilidadService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Carbon;
@@ -15,6 +18,8 @@ use Illuminate\Support\Facades\DB;
 
 class PublicController extends Controller
 {
+    private const MAX_DIAS_RANGO = 45;
+
     // ─────────────────────────────────────────────
     // Helper — busca la profesional por slug
     // y verifica que esté activa
@@ -23,8 +28,10 @@ class PublicController extends Controller
     {
         $user = User::where('slug', $slug)->firstOrFail();
 
-        if (!$user->activo) {
-            abort(403, 'Esta agenda no está disponible.');
+        // 404 (no 403) para no revelar que existe un negocio con
+        // suscripcion vencida/suspendida. Misma regla que CheckSubscription.
+        if ($user->suscripcionVencida()) {
+            abort(404);
         }
 
         return $user;
@@ -38,11 +45,18 @@ class PublicController extends Controller
     {
         $user = $this->getProfesional($slug);
 
+        $profesionales = $user->profesionales()
+            ->where('activo', true)
+            ->orderBy('id')
+            ->get(['id', 'nombre'])
+            ->map(fn ($p) => ['id' => $p->id, 'nombre' => $p->nombre])
+            ->values();
+
         return response()->json([
-            'name'      => $user->name,
-            'telefono'  => $user->telefono,
-            'direccion' => $user->direccion,
-            'slug'      => $user->slug,
+            'nombre'        => $user->name,
+            'logo_url'      => $user->logo_url,
+            'direccion'     => $user->direccion,
+            'profesionales' => $profesionales,
         ]);
     }
 
@@ -70,14 +84,42 @@ class PublicController extends Controller
     // GET /api/public/{slug}/servicios
     // Lista de servicios activos del estudio
     // ─────────────────────────────────────────────
-    public function servicios(string $slug): JsonResponse
+    public function servicios(Request $request, string $slug): JsonResponse
     {
         $user = $this->getProfesional($slug);
 
-        $servicios = Servicio::where('user_id', $user->id)
-            ->where('activo', true)
-            ->orderBy('nombre')
-            ->get(['id', 'nombre', 'duracion_minutos', 'precio']);
+        $query = Servicio::where('user_id', $user->id)->where('activo', true);
+
+        // Con profesional_id: solo los servicios que esa profesional ofrece
+        // (pivot profesional_servicio). 404 si es de otro salon o esta inactiva.
+        if ($request->filled('profesional_id')) {
+            $profesional = Profesional::resolverParaUsuario($user, (int) $request->query('profesional_id'));
+            $query->whereIn('id', $profesional->servicios()->pluck('servicios.id'));
+        }
+
+        // Solo categorias del propio salon (nunca se filtra la de otro tenant).
+        $categorias = CategoriaServicio::where('user_id', $user->id)->pluck('nombre', 'id');
+
+        $servicios = $query
+            ->get(['id', 'nombre', 'duracion_minutos', 'precio', 'categoria_id', 'orden'])
+            // Mismo orden que la lista del salon: categoria alfabetica, luego
+            // orden/id; sin categoria al final.
+            ->sortBy([
+                fn ($a, $b) => (isset($categorias[$a->categoria_id]) ? 0 : 1) <=> (isset($categorias[$b->categoria_id]) ? 0 : 1),
+                fn ($a, $b) => strcasecmp($categorias[$a->categoria_id] ?? '', $categorias[$b->categoria_id] ?? ''),
+                fn ($a, $b) => $a->orden <=> $b->orden,
+                fn ($a, $b) => $a->id <=> $b->id,
+            ])
+            ->map(fn ($s) => [
+                'id'               => $s->id,
+                'nombre'           => $s->nombre,
+                'duracion_minutos' => (int) $s->duracion_minutos,
+                'precio'           => $s->precio + 0,
+                'categoria'        => isset($categorias[$s->categoria_id])
+                    ? ['id' => $s->categoria_id, 'nombre' => $categorias[$s->categoria_id]]
+                    : null,
+            ])
+            ->values();
 
         return response()->json($servicios);
     }
@@ -86,69 +128,131 @@ class PublicController extends Controller
     // GET /api/public/{slug}/disponibilidad?fecha=
     // Slots disponibles para una fecha
     // ─────────────────────────────────────────────
-    public function disponibilidad(Request $request, string $slug): JsonResponse
+    public function disponibilidad(Request $request, string $slug, DisponibilidadService $disponibilidad): JsonResponse
     {
-        $request->validate([
-            'fecha' => 'required|date|after_or_equal:today',
+        $data = $request->validate([
+            'fecha'          => 'required|date_format:Y-m-d|after_or_equal:today',
+            'servicio_ids'   => 'required|array|min:1',
+            'servicio_ids.*' => 'integer',
+            'profesional_id' => 'nullable|integer',
         ]);
 
-        $user  = $this->getProfesional($slug);
-        $fecha = $request->fecha;
+        $user = $this->getProfesional($slug);
+
+        $resuelto = $this->resolverServiciosYProfesional($user, $data);
+        if ($resuelto instanceof JsonResponse) {
+            return $resuelto;
+        }
+        [$servicios, $profesional] = $resuelto;
+
+        $slots = $disponibilidad->calcular(
+            $user,
+            $data['fecha'],
+            $servicios,
+            $profesional,
+            Carbon::now(),
+            (int) config('reservas.anticipacion_minutos', 120),
+            (int) config('reservas.ventana_pago_minutos', 15),
+        );
+
+        return response()->json([
+            'fecha'                  => $data['fecha'],
+            'duracion_total_minutos' => (int) $servicios->sum('duracion_minutos'),
+            'slots'                  => $slots,
+        ]);
+    }
+
+    /**
+     * Valida servicios (activos y del salon) y profesional (404 si es ajena o
+     * inactiva; 422 si no ofrece todos los servicios). Comun a los dos
+     * endpoints de disponibilidad.
+     *
+     * @return array{0: \Illuminate\Support\Collection, 1: ?Profesional}|JsonResponse
+     */
+    private function resolverServiciosYProfesional(User $user, array $data): array|JsonResponse
+    {
+        $ids = array_values(array_unique($data['servicio_ids']));
+        $servicios = Servicio::where('user_id', $user->id)
+            ->where('activo', true)
+            ->whereIn('id', $ids)
+            ->get();
+
+        if ($servicios->count() !== count($ids)) {
+            return response()->json(['message' => 'Uno o más servicios no son válidos.'], 422);
+        }
+
+        $profesional = null;
+        if (!empty($data['profesional_id'])) {
+            $profesional = Profesional::resolverParaUsuario($user, (int) $data['profesional_id']);
+            $ofrecidos = $profesional->servicios()->pluck('servicios.id')->all();
+
+            if (count(array_diff($ids, $ofrecidos)) > 0) {
+                return response()->json(['message' => 'La profesional no ofrece todos los servicios elegidos.'], 422);
+            }
+        }
+
+        return [$servicios, $profesional];
+    }
+
+    // ─────────────────────────────────────────────
+    // GET /api/public/{slug}/disponibilidad/dias?desde=&hasta=
+    // Dias del rango con al menos un inicio libre (y cuantos)
+    // ─────────────────────────────────────────────
+    public function disponibilidadDias(Request $request, string $slug, DisponibilidadService $disponibilidad): JsonResponse
+    {
+        $data = $request->validate([
+            'desde'          => 'required|date_format:Y-m-d',
+            'hasta'          => 'required|date_format:Y-m-d|after_or_equal:desde',
+            'servicio_ids'   => 'required|array|min:1',
+            'servicio_ids.*' => 'integer',
+            'profesional_id' => 'nullable|integer',
+        ]);
+
+        $desde = Carbon::parse($data['desde'])->startOfDay();
+        $hasta = Carbon::parse($data['hasta'])->startOfDay();
+        if ($desde->diffInDays($hasta) + 1 > self::MAX_DIAS_RANGO) {
+            return response()->json(['message' => 'El rango no puede superar ' . self::MAX_DIAS_RANGO . ' días.'], 422);
+        }
+
+        $user = $this->getProfesional($slug);
+
+        $resuelto = $this->resolverServiciosYProfesional($user, $data);
+        if ($resuelto instanceof JsonResponse) {
+            return $resuelto;
+        }
+        [$servicios, $profesional] = $resuelto;
+
+        // Recorte a [hoy, hoy + ventana].
         $ahora = Carbon::now();
-        $esHoy = $fecha === $ahora->toDateString();
-        $ahoraMinutos = $ahora->hour * 60 + $ahora->minute;
+        $hoy = $ahora->copy()->startOfDay();
+        $limite = $hoy->copy()->addDays(max(0, (int) config('reservas.ventana_dias', 30)));
+        if ($desde->lt($hoy)) {
+            $desde = $hoy;
+        }
+        if ($hasta->gt($limite)) {
+            $hasta = $limite;
+        }
+        if ($desde->gt($hasta)) {
+            return response()->json(['dias' => []]);
+        }
 
-        // Slots configurados por la profesional
-        $slots = $user->slotsDisponibles()->activos()->orderBy('hora')->get();
+        $libres = $disponibilidad->contarLibresPorDia(
+            $user,
+            $desde->format('Y-m-d'),
+            $hasta->format('Y-m-d'),
+            $servicios,
+            $profesional,
+            $ahora,
+            (int) config('reservas.anticipacion_minutos', 120),
+            (int) config('reservas.ventana_pago_minutos', 15),
+        );
 
-        // Turnos confirmados del día
-        $turnos = Turno::where('user_id', $user->id)
-            ->confirmados()
-            ->whereDate('fecha_hora', $fecha)
-            ->get(['fecha_hora', 'duracion_total_minutos']);
+        $dias = [];
+        foreach ($libres as $fecha => $cantidad) {
+            $dias[] = ['fecha' => (string) $fecha, 'libres' => $cantidad];
+        }
 
-        // Reservas pendientes del día
-        $reservas = ReservaWeb::where('user_id', $user->id)
-            ->pendientes()
-            ->where('fecha', $fecha)
-            ->get(['slot_hora', 'duracion_total_minutos']);
-
-        $resultado = $slots->map(function ($slot) use ($turnos, $reservas, $esHoy, $ahoraMinutos) {
-            $slotCarbon  = Carbon::parse($slot->hora);
-            $slotMinutos = $slotCarbon->hour * 60 + $slotCarbon->minute;
-
-            // Bloqueo por hora pasada — comparación en minutos, no solo
-            // ->hour (ver mismo fix en TurnoController::disponibilidad).
-            if ($esHoy && $slotMinutos <= $ahoraMinutos) {
-                return ['hora' => $slotCarbon->format('H:i'), 'libre' => false];
-            }
-
-            // Bloqueo por turno confirmado
-            foreach ($turnos as $turno) {
-                $inicio = Carbon::parse($turno->fecha_hora);
-                $inicioMin = $inicio->hour * 60 + $inicio->minute;
-                $finMin    = $inicioMin + $turno->duracion_total_minutos;
-
-                if ($slotMinutos >= $inicioMin && $slotMinutos < $finMin) {
-                    return ['hora' => $slotCarbon->format('H:i'), 'libre' => false];
-                }
-            }
-
-            // Bloqueo por reserva pendiente
-            foreach ($reservas as $reserva) {
-                $inicioReserva = Carbon::parse($reserva->slot_hora);
-                $inicioMin     = $inicioReserva->hour * 60 + $inicioReserva->minute;
-                $finMin        = $inicioMin + $reserva->duracion_total_minutos;
-
-                if ($slotMinutos >= $inicioMin && $slotMinutos < $finMin) {
-                    return ['hora' => $slotCarbon->format('H:i'), 'libre' => false];
-                }
-            }
-
-            return ['hora' => $slotCarbon->format('H:i'), 'libre' => true];
-        });
-
-        return response()->json($resultado->values());
+        return response()->json(['dias' => $dias]);
     }
 
     // ─────────────────────────────────────────────
@@ -157,6 +261,15 @@ class PublicController extends Controller
     // ─────────────────────────────────────────────
     public function store(Request $request, string $slug): JsonResponse
     {
+        // TODO(reserva-online slice 3): quitar este guard temporal (y el flag
+        // config('reservas.creacion_habilitada')). La creacion todavia no
+        // tiene MP, lock ni profesional; se apaga hasta que este completa.
+        if (! config('reservas.creacion_habilitada')) {
+            return response()->json([
+                'message' => 'La reserva online todavía no está disponible.',
+            ], 503);
+        }
+
         $user = $this->getProfesional($slug);
 
         $data = $request->validate([
