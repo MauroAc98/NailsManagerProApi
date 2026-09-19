@@ -85,13 +85,31 @@ class PublicDisponibilidadDiasTest extends TestCase
 
     public function test_contrato_json_exacto_solo_con_dias_que_tienen_lugar(): void
     {
-        [, $s] = $this->salonBasico(); // 12:00, 12:30, 13:00 -> 3 inicios por dia
+        [, $s] = $this->salonBasico(); // slots 12:00 y 13:00 -> 2 inicios por dia (sin horarios intermedios)
 
         $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-12&servicio_ids[]={$s->id}"))
             ->assertOk()
             ->assertExactJson(['dias' => [
-                ['fecha' => '2099-06-11', 'libres' => 3],
-                ['fecha' => '2099-06-12', 'libres' => 3],
+                ['fecha' => '2099-06-11', 'libres' => 2],
+                ['fecha' => '2099-06-12', 'libres' => 2],
+            ]]);
+    }
+
+    public function test_cuenta_solo_los_slots_activos_que_entran_sin_pisar_turnos(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $s = $this->crearServicio($this->user, 'S', 60, true, $ana);
+        foreach (['09:00', '09:30', '11:30', '14:00'] as $h) {
+            $this->crearSlot($this->user, $ana, $h);
+        }
+        $this->crearSlot($this->user, $ana, '16:00', false);
+        $this->turno($ana, '2099-06-11 09:00:00', 90); // saca 09:00 y 09:30
+
+        $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-12&servicio_ids[]={$s->id}"))
+            ->assertOk()
+            ->assertExactJson(['dias' => [
+                ['fecha' => '2099-06-11', 'libres' => 2],
+                ['fecha' => '2099-06-12', 'libres' => 4],
             ]]);
     }
 
@@ -107,11 +125,11 @@ class PublicDisponibilidadDiasTest extends TestCase
     public function test_dia_totalmente_ocupado_se_excluye(): void
     {
         [$ana, $s] = $this->salonBasico('12:00', '13:00', 30);
-        $this->turno($ana, '2099-06-11 11:30:00', 180); // tapa 12:00-13:00 inclusive
+        $this->turno($ana, '2099-06-11 11:30:00', 180); // tapa los dos slots (12:00 y 13:00)
 
         $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-12&servicio_ids[]={$s->id}"))
             ->assertOk()
-            ->assertExactJson(['dias' => [['fecha' => '2099-06-12', 'libres' => 3]]]);
+            ->assertExactJson(['dias' => [['fecha' => '2099-06-12', 'libres' => 2]]]);
     }
 
     public function test_un_hold_vigente_quita_el_dia(): void

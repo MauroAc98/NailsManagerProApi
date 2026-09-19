@@ -114,11 +114,13 @@ class DisponibilidadService
         array $ocupacion,
         Carbon $minimo,
     ): array {
-        $paso = max(1, (int) config('reservas.paso_minutos', 30));
+        // Candidatos = EXACTAMENTE los slots activos configurados de cada profesional
+        // (sin grilla ni horarios intermedios). Se ofrece un inicio si la duracion
+        // total entra sin pisar turnos de ESA profesional, holds ni el lead time.
         $porHora = [];
 
         foreach ($profesionales as $prof) {
-            foreach ($this->grilla($slotsPorProfesional[$prof->id] ?? [], $paso) as $hora) {
+            foreach ($slotsPorProfesional[$prof->id] ?? [] as $hora) {
                 $inicio = Carbon::parse("{$fecha} {$hora}");
                 $fin = $inicio->copy()->addMinutes($duracion);
 
@@ -144,36 +146,6 @@ class DisponibilidadService
         }
 
         return $resultado;
-    }
-
-    /**
-     * Los slots configurados definen el RANGO de atencion de la profesional
-     * (minimo a maximo); un turno puede empezar en cualquier momento dentro
-     * de el. Genera los inicios candidatos desde el minimo hasta el maximo
-     * inclusive, cada $paso minutos (alineados al minimo).
-     *
-     * Solo se exige que el INICIO caiga en el rango, no que el fin entre antes
-     * del maximo: es la misma regla que TurnoController::validarHorarioAtencion.
-     *
-     * @param  array<int, string>  $horas  'HH:MM' de los slots activos
-     * @return array<int, string>
-     */
-    private function grilla(array $horas, int $paso): array
-    {
-        if ($horas === []) {
-            return [];
-        }
-
-        $minutos = array_map(fn (string $h) => ((int) substr($h, 0, 2)) * 60 + (int) substr($h, 3, 2), $horas);
-        $desde = min($minutos);
-        $hasta = max($minutos);
-
-        $grilla = [];
-        for ($m = $desde; $m <= $hasta; $m += $paso) {
-            $grilla[] = sprintf('%02d:%02d', intdiv($m, 60), $m % 60);
-        }
-
-        return $grilla;
     }
 
     /**
@@ -260,6 +232,9 @@ class DisponibilidadService
      * Reservas web pending_payment creadas dentro de la ventana de pago,
      * agrupadas por fecha. No tienen profesional_id, asi que bloquean el
      * horario para todas.
+     *
+     * TODO(reserva-online): reservas_web aun no tiene profesional_id; cuando lo
+     * tenga (slice posterior) el hold debe bloquear solo a su profesional.
      *
      * @return array<string, array<int, array{0: Carbon, 1: Carbon}>> fecha => intervalos
      */
