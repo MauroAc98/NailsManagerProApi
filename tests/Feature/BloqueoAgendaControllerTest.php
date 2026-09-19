@@ -133,4 +133,31 @@ class BloqueoAgendaControllerTest extends TestCase
 
         $this->assertDatabaseCount('bloqueos_agenda', 1);
     }
+
+    // ── DELETE /api/bloqueos/{id} ────────────────────────────────
+
+    public function test_destroy_borra_un_bloqueo_propio(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $bloqueo = BloqueoAgenda::create(['user_id' => $user->id, 'fecha' => $this->fechaFutura()]);
+
+        $this->actingAs($user, 'sanctum')
+            ->deleteJson("/api/bloqueos/{$bloqueo->id}")
+            ->assertOk();
+
+        $this->assertDatabaseMissing('bloqueos_agenda', ['id' => $bloqueo->id]);
+    }
+
+    public function test_destroy_de_un_bloqueo_ajeno_devuelve_404(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $otroUsuario = User::factory()->create(['is_exempt' => true]);
+        $ajeno = BloqueoAgenda::create(['user_id' => $otroUsuario->id, 'fecha' => $this->fechaFutura()]);
+
+        $this->actingAs($user, 'sanctum')
+            ->deleteJson("/api/bloqueos/{$ajeno->id}")
+            ->assertStatus(404);
+
+        $this->assertDatabaseHas('bloqueos_agenda', ['id' => $ajeno->id]);
+    }
 }
