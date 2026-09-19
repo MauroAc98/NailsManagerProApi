@@ -33,4 +33,16 @@ class PublicThrottleTest extends TestCase
             'disponibilidad' => ['disponibilidad?fecha=2099-01-01&servicio_ids[]=1'],
         ];
     }
+
+    public function test_la_request_31_de_disponibilidad_dias_da_429(): void
+    {
+        $user = $this->crearSalon();
+        $url = "/api/public/{$user->slug}/disponibilidad/dias?desde=2099-01-01&hasta=2099-01-02&servicio_ids[]=1";
+
+        for ($i = 0; $i < 30; $i++) {
+            $this->assertNotSame(429, $this->getJson($url)->getStatusCode(), "request {$i}");
+        }
+
+        $this->getJson($url)->assertStatus(429);
+    }
 }

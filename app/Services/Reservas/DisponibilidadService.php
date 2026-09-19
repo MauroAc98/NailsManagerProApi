@@ -33,7 +33,6 @@ class DisponibilidadService
         int $anticipacionMinutos,
         int $ventanaPagoMinutos,
     ): array {
-        $duracion = (int) $servicios->sum('duracion_minutos');
         $servicioIds = $servicios->pluck('id')->all();
 
         $profesionales = $this->profesionalesCandidatas($user, $profesional, $servicioIds);
@@ -41,11 +40,80 @@ class DisponibilidadService
             return [];
         }
 
-        $minimo = $ahora->copy()->addMinutes($anticipacionMinutos);
-        $holds = $this->holdsVigentes($user, $fecha, $ahora, $ventanaPagoMinutos);
-        $ocupacion = $this->turnosDelDia($user, $fecha, $profesionales->pluck('id')->all());
+        $holds = $this->holdsVigentes($user, $fecha, $fecha, $ahora, $ventanaPagoMinutos);
+        $ocupacion = $this->turnosDelRango($user, $fecha, $fecha, $profesionales->pluck('id')->all());
         $slotsPorProfesional = $this->slotsPorProfesional($user, $profesionales);
 
+        return $this->calcularDia(
+            $fecha,
+            (int) $servicios->sum('duracion_minutos'),
+            $profesionales,
+            $slotsPorProfesional,
+            $holds[$fecha] ?? [],
+            $ocupacion,
+            $ahora->copy()->addMinutes($anticipacionMinutos),
+        );
+    }
+
+    /**
+     * Cuenta los inicios libres de cada dia del rango [$desde, $hasta]
+     * (Y-m-d, inclusive) y devuelve solo los dias con al menos uno. Carga
+     * profesionales, slots, turnos y holds UNA vez para todo el rango y
+     * calcula cada dia en memoria: mismo resultado que llamar a calcular()
+     * dia por dia, sin N consultas por dia.
+     *
+     * @param  Collection<int, \App\Models\Servicio>  $servicios
+     * @return array<string, int> fecha => cantidad de inicios libres
+     */
+    public function contarLibresPorDia(
+        User $user,
+        string $desde,
+        string $hasta,
+        Collection $servicios,
+        ?Profesional $profesional,
+        Carbon $ahora,
+        int $anticipacionMinutos,
+        int $ventanaPagoMinutos,
+    ): array {
+        $profesionales = $this->profesionalesCandidatas($user, $profesional, $servicios->pluck('id')->all());
+        if ($profesionales->isEmpty()) {
+            return [];
+        }
+
+        $duracion = (int) $servicios->sum('duracion_minutos');
+        $minimo = $ahora->copy()->addMinutes($anticipacionMinutos);
+        $holds = $this->holdsVigentes($user, $desde, $hasta, $ahora, $ventanaPagoMinutos);
+        $ocupacion = $this->turnosDelRango($user, $desde, $hasta, $profesionales->pluck('id')->all());
+        $slotsPorProfesional = $this->slotsPorProfesional($user, $profesionales);
+
+        $resultado = [];
+        $dia = Carbon::parse($desde)->startOfDay();
+        $ultimo = Carbon::parse($hasta)->startOfDay();
+        while ($dia->lte($ultimo)) {
+            $fecha = $dia->format('Y-m-d');
+            $libres = $this->calcularDia($fecha, $duracion, $profesionales, $slotsPorProfesional, $holds[$fecha] ?? [], $ocupacion, $minimo);
+            if ($libres !== []) {
+                $resultado[$fecha] = count($libres);
+            }
+            $dia->addDay();
+        }
+
+        return $resultado;
+    }
+
+    /**
+     * @param  Collection<int, Profesional>  $profesionales
+     * @return array<int, array{hora: string, profesional_ids: array<int,int>}>
+     */
+    private function calcularDia(
+        string $fecha,
+        int $duracion,
+        Collection $profesionales,
+        array $slotsPorProfesional,
+        array $holds,
+        array $ocupacion,
+        Carbon $minimo,
+    ): array {
         $paso = max(1, (int) config('reservas.paso_minutos', 30));
         $porHora = [];
 
@@ -159,16 +227,16 @@ class DisponibilidadService
     }
 
     /**
-     * Turnos confirmados que tocan el dia, por profesional, como intervalos
+     * Turnos confirmados que tocan el rango de dias, por profesional, como intervalos
      * [inicio, fin). Se leen los valores crudos y se parsean en la zona de la
      * app para no depender del cast datetime de Eloquent.
      *
      * @return array<int, array<int, array{0: Carbon, 1: Carbon}>>
      */
-    private function turnosDelDia(User $user, string $fecha, array $profesionalIds): array
+    private function turnosDelRango(User $user, string $desde, string $hasta, array $profesionalIds): array
     {
-        $inicioDia = Carbon::parse("{$fecha} 00:00:00");
-        $finDia = $inicioDia->copy()->addDay();
+        $inicioDia = Carbon::parse("{$desde} 00:00:00");
+        $finDia = Carbon::parse("{$hasta} 00:00:00")->addDay();
 
         $turnos = Turno::where('user_id', $user->id)
             ->whereIn('profesional_id', $profesionalIds)
@@ -189,23 +257,26 @@ class DisponibilidadService
     }
 
     /**
-     * Reservas web pending_payment creadas dentro de la ventana de pago. No
-     * tienen profesional_id, asi que bloquean el horario para todas.
+     * Reservas web pending_payment creadas dentro de la ventana de pago,
+     * agrupadas por fecha. No tienen profesional_id, asi que bloquean el
+     * horario para todas.
      *
-     * @return array<int, array{0: Carbon, 1: Carbon}>
+     * @return array<string, array<int, array{0: Carbon, 1: Carbon}>> fecha => intervalos
      */
-    private function holdsVigentes(User $user, string $fecha, Carbon $ahora, int $ventanaMinutos): array
+    private function holdsVigentes(User $user, string $desde, string $hasta, Carbon $ahora, int $ventanaMinutos): array
     {
         $reservas = ReservaWeb::where('user_id', $user->id)
             ->pendientes()
-            ->whereDate('fecha', $fecha)
+            ->whereDate('fecha', '>=', $desde)
+            ->whereDate('fecha', '<=', $hasta)
             ->where('created_at', '>=', $ahora->copy()->subMinutes($ventanaMinutos)->format('Y-m-d H:i:s'))
             ->get();
 
         $holds = [];
         foreach ($reservas as $reserva) {
+            $fecha = substr((string) $reserva->getRawOriginal('fecha'), 0, 10);
             $inicio = Carbon::parse($fecha . ' ' . $reserva->getRawOriginal('slot_hora'));
-            $holds[] = [$inicio, $inicio->copy()->addMinutes((int) $reserva->duracion_total_minutos)];
+            $holds[$fecha][] = [$inicio, $inicio->copy()->addMinutes((int) $reserva->duracion_total_minutos)];
         }
 
         return $holds;

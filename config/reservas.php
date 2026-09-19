@@ -15,6 +15,10 @@ return [
     // esta ventana se ignoran al calcular disponibilidad.
     'ventana_pago_minutos' => (int) env('RESERVAS_VENTANA_PAGO_MINUTOS', 15),
 
+    // Ventana de reserva: dias hacia adelante (desde hoy) que se ofrecen.
+    // La usa el endpoint de dias con disponibilidad para recortar el rango.
+    'ventana_dias' => (int) env('RESERVAS_VENTANA_DIAS', 30),
+
     // TODO(reserva-online slice 3): eliminar este flag y el guard en
     // PublicController::store cuando la creacion de reservas este completa
     // (MP, lock, profesional). Mientras tanto POST /api/public/{slug}/reservas
