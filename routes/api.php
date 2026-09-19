@@ -144,6 +144,8 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
     Route::apiResource('profesionales', ProfesionalController::class)
         ->only(['index', 'store', 'update', 'destroy'])
         ->middlewareFor('update', 'throttle:60,1');
+    Route::post('profesionales/{id}/avatar', [ProfesionalController::class, 'subirAvatar']);
+    Route::delete('profesionales/{id}/avatar', [ProfesionalController::class, 'borrarAvatar']);
     Route::post('profesionales/{id}/fondo-historia', [ProfesionalController::class, 'subirFondoHistoria']);
     Route::delete('profesionales/{id}/fondo-historia', [ProfesionalController::class, 'borrarFondoHistoria']);
     Route::post('profesionales/{id}/historia-precios-fotos', [ProfesionalController::class, 'subirHistoriaPreciosFoto']);
