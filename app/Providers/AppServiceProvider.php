@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Services\Reservas\NullVerificadorWhatsapp;
+use App\Services\Reservas\VerificadorWhatsapp;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
@@ -14,7 +16,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Verificacion de WhatsApp: stub por defecto (todavia no hay proveedor).
+        $this->app->bind(VerificadorWhatsapp::class, NullVerificadorWhatsapp::class);
     }
 
     /**
