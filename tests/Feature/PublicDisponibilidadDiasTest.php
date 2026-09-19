@@ -53,23 +53,19 @@ class PublicDisponibilidadDiasTest extends TestCase
         ]);
     }
 
-    private function hold(string $fecha, string $hora, int $duracion): ReservaWeb
+    private function hold(string $fecha, string $hora, int $duracion, ?\App\Models\Profesional $prof = null): ReservaWeb
     {
-        $r = new ReservaWeb([
+        return ReservaWeb::create([
             'user_id' => $this->user->id,
-            'nombre_completo' => 'Web',
-            'telefono' => '+5491155551234',
+            'profesional_id' => $prof?->id ?? \App\Models\Profesional::where('user_id', $this->user->id)->value('id'),
+            'public_token' => ReservaWeb::generarToken(),
             'servicio_ids' => [1],
             'fecha' => $fecha,
             'slot_hora' => $hora,
             'duracion_total_minutos' => $duracion,
-            'estado' => 'pending_payment',
+            'estado' => 'held',
+            'expira_en' => Carbon::now()->timestamp + 600,
         ]);
-        $r->created_at = Carbon::now();
-        $r->updated_at = Carbon::now();
-        $r->save();
-
-        return $r;
     }
 
     /** @return array{0: \App\Models\Profesional, 1: \App\Models\Servicio} */
@@ -130,6 +126,28 @@ class PublicDisponibilidadDiasTest extends TestCase
         $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-12&servicio_ids[]={$s->id}"))
             ->assertOk()
             ->assertExactJson(['dias' => [['fecha' => '2099-06-12', 'libres' => 2]]]);
+    }
+
+    public function test_un_hold_de_una_profesional_no_quita_el_dia_de_otra_y_dias_equivale_a_slots(): void
+    {
+        [$ana, $s] = $this->salonBasico('12:00', '13:00', 30);
+        $bea = $this->crearProfesional($this->user, 'Bea');
+        $bea->servicios()->attach($s->id);
+        $this->crearSlot($this->user, $bea, '12:00');
+        $this->hold('2099-06-11', '12:00:00', 180, $ana);
+
+        foreach ([$ana->id, $bea->id, null] as $profId) {
+            $extra = $profId ? "&profesional_id={$profId}" : '';
+            $slots = $this->getJson("/api/public/{$this->user->slug}/disponibilidad?fecha=2099-06-11&servicio_ids[]={$s->id}{$extra}")->json('slots');
+            $dias = $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-11&servicio_ids[]={$s->id}{$extra}"))->json('dias');
+
+            $this->assertSame(count($slots), $dias[0]['libres'] ?? 0, "prof {$profId}");
+        }
+
+        $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-11&servicio_ids[]={$s->id}&profesional_id={$ana->id}"))
+            ->assertExactJson(['dias' => []]);
+        $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-11&servicio_ids[]={$s->id}&profesional_id={$bea->id}"))
+            ->assertExactJson(['dias' => [['fecha' => '2099-06-11', 'libres' => 1]]]);
     }
 
     public function test_un_hold_vigente_quita_el_dia(): void

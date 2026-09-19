@@ -33,7 +33,7 @@ class DisponibilidadServiceTest extends TestCase
         return Carbon::parse($dt);
     }
 
-    private function calcular(array $servicios, ?Profesional $prof = null, ?Carbon $ahora = null, int $lead = 120, int $ventana = 15): array
+    private function calcular(array $servicios, ?Profesional $prof = null, ?Carbon $ahora = null, int $lead = 120): array
     {
         return (new DisponibilidadService())->calcular(
             $this->user,
@@ -42,7 +42,6 @@ class DisponibilidadServiceTest extends TestCase
             $prof,
             $ahora ?? $this->ahora(),
             $lead,
-            $ventana,
         );
     }
 
@@ -220,26 +219,22 @@ class DisponibilidadServiceTest extends TestCase
 
     // -- 1.10 -----------------------------------------------------
 
-    private function reserva(string $slotHora, int $duracion, Carbon $creada, string $estado = 'pending_payment'): ReservaWeb
+    private function reserva(?Profesional $prof, string $slotHora, int $duracion, ?int $expiraEn, string $estado = 'held'): ReservaWeb
     {
-        $r = new ReservaWeb([
+        return ReservaWeb::create([
             'user_id' => $this->user->id,
-            'nombre_completo' => 'Web',
-            'telefono' => '+5491155551234',
+            'profesional_id' => $prof?->id,
+            'public_token' => ReservaWeb::generarToken(),
             'servicio_ids' => [1],
             'fecha' => self::FECHA,
             'slot_hora' => $slotHora,
             'duracion_total_minutos' => $duracion,
             'estado' => $estado,
+            'expira_en' => $expiraEn,
         ]);
-        $r->created_at = $creada;
-        $r->updated_at = $creada;
-        $r->save();
-
-        return $r;
     }
 
-    public function test_una_reserva_pendiente_reciente_bloquea_a_todas_las_profesionales(): void
+    public function test_un_hold_de_una_profesional_no_bloquea_a_otra(): void
     {
         $ana = $this->crearProfesional($this->user, 'Ana');
         $bea = $this->crearProfesional($this->user, 'Bea');
@@ -247,34 +242,110 @@ class DisponibilidadServiceTest extends TestCase
         $bea->servicios()->attach($s->id);
         $this->crearSlot($this->user, $ana, '14:00');
         $this->crearSlot($this->user, $bea, '14:00');
-        $this->crearSlot($this->user, $bea, '15:00');
         $ahora = $this->ahora();
-        $this->reserva('14:00:00', 30, $ahora->copy()->subMinutes(5));
+        $this->reserva($ana, '14:00:00', 30, $ahora->timestamp + 300);
 
-        // el hold [14:00,14:30) saca las 14:00 de ambas; queda el slot de Bea a las 15:00
-        $this->assertSame(['15:00'], $this->horas($this->calcular([$s], null, $ahora)));
+        $this->assertSame([], $this->calcular([$s], $ana, $ahora));
+        $this->assertSame([['hora' => '14:00', 'profesional_ids' => [$bea->id]]], $this->calcular([$s], null, $ahora));
+        $this->assertSame([['hora' => '14:00', 'profesional_ids' => [$bea->id]]], $this->calcular([$s], $bea, $ahora));
     }
 
-    public function test_una_reserva_pendiente_vieja_se_ignora(): void
+    public function test_un_hold_vencido_por_expira_en_se_ignora_aunque_siga_held(): void
     {
         $ana = $this->crearProfesional($this->user, 'Ana');
         $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
         $this->crearSlot($this->user, $ana, '14:00');
         $ahora = $this->ahora();
-        $this->reserva('14:00:00', 30, $ahora->copy()->subMinutes(20));
+        $this->reserva($ana, '14:00:00', 30, $ahora->timestamp - 1);
+        $this->reserva($ana, '15:00:00', 30, $ahora->timestamp, 'pending_payment'); // expira_en == ahora: ya no vive
 
         $this->assertSame(['14:00'], $this->horas($this->calcular([$s], null, $ahora)));
     }
 
-    public function test_reservas_rechazadas_no_bloquean_como_hold(): void
+    public function test_holds_no_bloqueantes_no_cuentan(): void
     {
         $ana = $this->crearProfesional($this->user, 'Ana');
         $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
         $this->crearSlot($this->user, $ana, '14:00');
         $ahora = $this->ahora();
-        $this->reserva('14:00:00', 30, $ahora->copy()->subMinutes(1), 'rejected');
+        foreach (['expired', 'cancelled', 'confirmed', 'rejected'] as $estado) {
+            $this->reserva($ana, '14:00:00', 30, $ahora->timestamp + 500, $estado);
+        }
 
         $this->assertSame(['14:00'], $this->horas($this->calcular([$s], null, $ahora)));
+    }
+
+    public function test_un_hold_pending_payment_vivo_bloquea_el_intervalo_completo(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
+        foreach (['13:30', '14:00', '14:30', '15:00'] as $h) {
+            $this->crearSlot($this->user, $ana, $h);
+        }
+        $ahora = $this->ahora();
+        $this->reserva($ana, '14:00:00', 60, $ahora->timestamp + 900, 'pending_payment');
+
+        // hold [14:00,15:00): 13:30 termina en 14:00 (adyacente, libre); 15:00 arranca al fin (libre)
+        $this->assertSame(['13:30', '15:00'], $this->horas($this->calcular([$s], $ana, $ahora)));
+    }
+
+    // -- estaLibre / ocupacionDelDia ------------------------------
+
+    private function estaLibre(Profesional $prof, string $hora, int $duracion, ?Carbon $ahora = null, ?int $ignorar = null, ?int $lead = null): bool
+    {
+        return (new DisponibilidadService())->estaLibre($prof->id, self::FECHA, $hora, $duracion, $ahora ?? $this->ahora(), $ignorar, $lead);
+    }
+
+    public function test_esta_libre_semiabierto_con_turnos_y_holds(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $ahora = $this->ahora();
+        $this->turno($ana, '10:00', 60);
+        $this->reserva($ana, '12:00:00', 60, $ahora->timestamp + 600);
+
+        $this->assertFalse($this->estaLibre($ana, '10:30', 30));
+        $this->assertTrue($this->estaLibre($ana, '11:00', 60));   // adyacente al turno y al hold
+        $this->assertFalse($this->estaLibre($ana, '11:30', 60));  // pisa el hold
+        $this->assertFalse($this->estaLibre($ana, '09:30', 60));  // pisa el inicio del turno
+        $this->assertTrue($this->estaLibre($ana, '09:00', 60));
+    }
+
+    public function test_esta_libre_ignora_la_reserva_indicada_y_los_holds_ajenos_a_la_profesional(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $bea = $this->crearProfesional($this->user, 'Bea');
+        $ahora = $this->ahora();
+        $propio = $this->reserva($ana, '12:00:00', 60, $ahora->timestamp + 600);
+        $this->reserva($bea, '15:00:00', 60, $ahora->timestamp + 600);
+
+        $this->assertFalse($this->estaLibre($ana, '12:00', 60));
+        $this->assertTrue($this->estaLibre($ana, '12:00', 60, null, $propio->id));
+        $this->assertTrue($this->estaLibre($ana, '15:00', 60));
+    }
+
+    public function test_esta_libre_respeta_el_lead_time_solo_si_se_pide(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $ahora = Carbon::parse(self::FECHA . ' 09:00:00');
+
+        $this->assertTrue($this->estaLibre($ana, '10:00', 30, $ahora));
+        $this->assertFalse($this->estaLibre($ana, '10:00', 30, $ahora, null, 120));
+        $this->assertTrue($this->estaLibre($ana, '11:00', 30, $ahora, null, 120));
+    }
+
+    public function test_ocupacion_del_dia_devuelve_turnos_y_holds_vivos_de_la_profesional(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $ahora = $this->ahora();
+        $this->turno($ana, '10:00', 60);
+        $this->reserva($ana, '12:00:00', 30, $ahora->timestamp + 600);
+        $this->reserva($ana, '13:00:00', 30, $ahora->timestamp - 5); // vencido
+
+        $ocupados = (new DisponibilidadService())->ocupacionDelDia($ana->id, self::FECHA, $ahora);
+
+        $this->assertCount(2, $ocupados);
+        $this->assertSame(['10:00', '11:00'], [$ocupados[0][0]->format('H:i'), $ocupados[0][1]->format('H:i')]);
+        $this->assertSame(['12:00', '12:30'], [$ocupados[1][0]->format('H:i'), $ocupados[1][1]->format('H:i')]);
     }
 
     // -- 1.11 -----------------------------------------------------
@@ -400,7 +471,7 @@ class DisponibilidadServiceTest extends TestCase
             $this->crearSlot($this->user, $ana, $h);
         }
         $ahora = $this->ahora();
-        $this->reserva('14:30:00', 60, $ahora->copy()->subMinutes(2)); // [14:30, 15:30)
+        $this->reserva($ana, '14:30:00', 60, $ahora->timestamp + 300); // [14:30, 15:30)
 
         $this->assertSame(['14:00', '15:30'], $this->horas($this->calcular([$s], $ana, $ahora)));
     }

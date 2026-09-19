@@ -152,7 +152,6 @@ class PublicController extends Controller
             $profesional,
             Carbon::now(),
             (int) config('reservas.anticipacion_minutos', 120),
-            (int) config('reservas.ventana_pago_minutos', 15),
         );
 
         return response()->json([
@@ -244,7 +243,6 @@ class PublicController extends Controller
             $profesional,
             $ahora,
             (int) config('reservas.anticipacion_minutos', 120),
-            (int) config('reservas.ventana_pago_minutos', 15),
         );
 
         $dias = [];
