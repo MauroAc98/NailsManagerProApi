@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\CategoriaServicio;
 use App\Models\Servicio;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Tests\Concerns\CreaSalonPublico;
 use Tests\TestCase;
 
@@ -21,8 +22,29 @@ class PublicServiciosTest extends TestCase
         $this->getJson("/api/public/{$user->slug}/servicios")
             ->assertOk()
             ->assertExactJson([
-                ['id' => $activo->id, 'nombre' => 'Esmaltado', 'duracion_minutos' => 45, 'precio' => 12000, 'categoria' => null],
+                ['id' => $activo->id, 'nombre' => 'Esmaltado', 'duracion_minutos' => 45, 'precio' => 12000, 'categoria' => null, 'fotos' => []],
             ]);
+    }
+
+    public function test_incluye_las_fotos_del_servicio_ordenadas_como_urls(): void
+    {
+        Storage::fake('public');
+
+        $user = $this->crearSalon();
+        $servicio = $this->crearServicio($user, 'Esmaltado', 45);
+        $servicio->fotos()->create(['path' => 'servicio_fotos/b.jpg', 'orden' => 1]);
+        $servicio->fotos()->create(['path' => 'servicio_fotos/a.jpg', 'orden' => 0]);
+
+        $res = $this->getJson("/api/public/{$user->slug}/servicios")->assertOk();
+
+        $res->assertJsonPath('0.fotos', [
+            Storage::disk('public')->url('servicio_fotos/a.jpg'),
+            Storage::disk('public')->url('servicio_fotos/b.jpg'),
+        ]);
+        // El array de fotos son URLs planas (strings), nunca objetos con
+        // 'id'/'path' — no hay forma de que el 'id' interno de la fila se
+        // filtre en la respuesta pública.
+        $this->assertIsString($res->json('0.fotos.0'));
     }
 
     public function test_no_incluye_servicios_de_otro_salon(): void
