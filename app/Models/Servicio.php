@@ -55,4 +55,12 @@ class Servicio extends Model
     {
         return $this->belongsTo(CategoriaServicio::class, 'categoria_id');
     }
+
+    // Fotos del portafolio de este servicio. Se exponen ordenadas por
+    // 'orden' — index 0 es la "portada" (convención compartida con
+    // Profesional::historiaPreciosFotos).
+    public function fotos()
+    {
+        return $this->hasMany(ServicioFoto::class)->orderBy('orden');
+    }
 }

@@ -112,6 +112,9 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
     // Servicios
     Route::patch('servicios/reordenar', [ServicioController::class, 'reordenar']);
     Route::apiResource('servicios', ServicioController::class);
+    Route::post('servicios/{id}/fotos', [ServicioController::class, 'subirFoto']);
+    Route::delete('servicios/{id}/fotos/{fotoId}', [ServicioController::class, 'borrarFoto']);
+    Route::patch('servicios/{id}/fotos/reordenar', [ServicioController::class, 'reordenarFotos']);
 
     // Categorías de servicio
     Route::apiResource('categorias-servicio', CategoriaServicioController::class);
@@ -144,6 +147,8 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
     Route::apiResource('profesionales', ProfesionalController::class)
         ->only(['index', 'store', 'update', 'destroy'])
         ->middlewareFor('update', 'throttle:60,1');
+    Route::post('profesionales/{id}/avatar', [ProfesionalController::class, 'subirAvatar']);
+    Route::delete('profesionales/{id}/avatar', [ProfesionalController::class, 'borrarAvatar']);
     Route::post('profesionales/{id}/fondo-historia', [ProfesionalController::class, 'subirFondoHistoria']);
     Route::delete('profesionales/{id}/fondo-historia', [ProfesionalController::class, 'borrarFondoHistoria']);
     Route::post('profesionales/{id}/historia-precios-fotos', [ProfesionalController::class, 'subirHistoriaPreciosFoto']);

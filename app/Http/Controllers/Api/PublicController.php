@@ -44,8 +44,8 @@ class PublicController extends Controller
         $profesionales = $user->profesionales()
             ->where('activo', true)
             ->orderBy('id')
-            ->get(['id', 'nombre'])
-            ->map(fn ($p) => ['id' => $p->id, 'nombre' => $p->nombre])
+            ->get(['id', 'nombre', 'avatar_path'])
+            ->map(fn ($p) => ['id' => $p->id, 'nombre' => $p->nombre, 'avatar_url' => $p->avatar_url])
             ->values();
 
         return response()->json([
@@ -97,6 +97,7 @@ class PublicController extends Controller
         $categorias = CategoriaServicio::where('user_id', $user->id)->pluck('nombre', 'id');
 
         $servicios = $query
+            ->with('fotos')
             ->get(['id', 'nombre', 'duracion_minutos', 'precio', 'categoria_id', 'orden'])
             // Mismo orden que la lista del salon: categoria alfabetica, luego
             // orden/id; sin categoria al final.
@@ -114,6 +115,9 @@ class PublicController extends Controller
                 'categoria'        => isset($categorias[$s->categoria_id])
                     ? ['id' => $s->categoria_id, 'nombre' => $categorias[$s->categoria_id]]
                     : null,
+                // Solo URLs planas, ordenadas — nunca el 'id' de la fila ni
+                // la 'path' relativa del disco (ver ServicioFoto::url).
+                'fotos'            => $s->fotos->pluck('url')->values(),
             ])
             ->values();
 

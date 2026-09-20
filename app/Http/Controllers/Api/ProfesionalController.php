@@ -239,6 +239,56 @@ class ProfesionalController extends Controller
     }
 
     // ─────────────────────────────────────────────
+    // POST /api/profesionales/{id}/avatar
+    // Guarda (o reemplaza) el avatar de esta profesional.
+    // ─────────────────────────────────────────────
+    public function subirAvatar(Request $request, int $id): JsonResponse
+    {
+        // mimes explícito (no solo 'image'): la regla 'image' de Laravel
+        // acepta SVG, que puede traer <script> embebido — mismo riesgo que
+        // AuthController::subirLogo, ver comentario ahí.
+        $request->validate([
+            'imagen' => 'required|image|mimes:jpeg,png,jpg,webp,gif,bmp|max:5120', // 5MB
+        ]);
+
+        $profesional = Profesional::delUsuario($request->user())->findOrFail($id);
+        $pathAnterior = $profesional->getRawOriginal('avatar_path');
+
+        // Subir y confirmar ANTES de borrar el archivo anterior — mismo
+        // criterio que subirFondoHistoria: si store() falla, el avatar
+        // previo tiene que seguir sirviendo en vez de quedar huérfano sin
+        // haberse reemplazado.
+        $path = $request->file('imagen')->store('avatars', 'public');
+        if (!$path) {
+            return response()->json(['message' => 'No se pudo guardar el avatar. Intentá de nuevo.'], 500);
+        }
+
+        $profesional->update(['avatar_path' => $path]);
+
+        if ($pathAnterior) {
+            Storage::disk('public')->delete($pathAnterior);
+        }
+
+        return response()->json($profesional);
+    }
+
+    // ─────────────────────────────────────────────
+    // DELETE /api/profesionales/{id}/avatar
+    // ─────────────────────────────────────────────
+    public function borrarAvatar(Request $request, int $id): JsonResponse
+    {
+        $profesional = Profesional::delUsuario($request->user())->findOrFail($id);
+
+        if ($profesional->getRawOriginal('avatar_path')) {
+            Storage::disk('public')->delete($profesional->getRawOriginal('avatar_path'));
+        }
+
+        $profesional->update(['avatar_path' => null]);
+
+        return response()->json($profesional);
+    }
+
+    // ─────────────────────────────────────────────
     // POST /api/profesionales/{id}/historia-precios-fotos
     // Agrega una foto a la "historia de precios" (dynamic price story).
     // Devuelve el Profesional completo — el store del frontend reemplaza

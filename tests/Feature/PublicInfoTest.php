@@ -23,8 +23,20 @@ class PublicInfoTest extends TestCase
             'nombre'        => 'Studio Ana',
             'logo_url'      => null,
             'direccion'     => 'Av. X 123',
-            'profesionales' => [['id' => $ana->id, 'nombre' => 'Ana']],
+            'profesionales' => [['id' => $ana->id, 'nombre' => 'Ana', 'avatar_url' => null]],
         ]);
+    }
+
+    public function test_info_incluye_el_avatar_url_de_la_profesional_cuando_tiene_uno(): void
+    {
+        $user = $this->crearSalon();
+        $ana = $this->crearProfesional($user, 'Ana');
+        $ana->update(['avatar_path' => 'avatars/ana.jpg']);
+
+        $res = $this->getJson("/api/public/{$user->slug}/info")->assertOk();
+
+        $res->assertJsonPath('profesionales.0.avatar_url', $ana->fresh()->avatar_url);
+        $this->assertNotNull($res->json('profesionales.0.avatar_url'));
     }
 
     public function test_info_no_filtra_telefono_email_ni_slug(): void

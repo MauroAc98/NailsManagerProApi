@@ -18,13 +18,14 @@ class Profesional extends Model
         'color',
         'activo',
         'fondo_historia_path',
+        'avatar_path',
         'historia_precios_template_id',
         'historia_precios_nota',
         'dias_atencion',
     ];
 
-    protected $appends = ['fondo_historia_url', 'nombre_completo'];
-    protected $hidden  = ['fondo_historia_path'];
+    protected $appends = ['fondo_historia_url', 'avatar_url', 'nombre_completo'];
+    protected $hidden  = ['fondo_historia_path', 'avatar_path'];
 
     protected function casts(): array
     {
@@ -62,6 +63,18 @@ class Profesional extends Model
         return Attribute::make(
             get: fn () => $this->fondo_historia_path
                 ? Storage::disk('public')->url($this->fondo_historia_path)
+                : null,
+        );
+    }
+
+    // URL pública del avatar de esta profesional, o null si no tiene uno
+    // guardado. avatar_path nunca se expone directo, mismo criterio que
+    // fondo_historia_path.
+    protected function avatarUrl(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => $this->avatar_path
+                ? Storage::disk('public')->url($this->avatar_path)
                 : null,
         );
     }
