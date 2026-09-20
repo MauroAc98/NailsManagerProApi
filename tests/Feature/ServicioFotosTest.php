@@ -249,4 +249,60 @@ class ServicioFotosTest extends TestCase
             ])
             ->assertStatus(422);
     }
+
+    // Las tres mutaciones de arriba devuelven $servicio->load('fotos'), pero
+    // index()/show() no cargaban la relacion — al recargar la pantalla de
+    // edicion, las fotos ya subidas parecian haber desaparecido hasta la
+    // primera mutacion de esa sesion. Gap real encontrado al conectar el
+    // frontend a estos endpoints.
+    public function test_index_incluye_las_fotos_de_cada_servicio(): void
+    {
+        Storage::fake('public');
+
+        $user = User::factory()->create(['is_exempt' => true]);
+        $servicio = $this->crearServicio($user);
+        $this->actingAs($user, 'sanctum')
+            ->postJson("/api/servicios/{$servicio->id}/fotos", ['imagen' => $this->fakeImagen()])
+            ->assertOk();
+
+        $response = $this->actingAs($user, 'sanctum')->getJson('/api/servicios')->assertOk();
+
+        $fila = collect($response->json())->firstWhere('id', $servicio->id);
+        $this->assertNotNull($fila);
+        $this->assertCount(1, $fila['fotos']);
+    }
+
+    public function test_show_incluye_las_fotos_del_servicio(): void
+    {
+        Storage::fake('public');
+
+        $user = User::factory()->create(['is_exempt' => true]);
+        $servicio = $this->crearServicio($user);
+        $this->actingAs($user, 'sanctum')
+            ->postJson("/api/servicios/{$servicio->id}/fotos", ['imagen' => $this->fakeImagen()])
+            ->assertOk();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson("/api/servicios/{$servicio->id}")
+            ->assertOk();
+
+        $response->assertJsonCount(1, 'fotos');
+    }
+
+    public function test_update_tambien_incluye_las_fotos_existentes(): void
+    {
+        Storage::fake('public');
+
+        $user = User::factory()->create(['is_exempt' => true]);
+        $servicio = $this->crearServicio($user);
+        $this->actingAs($user, 'sanctum')
+            ->postJson("/api/servicios/{$servicio->id}/fotos", ['imagen' => $this->fakeImagen()])
+            ->assertOk();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/servicios/{$servicio->id}", ['nombre' => 'Manicura rusa'])
+            ->assertOk();
+
+        $response->assertJsonCount(1, 'fotos');
+    }
 }

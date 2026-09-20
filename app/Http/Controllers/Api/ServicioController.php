@@ -24,7 +24,13 @@ class ServicioController extends Controller
     // ─────────────────────────────────────────────
     public function index(Request $request): JsonResponse
     {
+        // ->with('fotos'): las mutaciones de fotos (arriba) ya devolvian
+        // $servicio->load('fotos'), pero index/show/update no cargaban la
+        // relacion — al recargar la pantalla de edicion, las fotos ya
+        // subidas parecian haber desaparecido hasta la primera mutacion de
+        // esa sesion. Gap real encontrado al conectar el frontend.
         $servicios = Servicio::delUsuario($request->user())
+            ->with('fotos')
             ->orderBy('orden')
             ->get();
 
@@ -81,7 +87,7 @@ class ServicioController extends Controller
         $profesionalIds = $request->user()->profesionales()->where('activo', true)->pluck('id');
         $servicio->profesionales()->sync($profesionalIds);
 
-        return response()->json($servicio, 201);
+        return response()->json($servicio->load('fotos'), 201);
     }
 
     // ─────────────────────────────────────────────
@@ -89,7 +95,7 @@ class ServicioController extends Controller
     // ─────────────────────────────────────────────
     public function show(Request $request, int $id): JsonResponse
     {
-        $servicio = Servicio::delUsuario($request->user())->findOrFail($id);
+        $servicio = Servicio::delUsuario($request->user())->with('fotos')->findOrFail($id);
 
         return response()->json($servicio);
     }
@@ -135,7 +141,7 @@ class ServicioController extends Controller
             $servicio->profesionales()->sync($profesionalIds);
         }
 
-        return response()->json($servicio);
+        return response()->json($servicio->load('fotos'));
     }
 
     // ─────────────────────────────────────────────
