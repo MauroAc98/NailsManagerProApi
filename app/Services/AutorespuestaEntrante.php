@@ -209,12 +209,18 @@ class AutorespuestaEntrante
         $telefono = $user !== null ? trim((string) $user->telefono) : '';
         $digitos = preg_replace('/\D/', '', $telefono);
 
+        // Firmado como Turnetto (el sistema que manda el aviso), no como si
+        // hablara la profesional en primera persona — mas claro y profesional
+        // que un mensaje anonimo, y evita que se confunda con un intento de
+        // suplantar a la profesional.
+        $firma = $pt ? 'Somos a *Turnetto*' : 'Somos *Turnetto*';
+
         // Recordatorio corto para quien insiste: mismo mensaje en menos palabras,
         // para no repetir el texto largo entero.
         if (! $completo) {
             $recordatorio = $pt
-                ? 'Lembre-se: este número não recebe mensagens, ninguém vai ler o que você escrever aqui. 🙏'
-                : 'Recordá que este número no recibe mensajes: nadie va a leer lo que escribas acá. 🙏';
+                ? "{$firma}: este número não recebe mensagens, sua resposta não será lida."
+                : "{$firma}: este número no recibe mensajes, tu respuesta no va a ser leída.";
 
             if ($user === null) {
                 return $recordatorio."\n".($pt ? 'Escreva diretamente para a sua profissional.' : 'Escribile directamente a tu profesional.');
@@ -230,13 +236,15 @@ class AutorespuestaEntrante
         }
 
         if ($pt) {
-            $aviso = "Olá 👋 Este número envia apenas avisos automáticos de agendamentos e não recebe mensagens, então ninguém vai ler a sua resposta.\n\n";
+            $aviso = $firma.", o sistema de agendamentos de *:negocio:*.\n\nEste número envia apenas avisos automáticos e não recebe mensagens, então sua resposta não será lida.\n\n";
+            $avisoSinNegocio = $firma.", o sistema de agendamentos da sua profissional.\n\nEste número envia apenas avisos automáticos e não recebe mensagens.\n\n";
             $consulta = 'Para dúvidas, alterações ou cancelamentos, ';
             $generico = 'escreva diretamente para a sua profissional, pelo número de sempre.';
             $conLink = 'toque neste link para abrir o chat direto com *%s*:';
             $ounumero = 'Ou salve o número e escreva: %s';
         } else {
-            $aviso = "Hola 👋 Este número envía solo avisos automáticos de turnos y no recibe mensajes, así que nadie va a leer tu respuesta.\n\n";
+            $aviso = $firma.", el sistema de turnos de *:negocio:*.\n\nEste número solo envía avisos automáticos y no recibe mensajes, así que tu respuesta no va a ser leída.\n\n";
+            $avisoSinNegocio = $firma.", el sistema de turnos de tu profesional.\n\nEste número solo envía avisos automáticos y no recibe mensajes.\n\n";
             $consulta = 'Para consultas, cambios o cancelaciones, ';
             $generico = 'escribile directamente a tu profesional, por su número de siempre.';
             $conLink = 'tocá este link para abrir el chat directo con *%s*:';
@@ -244,8 +252,10 @@ class AutorespuestaEntrante
         }
 
         if ($user === null) {
-            return $aviso.$consulta.$generico;
+            return $avisoSinNegocio.$consulta.$generico;
         }
+
+        $aviso = str_replace(':negocio:', $user->name, $aviso);
 
         // Sin telefono cargado no hay link ni numero que dar: solo el nombre.
         if ($digitos === '') {

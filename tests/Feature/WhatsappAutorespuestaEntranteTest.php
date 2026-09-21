@@ -125,6 +125,9 @@ class WhatsappAutorespuestaEntranteTest extends TestCase
         // Le dice a la clienta QUE hacer con el link, no solo lo pega.
         $this->assertStringContainsString('tocá este link', $texto);
         $this->assertStringContainsString('chat directo', $texto);
+        // Identifica quien manda el mensaje: Turnetto (el sistema), no una
+        // profesional hablando en primera persona.
+        $this->assertStringContainsString('Turnetto', $texto);
     }
 
     public function test_sin_context_encuentra_el_negocio_por_el_ultimo_mensaje_enviado_a_ese_numero(): void
@@ -196,6 +199,7 @@ class WhatsappAutorespuestaEntranteTest extends TestCase
         $texto = $this->enviosDeTexto()[0]['text']['body'];
         $this->assertStringContainsString('não recebe mensagens', $texto);
         $this->assertStringContainsString('toque neste link', $texto);
+        $this->assertStringContainsString('Turnetto', $texto);
     }
 
     public function test_no_repite_la_respuesta_a_la_misma_persona_dentro_de_las_24_horas(): void
@@ -222,7 +226,7 @@ class WhatsappAutorespuestaEntranteTest extends TestCase
         $envios = $this->enviosDeTexto();
         $this->assertCount(2, $envios);
         $corto = $envios[1]['text']['body'];
-        $this->assertStringContainsString('Recordá', $corto);
+        $this->assertStringContainsString('Turnetto', $corto);
         $this->assertStringContainsString('Nails by Natalia', $corto);
         $this->assertStringContainsString('https://wa.me/543764123456', $corto);
         $this->assertLessThan(mb_strlen($envios[0]['text']['body']), mb_strlen($corto));
@@ -288,7 +292,9 @@ class WhatsappAutorespuestaEntranteTest extends TestCase
         $this->travel(11)->minutes();
         $this->postSigned($this->entrante('5493764123456'))->assertOk();
 
-        $this->assertStringContainsString('Lembre-se', $this->enviosDeTexto()[1]['text']['body']);
+        $corto = $this->enviosDeTexto()[1]['text']['body'];
+        $this->assertStringContainsString('Turnetto', $corto);
+        $this->assertStringContainsString('não recebe mensagens', $corto);
     }
 
     public function test_si_falla_el_recordatorio_corto_se_puede_reintentar_despues(): void
