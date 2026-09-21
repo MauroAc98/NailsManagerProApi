@@ -8,6 +8,7 @@ use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
@@ -337,25 +338,38 @@ class AuthController extends Controller
     public function forgotPassword(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'email' => 'required|email|exists:users,email',
+            'email' => 'required|email',
         ]);
 
         $email = strtolower($data['email']);
-        $code = (string) random_int(100000, 999999);
 
-        DB::table('password_reset_tokens')->updateOrInsert(
-            ['email' => $email],
-            [
-                'token'      => Hash::make($code),
-                'created_at' => now(),
-            ],
-        );
+        // Misma respuesta exista o no el email: con un `exists` en la validacion
+        // cualquiera podia averiguar que emails estan registrados.
+        if (User::where('email', $email)->exists()) {
+            $code = (string) random_int(100000, 999999);
 
-        Mail::to($email)->send(new ResetCodeMail($code));
+            DB::table('password_reset_tokens')->updateOrInsert(
+                ['email' => $email],
+                [
+                    'token'      => Hash::make($code),
+                    'created_at' => now(),
+                ],
+            );
+            Cache::forget(self::claveIntentosReset($email));
+
+            Mail::to($email)->send(new ResetCodeMail($code));
+        }
 
         return response()->json([
             'message' => 'Te enviamos un código a tu email.',
         ]);
+    }
+
+    private const MAX_INTENTOS_RESET = 5;
+
+    private static function claveIntentosReset(string $email): string
+    {
+        return 'reset-password-intentos:' . sha1($email);
     }
 
     // ─────────────────────────────────────────────
@@ -364,7 +378,7 @@ class AuthController extends Controller
     public function resetPassword(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'email'    => 'required|email|exists:users,email',
+            'email'    => 'required|email',
             'code'     => 'required|string',
             'password' => 'required|string|min:8|confirmed',
         ]);
@@ -375,7 +389,26 @@ class AuthController extends Controller
             ->where('email', $email)
             ->first();
 
-        if (!$record || !Hash::check($data['code'], $record->token)) {
+        // Sin registro (email inexistente o codigo ya invalidado) se responde
+        // igual que un codigo incorrecto, sin revelar si el email existe.
+        if (!$record) {
+            throw ValidationException::withMessages([
+                'code' => ['El código ingresado es incorrecto.'],
+            ]);
+        }
+
+        if (!Hash::check($data['code'], $record->token)) {
+            // El codigo tiene 1M de valores posibles: tras 5 fallos se invalida
+            // y hay que pedir uno nuevo, para que no se pueda adivinar por
+            // fuerza bruta repartida entre muchas IPs.
+            $clave = self::claveIntentosReset($email);
+            $intentos = Cache::increment($clave);
+            Cache::put($clave, $intentos, now()->addMinutes(30));
+            if ($intentos >= self::MAX_INTENTOS_RESET) {
+                DB::table('password_reset_tokens')->where('email', $email)->delete();
+                Cache::forget($clave);
+            }
+
             throw ValidationException::withMessages([
                 'code' => ['El código ingresado es incorrecto.'],
             ]);

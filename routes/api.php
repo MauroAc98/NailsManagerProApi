@@ -50,9 +50,9 @@ Route::prefix('auth')->group(function () {
     // grupo admin/* más abajo.
     Route::post('login',    [AuthController::class, 'login'])->middleware('throttle:10,1');
 
-    Route::post('cambiar-password-obligatorio', [AuthController::class, 'cambiarPasswordObligatorio']);
+    Route::post('cambiar-password-obligatorio', [AuthController::class, 'cambiarPasswordObligatorio'])->middleware('throttle:5,1');
 
-    Route::post('forgot-password', [AuthController::class, 'forgotPassword']);
+    Route::post('forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:5,1');
     Route::post('reset-password',  [AuthController::class, 'resetPassword'])->middleware('throttle:10,1');
 
     Route::middleware('auth:sanctum')->group(function () {
