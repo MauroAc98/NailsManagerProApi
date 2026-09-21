@@ -110,18 +110,27 @@ class ReservaWebController extends Controller
 
         $dataId  = $request->query('data_id');
         $secret  = config('services.mercadopago.webhook_secret');
+
+        // Fallar cerrado: hash_hmac con clave vacia produce una firma que
+        // cualquiera puede calcular, asi que sin secreto no se verifica nada.
+        if (!is_string($secret) || $secret === '') {
+            return response()->json(['message' => 'Webhook no configurado.'], 503);
+        }
+
         $manifest = "id:{$dataId};request-id:{$requestId};";
 
         $hash = hash_hmac('sha256', $manifest, $secret);
 
-        // Extraer ts y v1 del header x-signature
+        // Extraer ts y v1 del header x-signature (partes sin '=' se ignoran
+        // en vez de romper con un 500).
         $parts = collect(explode(',', $signature))
             ->mapWithKeys(function ($part) {
-                [$key, $value] = explode('=', trim($part));
-                return [$key => $value];
+                $par = explode('=', trim($part), 2);
+
+                return count($par) === 2 ? [$par[0] => $par[1]] : [];
             });
 
-        if (!hash_equals($hash, $parts->get('v1', ''))) {
+        if (!hash_equals($hash, (string) $parts->get('v1', ''))) {
             return response()->json(['message' => 'Firma inválida.'], 401);
         }
 
