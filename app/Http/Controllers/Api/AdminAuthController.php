@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
+use App\Support\BloqueoLogin;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -25,13 +26,30 @@ class AdminAuthController extends Controller
             'password' => 'required|string',
         ]);
 
-        $admin = AdminUser::where('email', strtolower($data['email']))->first();
+        $email = strtolower($data['email']);
+        $bloqueo = BloqueoLogin::admin();
+
+        // El admin es la cuenta de mayor privilegio y no tiene segundo factor:
+        // bloqueo temporal mas estricto que el de los negocios.
+        if (($espera = $bloqueo->segundosDeBloqueo($email, $request->ip())) !== null) {
+            Log::warning('AdminAuthController: login bloqueado por demasiados fallos', ['email' => $email]);
+
+            return response()->json([
+                'message' => 'Demasiados intentos fallidos. Probá de nuevo en unos minutos.',
+                'retry_after' => $espera,
+            ], 429);
+        }
+
+        $admin = AdminUser::where('email', $email)->first();
 
         if (! $admin || ! Hash::check($data['password'], $admin->password)) {
+            $bloqueo->registrarFallo($email, $request->ip());
             Log::warning('AdminAuthController: intento de login fallido', ['email' => $data['email']]);
 
             return response()->json(['message' => 'Las credenciales son incorrectas.'], 401);
         }
+
+        $bloqueo->limpiar($email, $request->ip());
 
         // Un solo admin activo por vez: cada login invalida sesiones
         // previas, igual criterio que AuthController::login para tenants.

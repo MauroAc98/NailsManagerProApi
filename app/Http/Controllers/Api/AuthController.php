@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Mail\ResetCodeMail;
 use App\Models\Setting;
 use App\Models\User;
+use App\Support\BloqueoLogin;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Cache;
@@ -31,13 +32,29 @@ class AuthController extends Controller
             'password' => 'required|string',
         ]);
 
-        $user = User::where('email', strtolower($data['email']))->first();
+        $email = strtolower($data['email']);
+        $bloqueo = BloqueoLogin::negocio();
+
+        // Bloqueo temporal por cuenta tras varios fallos (el throttle por IP de
+        // la ruta no frena a quien rota IPs).
+        if (($espera = $bloqueo->segundosDeBloqueo($email, $request->ip())) !== null) {
+            return response()->json([
+                'message' => 'Demasiados intentos fallidos. Probá de nuevo en unos minutos.',
+                'retry_after' => $espera,
+            ], 429);
+        }
+
+        $user = User::where('email', $email)->first();
 
         if (!$user || !Hash::check($data['password'], $user->password)) {
+            $bloqueo->registrarFallo($email, $request->ip());
+
             throw ValidationException::withMessages([
                 'email' => ['Las credenciales son incorrectas.'],
             ]);
         }
+
+        $bloqueo->limpiar($email, $request->ip());
 
         if ($user->debe_cambiar_password) {
             return response()->json([
