@@ -139,21 +139,30 @@ class AutorespuestaEntrante
         $digitos = preg_replace('/\D/', '', $telefono);
 
         if ($pt) {
-            $base = "Olá 👋 Este número envia apenas avisos automáticos de agendamentos e não recebe mensagens, então ninguém vai ler a sua resposta.\n\nPara dúvidas, alterações ou cancelamentos, escreva diretamente para ";
-            $generico = 'a sua profissional, pelo número de sempre.';
+            $aviso = "Olá 👋 Este número envia apenas avisos automáticos de agendamentos e não recebe mensagens, então ninguém vai ler a sua resposta.\n\n";
+            $consulta = 'Para dúvidas, alterações ou cancelamentos, ';
+            $generico = 'escreva diretamente para a sua profissional, pelo número de sempre.';
+            $conLink = 'toque neste link para abrir o chat direto com *%s*:';
+            $ounumero = 'Ou salve o número e escreva: %s';
         } else {
-            $base = "Hola 👋 Este número envía solo avisos automáticos de turnos y no recibe mensajes, así que nadie va a leer tu respuesta.\n\nPara consultas, cambios o cancelaciones escribile directamente a ";
-            $generico = 'tu profesional, por su número de siempre.';
+            $aviso = "Hola 👋 Este número envía solo avisos automáticos de turnos y no recibe mensajes, así que nadie va a leer tu respuesta.\n\n";
+            $consulta = 'Para consultas, cambios o cancelaciones, ';
+            $generico = 'escribile directamente a tu profesional, por su número de siempre.';
+            $conLink = 'tocá este link para abrir el chat directo con *%s*:';
+            $ounumero = 'O guardá su número y escribile: %s';
         }
 
         if ($user === null) {
-            return $base.$generico;
+            return $aviso.$consulta.$generico;
         }
 
+        // Sin telefono cargado no hay link ni numero que dar: solo el nombre.
         if ($digitos === '') {
-            return $base.$user->name.'.';
+            return $aviso.$consulta.($pt ? 'escreva diretamente para ' : 'escribile directamente a ').$user->name.'.';
         }
 
-        return $base.$user->name.": {$telefono}\nhttps://wa.me/{$digitos}";
+        // El link se presenta como una accion ("toca este link y se abre el chat")
+        // en vez de pegarse suelto: mucha gente no sabe que wa.me abre el chat.
+        return $aviso.$consulta.sprintf($conLink, $user->name)."\n👉 https://wa.me/{$digitos}\n\n".sprintf($ounumero, $telefono);
     }
 }

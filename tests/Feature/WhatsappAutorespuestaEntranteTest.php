@@ -122,6 +122,9 @@ class WhatsappAutorespuestaEntranteTest extends TestCase
         $this->assertStringContainsString('+54 376 4123456', $texto);
         $this->assertStringContainsString('https://wa.me/543764123456', $texto);
         $this->assertStringContainsString('no recibe mensajes', $texto);
+        // Le dice a la clienta QUE hacer con el link, no solo lo pega.
+        $this->assertStringContainsString('tocá este link', $texto);
+        $this->assertStringContainsString('chat directo', $texto);
     }
 
     public function test_sin_context_encuentra_el_negocio_por_el_ultimo_mensaje_enviado_a_ese_numero(): void
@@ -190,7 +193,9 @@ class WhatsappAutorespuestaEntranteTest extends TestCase
 
         $this->postSigned($this->entrante('5493764123456'))->assertOk();
 
-        $this->assertStringContainsString('não recebe mensagens', $this->enviosDeTexto()[0]['text']['body']);
+        $texto = $this->enviosDeTexto()[0]['text']['body'];
+        $this->assertStringContainsString('não recebe mensagens', $texto);
+        $this->assertStringContainsString('toque neste link', $texto);
     }
 
     public function test_no_repite_la_respuesta_a_la_misma_persona_dentro_de_las_24_horas(): void
