@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Models\Cliente;
 use App\Models\User;
 use App\Models\WhatsappMensaje;
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
@@ -19,7 +21,9 @@ use Illuminate\Support\Facades\Log;
  */
 class AutorespuestaEntrante
 {
-    private const HORAS_ENTRE_RESPUESTAS = 24;
+    private const HORAS_VENTANA = 24;
+    private const MAX_RESPUESTAS_POR_VENTANA = 3;
+    private const MINUTOS_ENTRE_RESPUESTAS = 10;
 
     public function __construct(private readonly CloudApiService $cloudApi) {}
 
@@ -57,24 +61,38 @@ class AutorespuestaEntrante
             return;
         }
 
-        // Una sola respuesta por persona cada 24 h: evita repetirse ante varios
-        // mensajes seguidos, reintentos de Meta o dos bots hablandose entre si.
-        $clave = 'whatsapp:autorespuesta:'.$this->sufijo($from);
-        if (! Cache::add($clave, 1, now()->addHours(self::HORAS_ENTRE_RESPUESTAS))) {
+        // Meta reenvia webhooks: el mismo mensaje entrante no se contesta dos veces.
+        $idEntrante = $mensaje['id'] ?? null;
+        $claveMensaje = is_string($idEntrante) && $idEntrante !== '' ? 'whatsapp:autorespuesta:msg:'.$idEntrante : null;
+        if ($claveMensaje !== null && ! Cache::add($claveMensaje, 1, now()->addHours(48))) {
             return;
         }
 
+        $clave = 'whatsapp:autorespuesta:estado:'.$this->sufijo($from);
+
         try {
-            $resultado = $this->cloudApi->enviarTexto($from, $this->texto($user));
+            $decision = Cache::lock($clave.':lock', 10)->block(3, fn () => $this->decidir($clave));
+        } catch (LockTimeoutException) {
+            $this->liberar($claveMensaje);
+
+            return;
+        }
+
+        if ($decision === null) {
+            return; // ya se le respondio hace poco, o llego al maximo del dia
+        }
+
+        try {
+            $resultado = $this->cloudApi->enviarTexto($from, $this->texto($user, $decision['completo']));
         } catch (\Throwable $e) {
-            Cache::forget($clave);
+            $this->deshacer($clave, $decision['previo'], $claveMensaje);
             Log::warning('whatsapp.autorespuesta.error_de_red', ['error' => $e->getMessage()]);
 
             return;
         }
 
         if ($resultado->messageId === null) {
-            Cache::forget($clave); // que un proximo mensaje pueda reintentar
+            $this->deshacer($clave, $decision['previo'], $claveMensaje); // que un proximo mensaje pueda reintentar
             Log::warning('whatsapp.autorespuesta.no_enviada', ['status' => $resultado->statusCode]);
 
             return;
@@ -83,7 +101,60 @@ class AutorespuestaEntrante
         Log::info('whatsapp.autorespuesta.enviada', [
             'user_id' => $user?->id,
             'message_id' => $resultado->messageId,
+            'completo' => $decision['completo'],
         ]);
+    }
+
+    /**
+     * Decide si toca responder y con que. Primer mensaje de la ventana de 24 h:
+     * aviso completo. Si insiste, un recordatorio corto, pero solo pasados
+     * MINUTOS_ENTRE_RESPUESTAS de la ultima respuesta y hasta un maximo por
+     * ventana (evita repetir el mismo texto largo ante varios mensajes
+     * seguidos, que invita a bloquear o reportar el numero compartido, y corta
+     * los bucles con otro bot). Reserva el turno ANTES de enviar, dentro del
+     * lock, para que dos webhooks simultaneos no manden el mismo aviso.
+     *
+     * @return array{completo: bool, previo: ?array}|null null = no responder
+     */
+    private function decidir(string $clave): ?array
+    {
+        $ahora = now()->timestamp;
+        $previo = Cache::get($clave);
+
+        if (! is_array($previo)) {
+            $estado = ['n' => 1, 'ultima' => $ahora, 'expira' => $ahora + self::HORAS_VENTANA * 3600];
+            Cache::put($clave, $estado, Carbon::createFromTimestamp($estado['expira']));
+
+            return ['completo' => true, 'previo' => null];
+        }
+
+        if ($previo['n'] >= self::MAX_RESPUESTAS_POR_VENTANA
+            || $ahora - $previo['ultima'] < self::MINUTOS_ENTRE_RESPUESTAS * 60) {
+            return null;
+        }
+
+        $estado = ['n' => $previo['n'] + 1, 'ultima' => $ahora, 'expira' => $previo['expira']];
+        Cache::put($clave, $estado, Carbon::createFromTimestamp($estado['expira']));
+
+        return ['completo' => false, 'previo' => $previo];
+    }
+
+    /** Si el envio fallo, la clienta vuelve al estado previo y Meta/ella pueden reintentar. */
+    private function deshacer(string $clave, ?array $previo, ?string $claveMensaje): void
+    {
+        if ($previo === null) {
+            Cache::forget($clave);
+        } else {
+            Cache::put($clave, $previo, Carbon::createFromTimestamp($previo['expira']));
+        }
+        $this->liberar($claveMensaje);
+    }
+
+    private function liberar(?string $claveMensaje): void
+    {
+        if ($claveMensaje !== null) {
+            Cache::forget($claveMensaje);
+        }
     }
 
     /**
@@ -132,11 +203,31 @@ class AutorespuestaEntrante
         return substr(preg_replace('/\D/', '', $numero), -10);
     }
 
-    private function texto(?User $user): string
+    private function texto(?User $user, bool $completo = true): string
     {
         $pt = $user?->locale === 'pt-BR';
         $telefono = $user !== null ? trim((string) $user->telefono) : '';
         $digitos = preg_replace('/\D/', '', $telefono);
+
+        // Recordatorio corto para quien insiste: mismo mensaje en menos palabras,
+        // para no repetir el texto largo entero.
+        if (! $completo) {
+            $recordatorio = $pt
+                ? 'Lembre-se: este número não recebe mensagens, ninguém vai ler o que você escrever aqui. 🙏'
+                : 'Recordá que este número no recibe mensajes: nadie va a leer lo que escribas acá. 🙏';
+
+            if ($user === null) {
+                return $recordatorio."\n".($pt ? 'Escreva diretamente para a sua profissional.' : 'Escribile directamente a tu profesional.');
+            }
+            if ($digitos === '') {
+                return $recordatorio."\n".($pt ? 'Escreva diretamente para ' : 'Escribile directamente a ').$user->name.'.';
+            }
+
+            return $recordatorio."\n".sprintf(
+                $pt ? 'Para falar com *%s*, toque neste link:' : 'Para hablar con *%s* tocá este link:',
+                $user->name,
+            )."\n👉 https://wa.me/{$digitos}";
+        }
 
         if ($pt) {
             $aviso = "Olá 👋 Este número envia apenas avisos automáticos de agendamentos e não recebe mensagens, então ninguém vai ler a sua resposta.\n\n";

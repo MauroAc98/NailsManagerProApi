@@ -210,6 +210,106 @@ class WhatsappAutorespuestaEntranteTest extends TestCase
         $this->assertCount(1, $this->enviosDeTexto());
     }
 
+    public function test_si_insiste_pasados_10_minutos_recibe_un_recordatorio_corto(): void
+    {
+        $user = $this->negocio();
+        $this->mensajeEnviado($user, '5493764123456');
+
+        $this->postSigned($this->entrante('5493764123456'))->assertOk();
+        $this->travel(11)->minutes();
+        $this->postSigned($this->entrante('5493764123456'))->assertOk();
+
+        $envios = $this->enviosDeTexto();
+        $this->assertCount(2, $envios);
+        $corto = $envios[1]['text']['body'];
+        $this->assertStringContainsString('Recordá', $corto);
+        $this->assertStringContainsString('Nails by Natalia', $corto);
+        $this->assertStringContainsString('https://wa.me/543764123456', $corto);
+        $this->assertLessThan(mb_strlen($envios[0]['text']['body']), mb_strlen($corto));
+    }
+
+    public function test_dentro_de_los_10_minutos_no_vuelve_a_responder(): void
+    {
+        $user = $this->negocio();
+        $this->mensajeEnviado($user, '5493764123456');
+
+        $this->postSigned($this->entrante('5493764123456'))->assertOk();
+        $this->travel(9)->minutes();
+        $this->postSigned($this->entrante('5493764123456'))->assertOk();
+
+        $this->assertCount(1, $this->enviosDeTexto());
+    }
+
+    public function test_como_maximo_3_respuestas_en_24_horas(): void
+    {
+        $user = $this->negocio();
+        $this->mensajeEnviado($user, '5493764123456');
+
+        for ($i = 0; $i < 5; $i++) {
+            $this->postSigned($this->entrante('5493764123456'))->assertOk();
+            $this->travel(11)->minutes();
+        }
+
+        $this->assertCount(3, $this->enviosDeTexto());
+    }
+
+    public function test_pasadas_24_horas_vuelve_a_mandar_el_aviso_completo(): void
+    {
+        $user = $this->negocio();
+        $this->mensajeEnviado($user, '5493764123456');
+
+        $this->postSigned($this->entrante('5493764123456'))->assertOk();
+        $this->travel(25)->hours();
+        $this->postSigned($this->entrante('5493764123456'))->assertOk();
+
+        $envios = $this->enviosDeTexto();
+        $this->assertCount(2, $envios);
+        $this->assertSame($envios[0]['text']['body'], $envios[1]['text']['body']);
+    }
+
+    public function test_un_reintento_de_meta_del_mismo_mensaje_no_genera_otra_respuesta(): void
+    {
+        $user = $this->negocio();
+        $this->mensajeEnviado($user, '5493764123456');
+
+        $this->postSigned($this->entrante('5493764123456', ['id' => 'wamid.MISMO']))->assertOk();
+        $this->travel(11)->minutes();
+        $this->postSigned($this->entrante('5493764123456', ['id' => 'wamid.MISMO']))->assertOk();
+
+        $this->assertCount(1, $this->enviosDeTexto());
+    }
+
+    public function test_el_recordatorio_corto_tambien_sale_en_portugues(): void
+    {
+        $user = $this->negocio(['locale' => 'pt-BR']);
+        $this->mensajeEnviado($user, '5493764123456');
+
+        $this->postSigned($this->entrante('5493764123456'))->assertOk();
+        $this->travel(11)->minutes();
+        $this->postSigned($this->entrante('5493764123456'))->assertOk();
+
+        $this->assertStringContainsString('Lembre-se', $this->enviosDeTexto()[1]['text']['body']);
+    }
+
+    public function test_si_falla_el_recordatorio_corto_se_puede_reintentar_despues(): void
+    {
+        $user = $this->negocio();
+        $this->mensajeEnviado($user, '5493764123456');
+        Http::swap(new HttpFactory());
+        Http::fake(['graph.facebook.com/*' => Http::sequence()
+            ->push(['messages' => [['id' => 'wamid.1']]], 200)
+            ->push(['error' => ['message' => 'boom']], 500)
+            ->push(['messages' => [['id' => 'wamid.3']]], 200)]);
+
+        $this->postSigned($this->entrante('5493764123456'))->assertOk();
+        $this->travel(11)->minutes();
+        $this->postSigned($this->entrante('5493764123456'))->assertOk(); // falla
+        $this->travel(1)->minutes();
+        $this->postSigned($this->entrante('5493764123456'))->assertOk(); // reintenta bien
+
+        $this->assertCount(3, $this->enviosDeTexto());
+    }
+
     public function test_no_responde_a_reacciones(): void
     {
         $user = $this->negocio();
