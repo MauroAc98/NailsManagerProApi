@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\WhatsappConnection;
 use App\Models\WhatsappMensaje;
+use App\Services\AutorespuestaEntrante;
 use App\Services\CloudApiService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -42,7 +43,7 @@ class CloudApiWebhookController extends Controller
     // (sha256=<hmac hex> sobre el body crudo, con el App Secret) — a
     // diferencia de Evolution, acá no hay secreto en la URL.
     // ─────────────────────────────────────────────
-    public function handle(Request $request, CloudApiService $cloudApi): JsonResponse
+    public function handle(Request $request, CloudApiService $cloudApi, AutorespuestaEntrante $autorespuesta): JsonResponse
     {
         $appSecret = config('services.whatsapp_cloud.app_secret');
         $header = $request->header('X-Hub-Signature-256', '');
@@ -64,14 +65,20 @@ class CloudApiWebhookController extends Controller
             foreach ($entry['changes'] ?? [] as $change) {
                 $field = $change['field'] ?? null;
 
-                // `value.messages[]` (mensajes entrantes) se ignora a propósito:
-                // con un solo número Cloud API compartido para todo el SaaS,
-                // todavía no está decidido cómo desambiguar a qué profesional/
-                // cliente pertenece un mensaje entrante — se resuelve antes de
-                // migrar profesionales reales más allá del piloto. El ruteo
-                // por-tenant de calidad ya existe (abajo); la pregunta abierta
-                // es la de ownership del entrante.
-                //
+                // `value.messages[]` (mensajes entrantes): con un solo número
+                // Cloud API compartido nadie los lee ni le llegan a la
+                // profesional. En vez de rutearlos, AutorespuestaEntrante les
+                // contesta a la clienta que ese número no recibe mensajes y le
+                // da el teléfono de su negocio. Su fallo NUNCA debe tumbar el
+                // 200 (Meta reintentaría todo el payload, statuses incluidos).
+                if ($field === 'messages' && ! empty($change['value']['messages'])) {
+                    try {
+                        $autorespuesta->procesar($change);
+                    } catch (\Throwable $e) {
+                        Log::warning('whatsapp.autorespuesta.no_procesada', ['error' => $e->getMessage()]);
+                    }
+                }
+
                 // procesarStatus() queda FUERA del try/catch de calidad: un
                 // error de DB acá debe propagar a 500 para que Meta reintente,
                 // nunca convertirse en un 200 + warning que pierde el update.

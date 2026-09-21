@@ -46,6 +46,10 @@ return [
         // permite detectar un entry.id desconocido/huérfano (alarma de
         // suscripción huérfana, ver EmbeddedSignupService). Nullable.
         'waba_id' => env('WHATSAPP_CLOUD_WABA_ID'),
+        // Interruptor de la respuesta automatica a los mensajes entrantes del
+        // numero compartido (ver AutorespuestaEntrante). Prendido por defecto;
+        // WHATSAPP_AUTORESPUESTA_HABILITADA=false la apaga sin cambiar codigo.
+        'autorespuesta_habilitada' => (bool) env('WHATSAPP_AUTORESPUESTA_HABILITADA', true),
     ],
 
     // Embedded Signup (Coexistence) — onboarding del número propio de cada

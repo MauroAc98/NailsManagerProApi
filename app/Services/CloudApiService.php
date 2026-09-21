@@ -141,6 +141,45 @@ class CloudApiService
     }
 
     /**
+     * Envía un mensaje de texto libre. Solo es válido dentro de la ventana de
+     * 24 h desde el último mensaje de la persona (Meta rechaza texto libre
+     * fuera de ella): sirve para responder a un entrante, nunca para iniciar
+     * una conversación (para eso están las plantillas).
+     */
+    public function enviarTexto(
+        string $numero,
+        string $texto,
+        ?string $token = null,
+        ?string $phoneNumberId = null,
+    ): CloudApiEnvioResultado {
+        $numero = $this->normalizarNumero($numero);
+        $tokenEfectivo = $token ?? $this->token;
+        $numeroEfectivo = $phoneNumberId ?? $this->phoneNumberId;
+
+        $response = Http::withHeaders($this->headersCon($tokenEfectivo))
+            ->timeout(10)
+            ->post("https://graph.facebook.com/{$this->apiVersion}/{$numeroEfectivo}/messages", [
+                'messaging_product' => 'whatsapp',
+                'to' => $numero,
+                'type' => 'text',
+                'text' => ['preview_url' => true, 'body' => $texto],
+            ]);
+
+        $respuesta = $response->json() ?? [];
+
+        if (! $response->successful()) {
+            Log::error('CloudApiService::enviarTexto falló', [
+                'numero' => $numero,
+                'body' => $response->body(),
+            ]);
+
+            return new CloudApiEnvioResultado(null, $response->status(), $respuesta);
+        }
+
+        return new CloudApiEnvioResultado($response->json('messages.0.id'), $response->status(), $respuesta);
+    }
+
+    /**
      * Escritor del webhook: procesa el `value` de un change con
      * field === 'phone_number_quality_update'. Parser event-only —
      * confirmado contra la muestra real de Meta App Dashboard (v26.0), que
