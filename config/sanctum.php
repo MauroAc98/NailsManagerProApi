@@ -50,7 +50,10 @@ return [
     |
     */
 
-    'expiration' => null,
+    // Minutos de vida de un token desde que se emite (90 dias). Antes era null
+    // (no vencia nunca): un token filtrado servia para siempre. La app no
+    // renueva tokens: pasado el plazo, el 401 lleva al login de nuevo.
+    'expiration' => (int) env('SANCTUM_EXPIRATION', 60 * 24 * 90),
 
     /*
     |--------------------------------------------------------------------------
