@@ -15,6 +15,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class TurnoController extends Controller
 {
@@ -350,7 +351,9 @@ class TurnoController extends Controller
     public function update(Request $request, int $id): JsonResponse
     {
         $data = $request->validate([
-            'cliente_id' => 'required|integer|exists:clientes,id',
+            // Scopeado al negocio: un exists global dejaba apuntar el turno a un
+            // cliente de otro negocio y leer sus datos en la respuesta.
+            'cliente_id' => ['required', 'integer', Rule::exists('clientes', 'id')->where('user_id', $request->user()->id)],
             'servicio_ids' => 'required|array|min:1',
             'servicio_ids.*' => 'integer|exists:servicios,id',
             'fecha_hora' => 'required|date|after_or_equal:today',
