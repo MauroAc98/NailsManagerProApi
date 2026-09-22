@@ -62,6 +62,27 @@ class PublicController extends Controller
     }
 
     // ─────────────────────────────────────────────
+    // GET /api/public/{slug}/terminos
+    // Condiciones de la reserva online: antes de esto el frontend mostraba
+    // "cancelación gratis hasta X h antes" con un numero fijo del lado del
+    // cliente, igual para cualquier negocio real — una promesa sin backend
+    // detras. ventana_pago_minutos usa el valor normal (no el de alta
+    // ocupación): esto se pide UNA vez al entrar al flujo, antes de que
+    // exista una reserva puntual a la que aplicarle esa regla.
+    // ─────────────────────────────────────────────
+    public function terminos(string $slug): JsonResponse
+    {
+        $user = $this->getProfesional($slug);
+
+        return response()->json([
+            'deposito' => (float) ($user->sena_monto ?? 0),
+            'ventana_pago_minutos' => (int) config('reservas.pago_minutos'),
+            'anticipacion_minutos' => (int) config('reservas.anticipacion_minutos'),
+            'ventana_cancelacion_horas' => (int) config('reservas.cancelacion_horas'),
+        ]);
+    }
+
+    // ─────────────────────────────────────────────
     // GET /api/public/{slug}/branding
     // Datos mínimos para el login personalizado por negocio (logo +
     // nombre). A diferencia de getProfesional(), NO valida "activo": ese

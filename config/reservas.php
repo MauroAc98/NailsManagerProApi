@@ -17,12 +17,17 @@ return [
 
     // ── Holds (slice 3) ──────────────────────────────────────────
     // Minutos que un hold sin pagar bloquea el horario (normal / alta ocupacion).
-    'hold_minutos'      => (int) env('RESERVAS_HOLD_MINUTOS', 10),
+    'hold_minutos' => (int) env('RESERVAS_HOLD_MINUTOS', 10),
     'hold_minutos_alta' => (int) env('RESERVAS_HOLD_MINUTOS_ALTA', 5),
 
     // Minutos disponibles para pagar una vez iniciado el pago (normal / alta).
-    'pago_minutos'      => (int) env('RESERVAS_PAGO_MINUTOS', 15),
+    'pago_minutos' => (int) env('RESERVAS_PAGO_MINUTOS', 15),
     'pago_minutos_alta' => (int) env('RESERVAS_PAGO_MINUTOS_ALTA', 10),
+
+    // Horas antes del turno hasta las que se puede cancelar sin perder la
+    // seña. Constante por ahora (mismo criterio que anticipacion_minutos);
+    // mas adelante pasa a ser configurable por salon si hace falta.
+    'cancelacion_horas' => (int) env('RESERVAS_CANCELACION_HORAS', 24),
 
     // Fraccion (0-1) de slots ocupados de la profesional ese dia a partir de la
     // cual se considera "alta ocupacion" y se acortan los tiempos.
@@ -34,8 +39,8 @@ return [
 
     // Con >= umbral holds vencidos sin pago dentro de la ventana (horas) se
     // exige verificar el WhatsApp. Solo se ENFORCEA con verificacion_habilitada.
-    'verificacion_habilitada'    => (bool) env('RESERVAS_VERIFICACION_HABILITADA', false),
-    'verificacion_umbral'        => (int) env('RESERVAS_VERIFICACION_UMBRAL', 2),
+    'verificacion_habilitada' => (bool) env('RESERVAS_VERIFICACION_HABILITADA', false),
+    'verificacion_umbral' => (int) env('RESERVAS_VERIFICACION_UMBRAL', 2),
     'verificacion_ventana_horas' => (int) env('RESERVAS_VERIFICACION_VENTANA_HORAS', 24),
     'verificacion_validez_horas' => (int) env('RESERVAS_VERIFICACION_VALIDEZ_HORAS', 24),
 

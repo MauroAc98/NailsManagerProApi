@@ -1,23 +1,23 @@
 <?php
 
-use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\ServicioController;
-use App\Http\Controllers\Api\ClienteController;
-use App\Http\Controllers\Api\SlotDisponibleController;
-use App\Http\Controllers\Api\TurnoController;
-use App\Http\Controllers\Api\ProfesionalController;
-use App\Http\Controllers\Api\MercadoPagoWebhookController;
-use App\Http\Controllers\Api\ReservaWebController;
-use App\Http\Controllers\Api\PublicController;
-use App\Http\Controllers\Api\ReservaPublicaController;
-use App\Http\Controllers\Api\CloudApiWebhookController;
-use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\AdminAuthController;
-use App\Http\Controllers\Api\StatsController;
+use App\Http\Controllers\Api\AdminController;
+use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\BloqueoAgendaController;
+use App\Http\Controllers\Api\CategoriaServicioController;
+use App\Http\Controllers\Api\ClienteController;
+use App\Http\Controllers\Api\CloudApiWebhookController;
 use App\Http\Controllers\Api\GastoController;
 use App\Http\Controllers\Api\IngresoController;
-use App\Http\Controllers\Api\CategoriaServicioController;
-use App\Http\Controllers\Api\BloqueoAgendaController;
+use App\Http\Controllers\Api\MercadoPagoWebhookController;
+use App\Http\Controllers\Api\ProfesionalController;
+use App\Http\Controllers\Api\PublicController;
+use App\Http\Controllers\Api\ReservaPublicaController;
+use App\Http\Controllers\Api\ReservaWebController;
+use App\Http\Controllers\Api\ServicioController;
+use App\Http\Controllers\Api\SlotDisponibleController;
+use App\Http\Controllers\Api\StatsController;
+use App\Http\Controllers\Api\TurnoController;
 use App\Http\Controllers\Api\WhatsappConnectionAdminController;
 use Illuminate\Support\Facades\Route;
 
@@ -25,19 +25,20 @@ use Illuminate\Support\Facades\Route;
 // Rutas públicas — sin autenticación
 // ─────────────────────────────────────────────
 Route::prefix('public/{slug}')->group(function () {
-    Route::get('info',           [PublicController::class, 'info'])->middleware('throttle:60,1');
-    Route::get('branding',       [PublicController::class, 'branding']);
-    Route::get('servicios',      [PublicController::class, 'servicios'])->middleware('throttle:60,1');
+    Route::get('info', [PublicController::class, 'info'])->middleware('throttle:60,1');
+    Route::get('terminos', [PublicController::class, 'terminos'])->middleware('throttle:60,1');
+    Route::get('branding', [PublicController::class, 'branding']);
+    Route::get('servicios', [PublicController::class, 'servicios'])->middleware('throttle:60,1');
     Route::get('disponibilidad', [PublicController::class, 'disponibilidad'])->middleware('throttle:60,1');
     Route::get('disponibilidad/dias', [PublicController::class, 'disponibilidadDias'])->middleware('throttle:30,1');
     // Reserva online (slice 3): escrituras detras del kill switch y del device token.
     // Throttles con nombre (AppServiceProvider): por dispositivo / token / telefono, nunca por IP.
     Route::middleware(['reservas.creacion', 'reservas.device'])->group(function () {
-        Route::post('reservas/holds',            [ReservaPublicaController::class, 'hold'])->middleware('throttle:reservas-hold');
-        Route::put('reservas/{token}/datos',     [ReservaPublicaController::class, 'datos'])->middleware('throttle:reservas-datos');
-        Route::post('reservas/{token}/pago',     [ReservaPublicaController::class, 'pago'])->middleware('throttle:reservas-pago');
-        Route::delete('reservas/{token}',        [ReservaPublicaController::class, 'destroy'])->middleware('throttle:reservas-estado');
-        Route::get('reservas/{token}',           [ReservaPublicaController::class, 'show'])->middleware('throttle:reservas-estado');
+        Route::post('reservas/holds', [ReservaPublicaController::class, 'hold'])->middleware('throttle:reservas-hold');
+        Route::put('reservas/{token}/datos', [ReservaPublicaController::class, 'datos'])->middleware('throttle:reservas-datos');
+        Route::post('reservas/{token}/pago', [ReservaPublicaController::class, 'pago'])->middleware('throttle:reservas-pago');
+        Route::delete('reservas/{token}', [ReservaPublicaController::class, 'destroy'])->middleware('throttle:reservas-estado');
+        Route::get('reservas/{token}', [ReservaPublicaController::class, 'show'])->middleware('throttle:reservas-estado');
     });
 });
 
@@ -49,16 +50,16 @@ Route::get('support-info', [AuthController::class, 'supportInfo']);
 Route::prefix('auth')->group(function () {
     // register() se mudó a POST admin/negocios — ver AdminController y el
     // grupo admin/* más abajo.
-    Route::post('login',    [AuthController::class, 'login'])->middleware('throttle:10,1');
+    Route::post('login', [AuthController::class, 'login'])->middleware('throttle:10,1');
 
     Route::post('cambiar-password-obligatorio', [AuthController::class, 'cambiarPasswordObligatorio'])->middleware('throttle:5,1');
 
     Route::post('forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:5,1');
-    Route::post('reset-password',  [AuthController::class, 'resetPassword'])->middleware('throttle:10,1');
+    Route::post('reset-password', [AuthController::class, 'resetPassword'])->middleware('throttle:10,1');
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('logout', [AuthController::class, 'logout']);
-        Route::get('me',      [AuthController::class, 'me']);
+        Route::get('me', [AuthController::class, 'me']);
         Route::get('subscription-status', [AuthController::class, 'subscriptionStatus']);
     });
 });
@@ -75,7 +76,7 @@ Route::prefix('admin')->group(function () {
     // tiene su propio throttle:5,1 arriba.
     Route::middleware(['auth:admin', 'throttle:admin'])->group(function () {
         Route::post('logout', [AdminAuthController::class, 'logout']);
-        Route::get('me',      [AdminAuthController::class, 'me']);
+        Route::get('me', [AdminAuthController::class, 'me']);
 
         Route::post('subscriptions/{user}/renew', [AdminController::class, 'renewSubscription']);
         Route::post('subscriptions/{user}/suspend', [AdminController::class, 'suspendSubscription']);
@@ -87,13 +88,13 @@ Route::prefix('admin')->group(function () {
         // Onboarding de Embedded Signup (design §7). El GET de estado es
         // INGATEADO — sigue alcanzable mientras la feature está gated (Q1);
         // la gate de Advanced Access la aplica el seam en el POST.
-        Route::get('whatsapp/connections',  [WhatsappConnectionAdminController::class, 'index']);
+        Route::get('whatsapp/connections', [WhatsappConnectionAdminController::class, 'index']);
         Route::post('whatsapp/connections', [WhatsappConnectionAdminController::class, 'store']);
 
         // Creación de negocio (movida de auth/register) y búsqueda puntual
         // por email/slug para el flujo de renovación — ver AdminController.
-        Route::post('negocios',       [AdminController::class, 'crearNegocio']);
-        Route::get('negocios',        [AdminController::class, 'listarNegocios']);
+        Route::post('negocios', [AdminController::class, 'crearNegocio']);
+        Route::get('negocios', [AdminController::class, 'listarNegocios']);
         Route::get('negocios/buscar', [AdminController::class, 'buscarNegocio']);
 
         Route::get('settings', [AdminController::class, 'obtenerSettings']);
@@ -107,7 +108,7 @@ Route::prefix('admin')->group(function () {
 Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
 
     // Perfil
-    Route::put('perfil',       [AuthController::class, 'updatePerfil']);
+    Route::put('perfil', [AuthController::class, 'updatePerfil']);
     Route::post('perfil/logo', [AuthController::class, 'subirLogo']);
 
     // Servicios
@@ -163,27 +164,27 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
 
     // Turnos
     Route::prefix('turnos')->group(function () {
-        Route::get('marcas',               [TurnoController::class, 'marcas']);
-        Route::get('disponibilidad',       [TurnoController::class, 'disponibilidad']);
-        Route::get('pendientes-de-cobro',  [TurnoController::class, 'pendientesDeCobro']);
+        Route::get('marcas', [TurnoController::class, 'marcas']);
+        Route::get('disponibilidad', [TurnoController::class, 'disponibilidad']);
+        Route::get('pendientes-de-cobro', [TurnoController::class, 'pendientesDeCobro']);
         Route::get('recordatorios-pendientes', [TurnoController::class, 'recordatoriosPendientes']);
-        Route::get('manana',               [TurnoController::class, 'turnosManana']);
-        Route::get('notificaciones',       [TurnoController::class, 'notificaciones']);
+        Route::get('manana', [TurnoController::class, 'turnosManana']);
+        Route::get('notificaciones', [TurnoController::class, 'notificaciones']);
         Route::post('notificaciones/marcar-vistas', [TurnoController::class, 'marcarNotificacionesVistas']);
-        Route::get('/',                    [TurnoController::class, 'index']);
-        Route::get('/{id}',                [TurnoController::class, 'show']);
-        Route::post('/',                   [TurnoController::class, 'store']);
+        Route::get('/', [TurnoController::class, 'index']);
+        Route::get('/{id}', [TurnoController::class, 'show']);
+        Route::post('/', [TurnoController::class, 'store']);
         Route::post('{id}/recordatorio-manual', [TurnoController::class, 'marcarRecordatorioManual']);
-        Route::put('/{id}',                [TurnoController::class, 'update']);
-        Route::patch('{id}/completar',     [TurnoController::class, 'completar']);
-        Route::patch('{id}/precios',       [TurnoController::class, 'actualizarPrecios']);
-        Route::delete('/{id}',             [TurnoController::class, 'destroy']);
+        Route::put('/{id}', [TurnoController::class, 'update']);
+        Route::patch('{id}/completar', [TurnoController::class, 'completar']);
+        Route::patch('{id}/precios', [TurnoController::class, 'actualizarPrecios']);
+        Route::delete('/{id}', [TurnoController::class, 'destroy']);
     });
 
     // Reservas web — panel de aceptación
     Route::prefix('reservas')->group(function () {
-        Route::get('/',              [ReservaWebController::class, 'index']);
-        Route::post('{id}/aceptar',  [ReservaWebController::class, 'aceptar']);
+        Route::get('/', [ReservaWebController::class, 'index']);
+        Route::post('{id}/aceptar', [ReservaWebController::class, 'aceptar']);
         Route::post('{id}/rechazar', [ReservaWebController::class, 'rechazar']);
     });
 
