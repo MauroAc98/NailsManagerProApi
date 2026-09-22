@@ -26,6 +26,12 @@
         <env name="DB_CONNECTION" value="sqlite"/>
         <env name="DB_DATABASE" value=":memory:"/>
         <env name="DB_URL" value=""/>
+        <!-- Valores distintos a proposito: si algun back_url volviera a usar
+             FRONTEND_URL (el dashboard) en vez de RESERVAS_BASE_URL (el
+             dominio publico de reserva online), un test que compare contra
+             el equivocado tiene que poder notarlo. -->
+        <env name="FRONTEND_URL" value="https://app.turnetto.test"/>
+        <env name="RESERVAS_BASE_URL" value="https://reservar.turnetto.test"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>

@@ -2,6 +2,14 @@
 
 return [
 
+    // Dominio publico de reserva online (reservar.turnetto.com), NUNCA
+    // services.frontend_url (ese es app.turnetto.com, el dashboard del
+    // negocio) — lo usa MercadoPagoService para las back_urls de MP. Mandar
+    // a la clienta al dominio del dashboard la deja del lado del guard de
+    // auth (isReservaPublica evalua false ahi), mostrando el Welcome de una
+    // cuenta logueada en vez de la pantalla de estado de su reserva.
+    'base_url' => env('RESERVAS_BASE_URL'),
+
     // Minutos de anticipacion minima para reservar online (slice 1: constante;
     // mas adelante pasa a ser configurable por salon).
     'anticipacion_minutos' => (int) env('RESERVAS_ANTICIPACION_MINUTOS', 120),

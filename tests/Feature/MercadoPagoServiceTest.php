@@ -253,7 +253,7 @@ class MercadoPagoServiceTest extends TestCase
 
         app(MercadoPagoService::class)->crearOReusarPreferencia($user, $reserva);
 
-        $esperada = rtrim((string) config('services.frontend_url'), '/')."/reservar/{$user->slug}/reserva/{$reserva->public_token}";
+        $esperada = rtrim((string) config('reservas.base_url'), '/')."/reservar/{$user->slug}/reserva/{$reserva->public_token}";
 
         Http::assertSent(function (HttpRequest $r) use ($esperada) {
             $online = $r['config']['online'];
@@ -263,6 +263,24 @@ class MercadoPagoServiceTest extends TestCase
                 && $online['failure_url'] === $esperada
                 && $online['auto_return'] === 'approved';
         });
+    }
+
+    // Bug real: usaba services.frontend_url (app.turnetto.com, el dashboard)
+    // en vez de reservas.base_url (reservar.turnetto.com) — Mercado Pago
+    // mandaba a la clienta de vuelta al dominio equivocado, donde el guard
+    // de auth no la excluye del Welcome de una cuenta logueada.
+    public function test_las_back_urls_no_usan_el_dominio_del_dashboard(): void
+    {
+        $user = $this->negocio();
+        $this->conCredenciales($user);
+        $reserva = $this->reserva($user);
+        $this->fakeMp();
+
+        app(MercadoPagoService::class)->crearOReusarPreferencia($user, $reserva);
+
+        $dashboard = rtrim((string) config('services.frontend_url'), '/');
+
+        Http::assertSent(fn (HttpRequest $r) => ! str_starts_with($r['config']['online']['success_url'], $dashboard));
     }
 
     public function test_el_external_reference_es_el_token_publico_no_el_id_interno(): void

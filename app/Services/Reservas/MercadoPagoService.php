@@ -64,7 +64,9 @@ class MercadoPagoService
             throw ReservaPublicaException::mpNoConectado();
         }
 
-        $base = rtrim((string) config('services.frontend_url'), '/');
+        // reservas.base_url, NUNCA services.frontend_url (ese apunta a
+        // app.turnetto.com, el dashboard) — ver comentario en config/reservas.php.
+        $base = rtrim((string) config('reservas.base_url'), '/');
         $volver = "{$base}/reservar/{$user->slug}/reserva/{$reserva->public_token}";
         $montoFormateado = number_format($monto, 2, '.', '');
 
