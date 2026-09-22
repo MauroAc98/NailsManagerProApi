@@ -12,18 +12,23 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Crea la preferencia de Checkout Pro para cobrar la seña. Fase 1: cada
- * negocio usa SU PROPIA cuenta de Mercado Pago (sin OAuth, sin app de
+ * Crea la order de Checkout Pro (Orders API) para cobrar la seña. Fase 1:
+ * cada negocio usa SU PROPIA cuenta de Mercado Pago (sin OAuth, sin app de
  * Turnetto) — el access_token sale de user_mp_credentials, cargado a mano.
  * La plata cae directo en la cuenta del negocio; Turnetto nunca la toca.
+ *
+ * Migrado desde la API vieja de Preferences (checkout/preferences) a Orders
+ * API (v1/orders) — MP la recomienda para integraciones nuevas. El webhook y
+ * la reconciliacion NO cambian: ambas APIs notifican type=payment y la fuente
+ * de verdad sigue siendo GET /v1/payments/{id}, nunca el cuerpo del aviso.
  */
 class MercadoPagoService
 {
     public function __construct(private ConfirmarReservaService $confirmar) {}
 
     /**
-     * Reusa la preferencia pendiente de esta reserva si ya existe (un
-     * reintento de /pago no debe crear una preferencia nueva en MP cada vez).
+     * Reusa la order pendiente de esta reserva si ya existe (un reintento de
+     * /pago no debe crear una order nueva en MP cada vez).
      *
      * @throws ReservaPublicaException mp_no_conectado | mp_error
      */
@@ -61,28 +66,50 @@ class MercadoPagoService
 
         $base = rtrim((string) config('services.frontend_url'), '/');
         $volver = "{$base}/reservar/{$user->slug}/reserva/{$reserva->public_token}";
+        $montoFormateado = number_format($monto, 2, '.', '');
 
         $response = Http::withToken($credencial->mp_access_token)
+            // Idempotency-Key estable por reserva: si esta llamada se
+            // reintentara alguna vez (timeout de red), MP devuelve la MISMA
+            // order en vez de crear una duplicada. Solo se llega aca una vez
+            // por reserva — el chequeo de arriba ya reusa la fila local en
+            // cualquier reintento normal (doble tap de "Pagar").
+            ->withHeaders(['X-Idempotency-Key' => "reserva-{$reserva->public_token}"])
             ->timeout(15)
-            ->post('https://api.mercadopago.com/checkout/preferences', [
+            ->post('https://api.mercadopago.com/v1/orders', [
+                'type' => 'online',
+                // Unico valor valido para Checkout Pro (redirect hospedado) —
+                // "automatic" es para integraciones de Checkout API a medida.
+                'processing_mode' => 'manual',
+                'total_amount' => $montoFormateado,
                 'items' => [[
                     'title' => "Seña de reserva - {$user->name}",
                     'quantity' => 1,
-                    'currency_id' => $user->locale === 'pt-BR' ? 'BRL' : 'ARS',
-                    'unit_price' => $monto,
+                    'unit_price' => $montoFormateado,
                 ]],
                 // El token publico, NUNCA el id interno de la reserva — mismo
                 // criterio que las URLs de este flujo (ver ReservaPublicaController).
                 'external_reference' => $reserva->public_token,
-                // Rapipago/Pago Facil tardan HASTA DIAS en acreditarse — con una
-                // ventana de pago de 15 minutos, la clienta pagaria igual y de
-                // todos modos perderia el horario. Se excluyen a proposito.
-                'payment_methods' => ['excluded_payment_types' => [['id' => 'ticket']]],
-                'back_urls' => ['success' => $volver, 'pending' => $volver, 'failure' => $volver],
-                'auto_return' => 'approved',
-                // Ruteo propio del negocio: ver comentario en la migracion
-                // add_webhook_ruteo_to_user_mp_credentials_table.
-                'notification_url' => rtrim((string) config('app.url'), '/')."/api/webhooks/mercadopago/{$credencial->webhook_ruteo}",
+                'config' => [
+                    'online' => [
+                        'success_url' => $volver,
+                        'pending_url' => $volver,
+                        'failure_url' => $volver,
+                        'auto_return' => 'approved',
+                    ],
+                    'payment_method' => [
+                        // Rapipago/Pago Facil tardan HASTA DIAS en acreditarse
+                        // — con una ventana de pago de 15 minutos, la clienta
+                        // pagaria igual y de todos modos perderia el horario.
+                        'not_allowed_types' => ['ticket'],
+                    ],
+                ],
+                // notification_url NO va aca: Orders API la configura UNA VEZ
+                // por aplicacion de MP (panel developers, "Modo productivo"),
+                // no por request. El ruteo propio del negocio
+                // (UserMpCredential::webhook_ruteo) sigue funcionando igual —
+                // solo cambia DONDE se configura esa URL, no como identifica
+                // al negocio.
             ]);
 
         if (! $response->successful()) {
@@ -99,8 +126,12 @@ class MercadoPagoService
 
         return PagoSena::create([
             'reserva_web_id' => $reserva->id,
+            // Sigue en la columna 'mp_preference_id' por no forzar una
+            // migracion de renombre sin beneficio funcional — desde esta
+            // migracion a Orders API, guarda el id de la ORDER, no de una
+            // preference.
             'mp_preference_id' => $data['id'] ?? null,
-            'init_point' => $data['init_point'] ?? null,
+            'init_point' => $data['checkout_url'] ?? null,
             'monto' => $monto,
             'estado' => 'pendiente',
         ]);

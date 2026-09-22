@@ -16,14 +16,18 @@ use Tests\TestCase;
 
 class PublicReservasHoldsTest extends TestCase
 {
-    use RefreshDatabase, CreaSalonPublico;
+    use CreaSalonPublico, RefreshDatabase;
 
     private const FECHA = '2099-06-11';
+
     private const DEVICE = 'device-token-de-prueba-0123456789abcdef';
+
     private const TEL = '+5491155551234';
 
     private User $user;
+
     private Profesional $ana;
+
     private Servicio $servicio;
 
     protected function setUp(): void
@@ -40,9 +44,9 @@ class PublicReservasHoldsTest extends TestCase
         }
 
         UserMpCredential::create(['user_id' => $this->user->id, 'mp_access_token' => 'APP_USR-token-de-test', 'mp_user_id' => 'MP-1']);
-        Http::fake(['api.mercadopago.com/checkout/preferences' => Http::response([
-            'id' => 'PREF-TEST',
-            'init_point' => 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=PREF-TEST',
+        Http::fake(['api.mercadopago.com/v1/orders' => Http::response([
+            'id' => 'ORDER-TEST',
+            'checkout_url' => 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=PREF-TEST',
         ], 201)]);
     }
 
@@ -54,7 +58,7 @@ class PublicReservasHoldsTest extends TestCase
 
     private function url(string $path = '', ?User $salon = null): string
     {
-        return '/api/public/' . ($salon ?? $this->user)->slug . '/reservas' . $path;
+        return '/api/public/'.($salon ?? $this->user)->slug.'/reservas'.$path;
     }
 
     private function headers(string $device = self::DEVICE, ?string $key = 'key-1'): array
@@ -137,7 +141,7 @@ class PublicReservasHoldsTest extends TestCase
 
     public function test_device_token_ausente_o_mal_formado_es_422_device_token_required(): void
     {
-        foreach ([null, 'corto', str_repeat('a', 31), str_repeat('a', 129), str_repeat('a', 31) . '!'] as $token) {
+        foreach ([null, 'corto', str_repeat('a', 31), str_repeat('a', 129), str_repeat('a', 31).'!'] as $token) {
             $headers = $token === null ? ['Idempotency-Key' => 'k'] : ['X-Device-Token' => $token, 'Idempotency-Key' => 'k'];
             $this->postJson($this->url('/holds'), $this->body(), $headers)
                 ->assertStatus(422)->assertJsonPath('code', 'device_token_required');
@@ -314,7 +318,7 @@ class PublicReservasHoldsTest extends TestCase
         $id = ReservaWeb::first()->id;
 
         $this->getJson($this->url("/{$token}", $otro), $this->headers(self::DEVICE, null))->assertNotFound()->assertJsonPath('code', 'not_found');
-        $this->getJson($this->url('/' . str_repeat('z', 40)), $this->headers(self::DEVICE, null))->assertNotFound()->assertJsonPath('code', 'not_found');
+        $this->getJson($this->url('/'.str_repeat('z', 40)), $this->headers(self::DEVICE, null))->assertNotFound()->assertJsonPath('code', 'not_found');
         $this->getJson($this->url("/{$id}"), $this->headers(self::DEVICE, null))->assertNotFound()->assertJsonPath('code', 'not_found');
     }
 
@@ -338,7 +342,7 @@ class PublicReservasHoldsTest extends TestCase
         }
 
         // Las lecturas de disponibilidad no dependen del flag.
-        $this->getJson("/api/public/{$this->user->slug}/disponibilidad?fecha=" . self::FECHA . "&servicio_ids[]={$this->servicio->id}")->assertOk();
+        $this->getJson("/api/public/{$this->user->slug}/disponibilidad?fecha=".self::FECHA."&servicio_ids[]={$this->servicio->id}")->assertOk();
     }
 
     public function test_la_ruta_vieja_post_reservas_ya_no_existe(): void
@@ -415,7 +419,7 @@ class PublicReservasHoldsTest extends TestCase
     {
         $lineas = [];
         Log::listen(function ($m) use (&$lineas) {
-            $lineas[] = $m->message . ' ' . json_encode($m->context);
+            $lineas[] = $m->message.' '.json_encode($m->context);
         });
 
         $token = $this->crearHold();

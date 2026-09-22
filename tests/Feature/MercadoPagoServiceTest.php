@@ -15,9 +15,9 @@ use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 /**
- * Crea (o reusa) la preferencia de Checkout Pro de Mercado Pago para cobrar
- * la seña, con el access_token de la cuenta del NEGOCIO (fase 1: cada negocio
- * con su propia cuenta MP, sin OAuth ni app de Turnetto).
+ * Crea (o reusa) la order de Checkout Pro de Mercado Pago (Orders API) para
+ * cobrar la seña, con el access_token de la cuenta del NEGOCIO (fase 1: cada
+ * negocio con su propia cuenta MP, sin OAuth ni app de Turnetto).
  */
 class MercadoPagoServiceTest extends TestCase
 {
@@ -55,9 +55,9 @@ class MercadoPagoServiceTest extends TestCase
 
     private function fakeMp(array $respuesta = [], int $status = 201): void
     {
-        Http::fake(['api.mercadopago.com/checkout/preferences' => Http::response(array_merge([
-            'id' => 'PREF-123',
-            'init_point' => 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=PREF-123',
+        Http::fake(['api.mercadopago.com/v1/orders' => Http::response(array_merge([
+            'id' => 'ORDER-123',
+            'checkout_url' => 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=ORDER-123',
         ], $respuesta), $status)]);
     }
 
@@ -101,20 +101,48 @@ class MercadoPagoServiceTest extends TestCase
 
         $pago = app(MercadoPagoService::class)->crearOReusarPreferencia($user, $reserva);
 
-        $this->assertSame('PREF-123', $pago->mp_preference_id);
-        $this->assertSame('https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=PREF-123', $pago->init_point);
+        $this->assertSame('ORDER-123', $pago->mp_preference_id);
+        $this->assertSame('https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=ORDER-123', $pago->init_point);
         $this->assertSame('pendiente', $pago->estado);
         $this->assertSame(5000.0, (float) $pago->monto);
 
         Http::assertSent(function (HttpRequest $r) use ($reserva) {
             return $r->hasHeader('Authorization', 'Bearer APP_USR-token-de-natalia')
+                && $r['type'] === 'online'
+                && $r['total_amount'] === '5000.00'
                 && $r['external_reference'] === $reserva->public_token
-                && $r['items'][0]['unit_price'] === 5000.0
-                && $r['items'][0]['currency_id'] === 'ARS';
+                && $r['items'][0]['unit_price'] === '5000.00';
         });
     }
 
-    public function test_usa_reales_para_un_negocio_en_portugues(): void
+    public function test_usa_processing_mode_manual_unico_valor_valido_para_checkout_pro(): void
+    {
+        $user = $this->negocio();
+        $this->conCredenciales($user);
+        $reserva = $this->reserva($user);
+        $this->fakeMp();
+
+        app(MercadoPagoService::class)->crearOReusarPreferencia($user, $reserva);
+
+        Http::assertSent(fn (HttpRequest $r) => $r['processing_mode'] === 'manual');
+    }
+
+    public function test_agrega_un_idempotency_key_estable_por_reserva(): void
+    {
+        $user = $this->negocio();
+        $this->conCredenciales($user);
+        $reserva = $this->reserva($user);
+        $this->fakeMp();
+
+        app(MercadoPagoService::class)->crearOReusarPreferencia($user, $reserva);
+
+        Http::assertSent(fn (HttpRequest $r) => $r->hasHeader('X-Idempotency-Key', "reserva-{$reserva->public_token}"));
+    }
+
+    // Orders API no acepta currency_id por request: la moneda la determina la
+    // cuenta de MP conectada (su pais), no algo que el negocio elija. Antes
+    // de esta migracion se armaba a mano segun el locale del negocio.
+    public function test_no_envia_currency_id_la_moneda_la_define_la_cuenta_de_mp(): void
     {
         $user = $this->negocio(['locale' => 'pt-BR']);
         $this->conCredenciales($user);
@@ -123,7 +151,7 @@ class MercadoPagoServiceTest extends TestCase
 
         app(MercadoPagoService::class)->crearOReusarPreferencia($user, $reserva);
 
-        Http::assertSent(fn (HttpRequest $r) => $r['items'][0]['currency_id'] === 'BRL');
+        Http::assertSent(fn (HttpRequest $r) => ! isset($r['items'][0]['currency_id']));
     }
 
     public function test_un_reintento_reusa_la_preferencia_pendiente_sin_llamar_a_mp_de_nuevo(): void
@@ -179,7 +207,7 @@ class MercadoPagoServiceTest extends TestCase
 
         app(MercadoPagoService::class)->crearOReusarPreferencia($user, $reserva);
 
-        Http::assertSent(fn (HttpRequest $r) => $r['payment_methods']['excluded_payment_types'] === [['id' => 'ticket']]);
+        Http::assertSent(fn (HttpRequest $r) => $r['config']['payment_method']['not_allowed_types'] === ['ticket']);
     }
 
     public function test_si_mp_responde_con_error_lanza_mp_error_y_no_guarda_nada(): void
@@ -199,17 +227,42 @@ class MercadoPagoServiceTest extends TestCase
         $this->assertSame(0, PagoSena::count());
     }
 
-    public function test_la_notification_url_usa_el_ruteo_propio_del_negocio(): void
+    // Orders API configura la URL de notificacion UNA VEZ por aplicacion de
+    // MP (panel developers), no por request — a diferencia de Preferences,
+    // que la aceptaba en el cuerpo de cada llamada. El ruteo propio del
+    // negocio (UserMpCredential::webhook_ruteo) sigue existiendo igual, solo
+    // que ahora se configura ahi en vez de mandarse aca.
+    public function test_no_envia_notification_url_por_request(): void
     {
         $user = $this->negocio();
-        $credencial = $this->conCredenciales($user);
+        $this->conCredenciales($user);
         $reserva = $this->reserva($user);
         $this->fakeMp();
 
         app(MercadoPagoService::class)->crearOReusarPreferencia($user, $reserva);
 
-        Http::assertSent(fn (HttpRequest $r) => $r['notification_url'] === config('app.url')."/api/webhooks/mercadopago/{$credencial->webhook_ruteo}"
-        );
+        Http::assertSent(fn (HttpRequest $r) => ! isset($r['notification_url']));
+    }
+
+    public function test_las_back_urls_apuntan_a_la_reserva_y_auto_return_es_approved(): void
+    {
+        $user = $this->negocio();
+        $this->conCredenciales($user);
+        $reserva = $this->reserva($user);
+        $this->fakeMp();
+
+        app(MercadoPagoService::class)->crearOReusarPreferencia($user, $reserva);
+
+        $esperada = rtrim((string) config('services.frontend_url'), '/')."/reservar/{$user->slug}/reserva/{$reserva->public_token}";
+
+        Http::assertSent(function (HttpRequest $r) use ($esperada) {
+            $online = $r['config']['online'];
+
+            return $online['success_url'] === $esperada
+                && $online['pending_url'] === $esperada
+                && $online['failure_url'] === $esperada
+                && $online['auto_return'] === 'approved';
+        });
     }
 
     public function test_el_external_reference_es_el_token_publico_no_el_id_interno(): void
