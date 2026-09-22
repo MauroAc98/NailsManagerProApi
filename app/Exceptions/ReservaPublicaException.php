@@ -75,6 +75,16 @@ class ReservaPublicaException extends RuntimeException
         return new self('device_token_required', 422, 'Falta el identificador del dispositivo.');
     }
 
+    public static function mpNoConectado(): self
+    {
+        return new self('mp_no_conectado', 503, 'Este negocio todavía no tiene Mercado Pago conectado.');
+    }
+
+    public static function mpError(): self
+    {
+        return new self('mp_error', 502, 'No pudimos generar el link de pago. Probá de nuevo en un momento.');
+    }
+
     public function render(): JsonResponse
     {
         $body = ['message' => $this->getMessage(), 'code' => $this->codigo];

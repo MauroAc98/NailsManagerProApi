@@ -6,10 +6,12 @@ use App\Exceptions\ReservaPublicaException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\CrearHoldRequest;
 use App\Http\Requests\GuardarDatosReservaRequest;
+use App\Models\PagoSena;
 use App\Models\ReservaWeb;
 use App\Models\User;
 use App\Services\Reservas\ChallengeVerifier;
 use App\Services\Reservas\HoldService;
+use App\Services\Reservas\MercadoPagoService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -26,6 +28,7 @@ class ReservaPublicaController extends Controller
     public function __construct(
         private HoldService $holds,
         private ChallengeVerifier $challenge,
+        private MercadoPagoService $mercadoPago,
     ) {
     }
 
@@ -84,14 +87,15 @@ class ReservaPublicaController extends Controller
         return response()->json($this->payloadBasico($reserva));
     }
 
-    // POST /api/public/{slug}/reservas/{token}/pago  (STUB de checkout hasta la slice de MP)
+    // POST /api/public/{slug}/reservas/{token}/pago
     public function pago(Request $request, string $slug, string $token): JsonResponse
     {
         $user = $this->salon($slug);
         $reserva = $this->holds->iniciarPago($user, $this->token($token), Carbon::now())->reserva;
+        $pago = $this->mercadoPago->crearOReusarPreferencia($user, $reserva);
 
         return response()->json($this->payloadBasico($reserva) + [
-            'checkout_url' => $this->checkoutUrl($user, $reserva),
+            'checkout_url' => $pago->init_point,
         ]);
     }
 
@@ -112,7 +116,7 @@ class ReservaPublicaController extends Controller
 
         $payload = $this->payloadBasico($reserva);
         if ($estado === 'pending_payment') {
-            $payload['checkout_url'] = $this->checkoutUrl($user, $reserva);
+            $payload['checkout_url'] = $this->checkoutUrl($reserva);
         }
         $payload['resumen'] = [
             'servicio_ids' => array_map('intval', $reserva->servicio_ids ?? []),
@@ -202,10 +206,12 @@ class ReservaPublicaController extends Controller
         return $m == floor($m) ? (int) $m : $m;
     }
 
-    private function checkoutUrl(User $user, ReservaWeb $r): string
+    /** Link de la preferencia de MP ya creada para esta reserva (ver MercadoPagoService). */
+    private function checkoutUrl(ReservaWeb $r): ?string
     {
-        $base = rtrim((string) config('services.frontend_url'), '/');
-
-        return "{$base}/reservar/{$user->slug}/reserva/{$r->public_token}?stub=1";
+        return PagoSena::where('reserva_web_id', $r->id)
+            ->whereIn('estado', ['pendiente', 'aprobado'])
+            ->latest('id')
+            ->value('init_point');
     }
 }

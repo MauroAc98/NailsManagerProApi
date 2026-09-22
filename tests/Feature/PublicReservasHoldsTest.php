@@ -6,6 +6,7 @@ use App\Models\Profesional;
 use App\Models\ReservaWeb;
 use App\Models\Servicio;
 use App\Models\User;
+use App\Models\UserMpCredential;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
@@ -31,12 +32,18 @@ class PublicReservasHoldsTest extends TestCase
         Carbon::setTestNow(Carbon::parse('2099-06-01 09:00:00'));
         config(['reservas.creacion_habilitada' => true, 'services.frontend_url' => 'https://app.test']);
 
-        $this->user = $this->crearSalon();
+        $this->user = $this->crearSalon(['sena_monto' => 5000]);
         $this->ana = $this->crearProfesional($this->user, 'Ana');
         $this->servicio = $this->crearServicio($this->user, 'S', 60, true, $this->ana);
         foreach (['09:00', '10:00', '11:00', '12:00', '13:00', '14:00'] as $h) {
             $this->crearSlot($this->user, $this->ana, $h);
         }
+
+        UserMpCredential::create(['user_id' => $this->user->id, 'mp_access_token' => 'APP_USR-token-de-test', 'mp_user_id' => 'MP-1']);
+        Http::fake(['api.mercadopago.com/checkout/preferences' => Http::response([
+            'id' => 'PREF-TEST',
+            'init_point' => 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=PREF-TEST',
+        ], 201)]);
     }
 
     protected function tearDown(): void
@@ -214,7 +221,7 @@ class PublicReservasHoldsTest extends TestCase
             'token' => $token,
             'estado' => 'pending_payment',
             'expira_en_ms' => (Carbon::now()->timestamp + 900) * 1000,
-            'checkout_url' => "https://app.test/reservar/{$this->user->slug}/reserva/{$token}?stub=1",
+            'checkout_url' => 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=PREF-TEST',
         ]);
 
         Carbon::setTestNow(Carbon::now()->addSeconds(120));
@@ -284,7 +291,7 @@ class PublicReservasHoldsTest extends TestCase
         $this->postJson($this->url("/{$token}/pago"), [], $this->headers(self::DEVICE, null));
 
         $this->getJson($this->url("/{$token}"), $this->headers(self::DEVICE, null))
-            ->assertOk()->assertJsonPath('estado', 'pending_payment')->assertJsonPath('checkout_url', "https://app.test/reservar/{$this->user->slug}/reserva/{$token}?stub=1");
+            ->assertOk()->assertJsonPath('estado', 'pending_payment')->assertJsonPath('checkout_url', 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=PREF-TEST');
 
         ReservaWeb::first()->update(['estado' => 'accepted']);
         $this->getJson($this->url("/{$token}"), $this->headers(self::DEVICE, null))->assertJsonPath('estado', 'confirmed');
