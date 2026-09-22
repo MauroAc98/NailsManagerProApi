@@ -7,8 +7,8 @@ use App\Mail\ResetCodeMail;
 use App\Models\Setting;
 use App\Models\User;
 use App\Support\BloqueoLogin;
-use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -28,7 +28,7 @@ class AuthController extends Controller
     public function login(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'email'    => 'required|email',
+            'email' => 'required|email',
             'password' => 'required|string',
         ]);
 
@@ -46,7 +46,7 @@ class AuthController extends Controller
 
         $user = User::where('email', $email)->first();
 
-        if (!$user || !Hash::check($data['password'], $user->password)) {
+        if (! $user || ! Hash::check($data['password'], $user->password)) {
             $bloqueo->registrarFallo($email, $request->ip());
 
             throw ValidationException::withMessages([
@@ -59,8 +59,8 @@ class AuthController extends Controller
         if ($user->debe_cambiar_password) {
             return response()->json([
                 'debe_cambiar_password' => true,
-                'email'                 => $user->email,
-                'message'               => 'Tenés que establecer una nueva contraseña antes de continuar.',
+                'email' => $user->email,
+                'message' => 'Tenés que establecer una nueva contraseña antes de continuar.',
             ], 200);
         }
 
@@ -72,7 +72,7 @@ class AuthController extends Controller
         $token = $user->createToken('app-mobile')->plainTextToken;
 
         return response()->json([
-            'user'  => $user,
+            'user' => $user,
             'token' => $token,
         ]);
     }
@@ -83,35 +83,35 @@ class AuthController extends Controller
     public function cambiarPasswordObligatorio(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'email'            => 'required|email',
-            'password_actual'  => 'required|string',
-            'password'         => 'required|string|min:8|confirmed',
+            'email' => 'required|email',
+            'password_actual' => 'required|string',
+            'password' => 'required|string|min:8|confirmed',
         ]);
 
         $user = User::where('email', strtolower($data['email']))->first();
 
-        if (!$user || !Hash::check($data['password_actual'], $user->password)) {
+        if (! $user || ! Hash::check($data['password_actual'], $user->password)) {
             throw ValidationException::withMessages([
                 'password_actual' => ['La contraseña actual es incorrecta.'],
             ]);
         }
 
-        if (!$user->debe_cambiar_password) {
+        if (! $user->debe_cambiar_password) {
             return response()->json([
                 'message' => 'Esta cuenta no requiere cambio de contraseña obligatorio.',
             ], 422);
         }
 
         $user->update([
-            'password'               => bcrypt($data['password']),
-            'debe_cambiar_password'  => false,
+            'password' => bcrypt($data['password']),
+            'debe_cambiar_password' => false,
         ]);
 
         $user->tokens()->delete();
         $token = $user->createToken('app-mobile')->plainTextToken;
 
         return response()->json([
-            'user'  => $user,
+            'user' => $user,
             'token' => $token,
         ]);
     }
@@ -144,37 +144,37 @@ class AuthController extends Controller
         $user = $request->user();
 
         $data = $request->validate([
-            'name'                    => 'sometimes|string|max:255',
-            'telefono'                => 'sometimes|nullable|string|max:30',
-            'direccion'               => 'sometimes|nullable|string|max:255',
+            'name' => 'sometimes|string|max:255',
+            'telefono' => 'sometimes|nullable|string|max:30',
+            'direccion' => 'sometimes|nullable|string|max:255',
             // required_with solo no alcanza: con nullable, {latitud: -27.4,
             // longitud: null} pasa esta regla porque la key longitud SÍ está
             // presente. El guard explícito de abajo cubre ese caso.
-            'latitud'                 => 'sometimes|nullable|numeric|between:-90,90|required_with:longitud',
-            'longitud'                => 'sometimes|nullable|numeric|between:-180,180|required_with:latitud',
+            'latitud' => 'sometimes|nullable|numeric|between:-90,90|required_with:longitud',
+            'longitud' => 'sometimes|nullable|numeric|between:-180,180|required_with:latitud',
             'recordatorio_automatico' => 'sometimes|boolean',
             'confirmacion_automatica' => 'sometimes|boolean',
-            'hora_recordatorio'       => 'sometimes|string|in:18:00,19:00,20:00,21:00,22:00',
-            'sena_monto'              => 'sometimes|nullable|numeric|min:0',
-            'whatsapp_pide_sena'      => 'sometimes|boolean',
+            'hora_recordatorio' => 'sometimes|string|in:18:00,19:00,20:00,21:00,22:00',
+            'sena_monto' => 'sometimes|nullable|numeric|min:0',
+            'whatsapp_pide_sena' => 'sometimes|boolean',
             // not_regex: los datos bancarios viajan como parámetros de la
             // plantilla Meta reserva_turno_sena — un salto de línea o tab
             // hace que Meta rechace el envío completo.
-            'whatsapp_sena_titular'   => 'sometimes|nullable|string|max:120|not_regex:/[\r\n\t]/',
-            'whatsapp_sena_entidad'   => 'sometimes|nullable|string|max:120|not_regex:/[\r\n\t]/',
-            'whatsapp_sena_alias'     => 'sometimes|nullable|string|max:60|not_regex:/[\r\n\t]/',
-            'whatsapp_sena_cbu'       => 'sometimes|nullable|string|max:34|not_regex:/[\r\n\t]/',
-            'fcm_token'               => 'sometimes|nullable|string',
-            'password'                => 'sometimes|string|min:8|confirmed',
-            'locale'                  => 'sometimes|nullable|in:es,pt-BR,en',
+            'whatsapp_sena_titular' => 'sometimes|nullable|string|max:120|not_regex:/[\r\n\t]/',
+            'whatsapp_sena_entidad' => 'sometimes|nullable|string|max:120|not_regex:/[\r\n\t]/',
+            'whatsapp_sena_alias' => 'sometimes|nullable|string|max:60|not_regex:/[\r\n\t]/',
+            'whatsapp_sena_cbu' => 'sometimes|nullable|string|max:34|not_regex:/[\r\n\t]/',
+            'fcm_token' => 'sometimes|nullable|string',
+            'password' => 'sometimes|string|min:8|confirmed',
+            'locale' => 'sometimes|nullable|in:es,pt-BR,en',
             // Categorías personalizadas de gastos / ingresos. Lista completa
             // (reemplaza el set actual del usuario), 1..30 ítems, cada nombre
             // string no vacío de hasta 40 chars y sin repetir. regex:/\S/
             // rechaza strings de puro espacio que trim() dejaría vacíos.
-            'categorias_gasto'        => 'sometimes|array|min:1|max:30',
-            'categorias_gasto.*'      => 'required|string|max:40|distinct|regex:/\S/',
-            'categorias_ingreso'      => 'sometimes|array|min:1|max:30',
-            'categorias_ingreso.*'    => 'required|string|max:40|distinct|regex:/\S/',
+            'categorias_gasto' => 'sometimes|array|min:1|max:30',
+            'categorias_gasto.*' => 'required|string|max:40|distinct|regex:/\S/',
+            'categorias_ingreso' => 'sometimes|array|min:1|max:30',
+            'categorias_ingreso.*' => 'required|string|max:40|distinct|regex:/\S/',
         ]);
 
         if (isset($data['password'])) {
@@ -273,6 +273,18 @@ class AuthController extends Controller
         if ($tocaSena) {
             $valorFinal = fn (string $campo) => array_key_exists($campo, $data) ? $data[$campo] : $user->{$campo};
 
+            // Guard de Mercado Pago: con la cuenta conectada, la reserva
+            // online depende de esta seña para poder cobrar (ver
+            // PublicController::info -> pago_habilitado). Vaciarla sin darse
+            // cuenta dejaría el flujo bloqueado para cualquier clienta nueva
+            // sin ningún aviso — se corta acá antes de guardar.
+            $montoFinalMp = $valorFinal('sena_monto');
+            if ((! is_numeric($montoFinalMp) || (float) $montoFinalMp <= 0) && $user->mpCredentials !== null) {
+                throw ValidationException::withMessages([
+                    'sena_monto' => ['No podés vaciar la seña: tenés Mercado Pago conectado y la reserva online la necesita para cobrar.'],
+                ]);
+            }
+
             if ($valorFinal('whatsapp_pide_sena')) {
                 $errores = [];
 
@@ -336,7 +348,7 @@ class AuthController extends Controller
         // sirviendo en vez de quedar el usuario sin logo y sin forma de
         // saber que la subida no se completó.
         $path = $request->file('imagen')->store('logos', 'public');
-        if (!$path) {
+        if (! $path) {
             return response()->json(['message' => 'No se pudo guardar el logo. Intentá de nuevo.'], 500);
         }
 
@@ -368,7 +380,7 @@ class AuthController extends Controller
             DB::table('password_reset_tokens')->updateOrInsert(
                 ['email' => $email],
                 [
-                    'token'      => Hash::make($code),
+                    'token' => Hash::make($code),
                     'created_at' => now(),
                 ],
             );
@@ -386,7 +398,7 @@ class AuthController extends Controller
 
     private static function claveIntentosReset(string $email): string
     {
-        return 'reset-password-intentos:' . sha1($email);
+        return 'reset-password-intentos:'.sha1($email);
     }
 
     // ─────────────────────────────────────────────
@@ -395,8 +407,8 @@ class AuthController extends Controller
     public function resetPassword(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'email'    => 'required|email',
-            'code'     => 'required|string',
+            'email' => 'required|email',
+            'code' => 'required|string',
             'password' => 'required|string|min:8|confirmed',
         ]);
 
@@ -408,13 +420,13 @@ class AuthController extends Controller
 
         // Sin registro (email inexistente o codigo ya invalidado) se responde
         // igual que un codigo incorrecto, sin revelar si el email existe.
-        if (!$record) {
+        if (! $record) {
             throw ValidationException::withMessages([
                 'code' => ['El código ingresado es incorrecto.'],
             ]);
         }
 
-        if (!Hash::check($data['code'], $record->token)) {
+        if (! Hash::check($data['code'], $record->token)) {
             // El codigo tiene 1M de valores posibles: tras 5 fallos se invalida
             // y hay que pedir uno nuevo, para que no se pueda adivinar por
             // fuerza bruta repartida entre muchas IPs.
@@ -439,7 +451,7 @@ class AuthController extends Controller
 
         $user = User::where('email', $email)->first();
         $user->update([
-            'password'              => bcrypt($data['password']),
+            'password' => bcrypt($data['password']),
             'debe_cambiar_password' => false,
         ]);
 
@@ -461,23 +473,23 @@ class AuthController extends Controller
 
         if ($user->is_exempt) {
             return response()->json([
-                'status'    => 'ACTIVO',
+                'status' => 'ACTIVO',
                 'is_exempt' => true,
-                'ends_at'   => null,
+                'ends_at' => null,
                 'days_left' => null,
-                'code'      => null,
+                'code' => null,
             ]);
         }
 
         $subscription = $user->subscription;
 
-        if (!$subscription) {
+        if (! $subscription) {
             return response()->json([
-                'status'    => 'VENCIDO',
+                'status' => 'VENCIDO',
                 'is_exempt' => false,
-                'ends_at'   => null,
+                'ends_at' => null,
                 'days_left' => 0,
-                'code'      => 'NO_SUBSCRIPTION',
+                'code' => 'NO_SUBSCRIPTION',
             ]);
         }
 
@@ -489,19 +501,19 @@ class AuthController extends Controller
         // mismo vocabulario que CheckSubscription y es puramente aditivo —
         // el frontend sigue gateando el bloqueo por `status !== 'ACTIVO'`.
         $suspendida = $subscription->status === 'SUSPENDIDO';
-        $vencida    = $subscription->ends_at <= now();
+        $vencida = $subscription->ends_at <= now();
 
         return response()->json([
-            'status'    => $suspendida
+            'status' => $suspendida
                 ? 'SUSPENDIDO'
                 : ($subscription->ends_at > now() ? 'ACTIVO' : 'VENCIDO'),
             'is_exempt' => false,
-            'ends_at'   => $subscription->ends_at,
+            'ends_at' => $subscription->ends_at,
             'days_left' => $daysLeft,
-            'code'      => match (true) {
+            'code' => match (true) {
                 $suspendida => 'SUBSCRIPTION_SUSPENDED',
-                $vencida    => 'SUBSCRIPTION_EXPIRED',
-                default     => null,
+                $vencida => 'SUBSCRIPTION_EXPIRED',
+                default => null,
             },
         ]);
     }
@@ -513,8 +525,8 @@ class AuthController extends Controller
     public function supportInfo(): JsonResponse
     {
         return response()->json([
-            'whatsapp'                  => Setting::get('support_whatsapp'),
-            'email'                     => Setting::get('support_email'),
+            'whatsapp' => Setting::get('support_whatsapp'),
+            'email' => Setting::get('support_email'),
             'subscription_warning_days' => (int) Setting::get('subscription_warning_days'),
         ]);
     }

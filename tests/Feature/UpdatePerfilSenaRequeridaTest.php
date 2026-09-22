@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Models\UserMpCredential;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -274,6 +275,56 @@ class UpdatePerfilSenaRequeridaTest extends TestCase
         $this->assertSame('Kimberley Faustino', $fresh->whatsapp_sena_titular);
         $this->assertSame('Kim1710', $fresh->whatsapp_sena_alias);
         $this->assertSame('5000.00', (string) $fresh->sena_monto);
+    }
+
+    // Guard de Mercado Pago (reserva online): vaciar la seña con la cuenta
+    // conectada dejaría el flujo de pago roto para cualquier clienta nueva
+    // sin que el negocio se entere.
+    public function test_vaciar_la_sena_con_mp_conectado_es_rechazado(): void
+    {
+        $user = $this->userConSenaCompleta();
+        UserMpCredential::create(['user_id' => $user->id, 'mp_access_token' => 'APP_USR-token', 'mp_user_id' => 'MP-1']);
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson('/api/perfil', ['sena_monto' => null])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('sena_monto');
+
+        $this->assertSame('5000.00', (string) $user->fresh()->sena_monto);
+    }
+
+    public function test_poner_la_sena_en_cero_con_mp_conectado_es_rechazado(): void
+    {
+        $user = $this->userConSenaCompleta();
+        UserMpCredential::create(['user_id' => $user->id, 'mp_access_token' => 'APP_USR-token', 'mp_user_id' => 'MP-1']);
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson('/api/perfil', ['sena_monto' => 0])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('sena_monto');
+    }
+
+    public function test_vaciar_la_sena_sin_mp_conectado_sigue_permitido(): void
+    {
+        $user = $this->userConSenaCompleta();
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson('/api/perfil', ['whatsapp_pide_sena' => false, 'sena_monto' => null])
+            ->assertOk();
+
+        $this->assertNull($user->fresh()->sena_monto);
+    }
+
+    public function test_bajar_la_sena_sin_vaciarla_con_mp_conectado_sigue_permitido(): void
+    {
+        $user = $this->userConSenaCompleta();
+        UserMpCredential::create(['user_id' => $user->id, 'mp_access_token' => 'APP_USR-token', 'mp_user_id' => 'MP-1']);
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson('/api/perfil', ['sena_monto' => 2000])
+            ->assertOk();
+
+        $this->assertSame('2000.00', (string) $user->fresh()->sena_monto);
     }
 
     public function test_editar_un_campo_no_relacionado_no_dispara_el_guard_de_sena(): void
