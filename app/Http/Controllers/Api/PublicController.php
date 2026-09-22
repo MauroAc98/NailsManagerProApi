@@ -3,14 +3,15 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Profesional;
 use App\Models\CategoriaServicio;
+use App\Models\Profesional;
 use App\Models\Servicio;
 use App\Models\User;
 use App\Services\Reservas\DisponibilidadService;
-use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 
 class PublicController extends Controller
 {
@@ -49,10 +50,14 @@ class PublicController extends Controller
             ->values();
 
         return response()->json([
-            'nombre'        => $user->name,
-            'logo_url'      => $user->logo_url,
-            'direccion'     => $user->direccion,
+            'nombre' => $user->name,
+            'logo_url' => $user->logo_url,
+            'direccion' => $user->direccion,
             'profesionales' => $profesionales,
+            // Fase 1 de Mercado Pago: sin esto conectado, el negocio no puede
+            // cobrar la sena y la reserva online no tiene sentido de arrancar
+            // (el frontend bloquea el flujo entero con este campo en falso).
+            'pago_habilitado' => $user->sena_monto > 0 && $user->mpCredentials !== null,
         ]);
     }
 
@@ -71,7 +76,7 @@ class PublicController extends Controller
         $user = User::where('slug', $slug)->firstOrFail();
 
         return response()->json([
-            'nombre'   => $user->name,
+            'nombre' => $user->name,
             'logo_url' => $user->logo_url,
         ]);
     }
@@ -108,16 +113,16 @@ class PublicController extends Controller
                 fn ($a, $b) => $a->id <=> $b->id,
             ])
             ->map(fn ($s) => [
-                'id'               => $s->id,
-                'nombre'           => $s->nombre,
+                'id' => $s->id,
+                'nombre' => $s->nombre,
                 'duracion_minutos' => (int) $s->duracion_minutos,
-                'precio'           => $s->precio + 0,
-                'categoria'        => isset($categorias[$s->categoria_id])
+                'precio' => $s->precio + 0,
+                'categoria' => isset($categorias[$s->categoria_id])
                     ? ['id' => $s->categoria_id, 'nombre' => $categorias[$s->categoria_id]]
                     : null,
                 // Solo URLs planas, ordenadas — nunca el 'id' de la fila ni
                 // la 'path' relativa del disco (ver ServicioFoto::url).
-                'fotos'            => $s->fotos->pluck('url')->values(),
+                'fotos' => $s->fotos->pluck('url')->values(),
             ])
             ->values();
 
@@ -131,8 +136,8 @@ class PublicController extends Controller
     public function disponibilidad(Request $request, string $slug, DisponibilidadService $disponibilidad): JsonResponse
     {
         $data = $request->validate([
-            'fecha'          => 'required|date_format:Y-m-d|after_or_equal:today',
-            'servicio_ids'   => 'required|array|min:1',
+            'fecha' => 'required|date_format:Y-m-d|after_or_equal:today',
+            'servicio_ids' => 'required|array|min:1',
             'servicio_ids.*' => 'integer',
             'profesional_id' => 'nullable|integer',
         ]);
@@ -155,9 +160,9 @@ class PublicController extends Controller
         );
 
         return response()->json([
-            'fecha'                  => $data['fecha'],
+            'fecha' => $data['fecha'],
             'duracion_total_minutos' => (int) $servicios->sum('duracion_minutos'),
-            'slots'                  => $slots,
+            'slots' => $slots,
         ]);
     }
 
@@ -166,7 +171,7 @@ class PublicController extends Controller
      * inactiva; 422 si no ofrece todos los servicios). Comun a los dos
      * endpoints de disponibilidad.
      *
-     * @return array{0: \Illuminate\Support\Collection, 1: ?Profesional}|JsonResponse
+     * @return array{0: Collection, 1: ?Profesional}|JsonResponse
      */
     private function resolverServiciosYProfesional(User $user, array $data): array|JsonResponse
     {
@@ -181,7 +186,7 @@ class PublicController extends Controller
         }
 
         $profesional = null;
-        if (!empty($data['profesional_id'])) {
+        if (! empty($data['profesional_id'])) {
             $profesional = Profesional::resolverParaUsuario($user, (int) $data['profesional_id']);
             $ofrecidos = $profesional->servicios()->pluck('servicios.id')->all();
 
@@ -200,9 +205,9 @@ class PublicController extends Controller
     public function disponibilidadDias(Request $request, string $slug, DisponibilidadService $disponibilidad): JsonResponse
     {
         $data = $request->validate([
-            'desde'          => 'required|date_format:Y-m-d',
-            'hasta'          => 'required|date_format:Y-m-d|after_or_equal:desde',
-            'servicio_ids'   => 'required|array|min:1',
+            'desde' => 'required|date_format:Y-m-d',
+            'hasta' => 'required|date_format:Y-m-d|after_or_equal:desde',
+            'servicio_ids' => 'required|array|min:1',
             'servicio_ids.*' => 'integer',
             'profesional_id' => 'nullable|integer',
         ]);
@@ -210,7 +215,7 @@ class PublicController extends Controller
         $desde = Carbon::parse($data['desde'])->startOfDay();
         $hasta = Carbon::parse($data['hasta'])->startOfDay();
         if ($desde->diffInDays($hasta) + 1 > self::MAX_DIAS_RANGO) {
-            return response()->json(['message' => 'El rango no puede superar ' . self::MAX_DIAS_RANGO . ' días.'], 422);
+            return response()->json(['message' => 'El rango no puede superar '.self::MAX_DIAS_RANGO.' días.'], 422);
         }
 
         $user = $this->getProfesional($slug);
