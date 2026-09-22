@@ -129,6 +129,50 @@ class MercadoPagoSincronizarPagoTest extends TestCase
         $this->assertSame('rechazado', $this->pago->fresh()->estado);
     }
 
+    // Diagnostico de reclamos ("pagué y no me confirmó"): guarda el motivo
+    // puntual del rechazo y el medio de pago usado, sin tener que ir a
+    // buscarlo a mano al dashboard de MP con el payment_id.
+    public function test_pago_rechazado_guarda_el_motivo_y_el_medio_de_pago(): void
+    {
+        $datos = $this->datosPago('rejected', 5000, [
+            'status_detail' => 'cc_rejected_insufficient_amount',
+            'payment_method_id' => 'visa',
+            'payment_type_id' => 'credit_card',
+        ]);
+
+        app(MercadoPagoService::class)->sincronizarPago($this->pago, $this->reserva, $datos);
+
+        $fresco = $this->pago->fresh();
+        $this->assertSame('cc_rejected_insufficient_amount', $fresco->status_detail);
+        $this->assertSame('visa', $fresco->payment_method_id);
+        $this->assertSame('credit_card', $fresco->payment_type_id);
+    }
+
+    public function test_pago_aprobado_tambien_guarda_el_medio_de_pago(): void
+    {
+        $datos = $this->datosPago('approved', 5000, [
+            'status_detail' => 'accredited',
+            'payment_method_id' => 'account_money',
+            'payment_type_id' => 'account_money',
+        ]);
+
+        app(MercadoPagoService::class)->sincronizarPago($this->pago, $this->reserva, $datos);
+
+        $fresco = $this->pago->fresh();
+        $this->assertSame('accredited', $fresco->status_detail);
+        $this->assertSame('account_money', $fresco->payment_method_id);
+    }
+
+    public function test_sin_status_detail_ni_medio_de_pago_en_la_respuesta_queda_null(): void
+    {
+        app(MercadoPagoService::class)->sincronizarPago($this->pago, $this->reserva, $this->datosPago('rejected'));
+
+        $fresco = $this->pago->fresh();
+        $this->assertNull($fresco->status_detail);
+        $this->assertNull($fresco->payment_method_id);
+        $this->assertNull($fresco->payment_type_id);
+    }
+
     public function test_consultar_pago_devuelve_los_datos_reales(): void
     {
         Http::fake(['api.mercadopago.com/v1/payments/PAY-1*' => Http::response($this->datosPago('approved'), 200)]);

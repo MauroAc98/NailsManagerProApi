@@ -204,7 +204,16 @@ class MercadoPagoService
             }
         }
 
-        $pagoSena->update(['mp_payment_id' => $paymentId, 'estado' => $estado]);
+        $pagoSena->update([
+            'mp_payment_id' => $paymentId,
+            'estado' => $estado,
+            // Diagnostico de reclamos ("pagué y no me confirmó"): sin esto,
+            // averiguar por que un pago se rechazo requeria ir a buscarlo a
+            // mano al dashboard de MP con el payment_id.
+            'status_detail' => $datosPago['status_detail'] ?? null,
+            'payment_method_id' => $datosPago['payment_method_id'] ?? null,
+            'payment_type_id' => $datosPago['payment_type_id'] ?? null,
+        ]);
 
         if ($estado !== 'aprobado') {
             return;

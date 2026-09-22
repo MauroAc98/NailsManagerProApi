@@ -19,6 +19,9 @@ class PagoSena extends Model
         'init_point',
         'monto',
         'estado',
+        'status_detail',
+        'payment_method_id',
+        'payment_type_id',
     ];
 
     protected function casts(): array
