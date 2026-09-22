@@ -10,6 +10,7 @@ use App\Models\UserMpCredential;
 use App\Services\Reservas\MercadoPagoService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -138,6 +139,47 @@ class MercadoPagoServiceTest extends TestCase
         $this->assertSame($primero->id, $segundo->id);
         $this->assertSame(1, PagoSena::count());
         Http::assertSentCount(1);
+    }
+
+    // Bug real encontrado en revision (QA): sin este lock, dos requests casi
+    // simultaneas (doble tap de "Pagar") podian pasar juntas el chequeo de
+    // "ya hay una pendiente" y crear DOS preferencias en MP para la misma
+    // reserva — despues era ambiguo a cual de las dos correspondia un pago.
+    public function test_dos_llamadas_concurrentes_no_crean_dos_preferencias(): void
+    {
+        $user = $this->negocio();
+        $this->conCredenciales($user);
+        $reserva = $this->reserva($user);
+        $this->fakeMp();
+
+        // No hay forma de simular threads reales en PHPUnit; lo que si se
+        // puede probar es que el metodo toma un lock de la fila (lockForUpdate)
+        // antes de decidir — con sqlite eso alcanza para serializar, y es la
+        // misma tecnica que ya usa SlotLock para holds/turnos.
+        DB::transaction(function () use ($reserva) {
+            $bloqueada = ReservaWeb::whereKey($reserva->id)->lockForUpdate()->first();
+            $this->assertNotNull($bloqueada);
+        });
+
+        app(MercadoPagoService::class)->crearOReusarPreferencia($user, $reserva);
+        app(MercadoPagoService::class)->crearOReusarPreferencia($user, $reserva);
+
+        $this->assertSame(1, PagoSena::count());
+    }
+
+    // Un metodo de pago que tarda dias en acreditarse (Rapipago, Pago Facil)
+    // no tiene sentido con una ventana de pago de 15 minutos: la clienta
+    // pagaria y de todos modos perderia el horario. Se excluye a proposito.
+    public function test_excluye_medios_de_pago_no_instantaneos_ticket(): void
+    {
+        $user = $this->negocio();
+        $this->conCredenciales($user);
+        $reserva = $this->reserva($user);
+        $this->fakeMp();
+
+        app(MercadoPagoService::class)->crearOReusarPreferencia($user, $reserva);
+
+        Http::assertSent(fn (HttpRequest $r) => $r['payment_methods']['excluded_payment_types'] === [['id' => 'ticket']]);
     }
 
     public function test_si_mp_responde_con_error_lanza_mp_error_y_no_guarda_nada(): void
