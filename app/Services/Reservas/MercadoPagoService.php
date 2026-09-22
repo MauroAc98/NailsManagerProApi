@@ -57,7 +57,9 @@ class MercadoPagoService
                 'external_reference' => $reserva->public_token,
                 'back_urls' => ['success' => $volver, 'pending' => $volver, 'failure' => $volver],
                 'auto_return' => 'approved',
-                'notification_url' => rtrim((string) config('app.url'), '/').'/api/webhooks/mercadopago',
+                // Ruteo propio del negocio: ver comentario en la migracion
+                // add_webhook_ruteo_to_user_mp_credentials_table.
+                'notification_url' => rtrim((string) config('app.url'), '/')."/api/webhooks/mercadopago/{$credencial->webhook_ruteo}",
             ]);
 
         if (! $response->successful()) {

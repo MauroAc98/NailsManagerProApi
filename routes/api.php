@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ClienteController;
 use App\Http\Controllers\Api\SlotDisponibleController;
 use App\Http\Controllers\Api\TurnoController;
 use App\Http\Controllers\Api\ProfesionalController;
+use App\Http\Controllers\Api\MercadoPagoWebhookController;
 use App\Http\Controllers\Api\ReservaWebController;
 use App\Http\Controllers\Api\PublicController;
 use App\Http\Controllers\Api\ReservaPublicaController;
@@ -192,6 +193,10 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
 // Webhook Mercado Pago — sin auth, con firma HMAC
 // ─────────────────────────────────────────────
 Route::post('webhooks/mercadopago', [ReservaWebController::class, 'webhookMercadoPago']);
+
+// Webhook MP fase 1 (cada negocio con su propia cuenta): {ruteo} identifica
+// al negocio — ver UserMpCredential::webhook_ruteo y MercadoPagoWebhookController.
+Route::post('webhooks/mercadopago/{ruteo}', [MercadoPagoWebhookController::class, 'handle']);
 
 // ─────────────────────────────────────────────
 // Webhook WhatsApp Cloud API — sin secreto en la URL: Meta firma cada

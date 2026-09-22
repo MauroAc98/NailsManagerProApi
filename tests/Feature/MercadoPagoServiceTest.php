@@ -157,6 +157,19 @@ class MercadoPagoServiceTest extends TestCase
         $this->assertSame(0, PagoSena::count());
     }
 
+    public function test_la_notification_url_usa_el_ruteo_propio_del_negocio(): void
+    {
+        $user = $this->negocio();
+        $credencial = $this->conCredenciales($user);
+        $reserva = $this->reserva($user);
+        $this->fakeMp();
+
+        app(MercadoPagoService::class)->crearOReusarPreferencia($user, $reserva);
+
+        Http::assertSent(fn (HttpRequest $r) => $r['notification_url'] === config('app.url')."/api/webhooks/mercadopago/{$credencial->webhook_ruteo}"
+        );
+    }
+
     public function test_el_external_reference_es_el_token_publico_no_el_id_interno(): void
     {
         $user = $this->negocio();
