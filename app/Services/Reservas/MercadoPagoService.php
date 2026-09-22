@@ -6,6 +6,7 @@ use App\Exceptions\ReservaPublicaException;
 use App\Models\PagoSena;
 use App\Models\ReservaWeb;
 use App\Models\User;
+use App\Models\UserMpCredential;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -18,6 +19,8 @@ use Illuminate\Support\Facades\Log;
  */
 class MercadoPagoService
 {
+    public function __construct(private ConfirmarReservaService $confirmar) {}
+
     /**
      * Reusa la preferencia pendiente de esta reserva si ya existe (un
      * reintento de /pago no debe crear una preferencia nueva en MP cada vez).
@@ -101,5 +104,120 @@ class MercadoPagoService
             'monto' => $monto,
             'estado' => 'pendiente',
         ]);
+    }
+
+    /**
+     * Trae el estado real de un pago desde MP — nunca el que vino en el
+     * cuerpo del webhook, que MP mismo advierte que puede llegar incompleto
+     * o desactualizado. Falla fuerte (para que MP reintente la notificacion).
+     *
+     * @return array<string, mixed>
+     *
+     * @throws ReservaPublicaException mp_error
+     */
+    public function consultarPago(UserMpCredential $credencial, string $paymentId): array
+    {
+        $response = Http::withToken($credencial->mp_access_token)
+            ->timeout(15)
+            ->get("https://api.mercadopago.com/v1/payments/{$paymentId}");
+
+        if (! $response->successful()) {
+            Log::error('mercadopago.consultar_pago.fallo', [
+                'user_id' => $credencial->user_id,
+                'payment_id' => $paymentId,
+                'status' => $response->status(),
+            ]);
+
+            throw ReservaPublicaException::mpError();
+        }
+
+        return $response->json() ?? [];
+    }
+
+    /**
+     * Busca un pago por external_reference (el public_token de la reserva)
+     * cuando no llego NINGUN aviso de MP — a diferencia de consultarPago, no
+     * hay un payment_id del que partir. Usada por la reconciliacion, que
+     * recorre muchas filas: una falla puntual de MP no debe tumbar el lote
+     * entero, por eso devuelve null en vez de lanzar.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function buscarPagoPorExternalReference(UserMpCredential $credencial, string $externalReference): ?array
+    {
+        $response = Http::withToken($credencial->mp_access_token)
+            ->timeout(15)
+            ->get('https://api.mercadopago.com/v1/payments/search', [
+                'external_reference' => $externalReference,
+            ]);
+
+        if (! $response->successful()) {
+            Log::error('mercadopago.buscar_pago.fallo', [
+                'user_id' => $credencial->user_id,
+                'external_reference' => $externalReference,
+                'status' => $response->status(),
+            ]);
+
+            return null;
+        }
+
+        return $response->json()['results'][0] ?? null;
+    }
+
+    /**
+     * Aplica el estado de un pago de MP a su PagoSena/ReservaWeb — el UNICO
+     * lugar que decide que hacer con un pago, compartido entre el webhook
+     * (avisos que llegan solos) y la reconciliacion (re-consulta manual), para
+     * que las dos vias nunca queden con logica distinta.
+     *
+     * @param  array<string, mixed>  $datosPago  lo que devuelve consultarPago/buscarPagoPorExternalReference
+     */
+    public function sincronizarPago(PagoSena $pagoSena, ReservaWeb $reserva, array $datosPago): void
+    {
+        if ($pagoSena->estaAprobado()) {
+            return;
+        }
+
+        $status = (string) ($datosPago['status'] ?? '');
+        $paymentId = (string) ($datosPago['id'] ?? '');
+
+        $estado = match ($status) {
+            'approved' => 'aprobado',
+            'rejected', 'cancelled' => 'rechazado',
+            default => 'pendiente',
+        };
+
+        // Defensa QA: nunca deberia pasar, pero si el monto que MP dice haber
+        // cobrado no coincide con lo pedido, no confirmamos a ciegas.
+        if ($estado === 'aprobado') {
+            $montoPagado = round((float) ($datosPago['transaction_amount'] ?? 0), 2);
+            $montoEsperado = round((float) $pagoSena->monto, 2);
+            if (abs($montoPagado - $montoEsperado) > 0.01) {
+                Log::error('mercadopago.sincronizar.monto_no_coincide', [
+                    'pago_sena_id' => $pagoSena->id,
+                    'payment_id' => $paymentId,
+                    'monto_esperado' => $montoEsperado,
+                    'monto_pagado' => $montoPagado,
+                ]);
+
+                return;
+            }
+        }
+
+        $pagoSena->update(['mp_payment_id' => $paymentId, 'estado' => $estado]);
+
+        if ($estado !== 'aprobado') {
+            return;
+        }
+
+        $resultado = $this->confirmar->confirmar($reserva, now());
+
+        if ($resultado->resultado === ConfirmacionResultado::NEEDS_REFUND) {
+            Log::error('mercadopago.sincronizar.pago_aprobado_requiere_reembolso', [
+                'reserva_id' => $reserva->id,
+                'payment_id' => $paymentId,
+                'motivo' => $resultado->motivo,
+            ]);
+        }
     }
 }

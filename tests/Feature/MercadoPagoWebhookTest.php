@@ -86,6 +86,7 @@ class MercadoPagoWebhookTest extends TestCase
         Http::fake(["api.mercadopago.com/v1/payments/{$paymentId}*" => Http::response(array_merge([
             'id' => $paymentId,
             'status' => $status,
+            'transaction_amount' => (float) $this->pago->monto,
             'external_reference' => $this->reserva->public_token,
         ], $extra), 200)]);
     }

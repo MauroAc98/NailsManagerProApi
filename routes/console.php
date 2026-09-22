@@ -17,3 +17,5 @@ Schedule::command('recordatorios:enviar')
 Schedule::command('suscripciones:marcar-vencidas')->daily();
 
 Schedule::command('reservas:expirar-holds')->everyMinute()->withoutOverlapping();
+
+Schedule::command('pagos:reconciliar')->everyMinute()->withoutOverlapping();
