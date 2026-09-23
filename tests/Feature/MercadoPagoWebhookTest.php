@@ -91,6 +91,31 @@ class MercadoPagoWebhookTest extends TestCase
         ], $extra), 200)]);
     }
 
+    // type=order: data.id es el ID DE LA ORDEN (mp_preference_id en
+    // PagoSena, ver setUp), nunca un paymentId — bien distinto del camino
+    // 'payment' de arriba.
+    private function notificarOrden(?string $ruteo = null, string $orderId = 'PREF-1'): TestResponse
+    {
+        return $this->postJson(
+            '/api/webhooks/mercadopago/'.($ruteo ?? $this->credencial->webhook_ruteo),
+            ['action' => 'order.processed', 'type' => 'order', 'data' => ['id' => $orderId, 'status' => 'processed']],
+        );
+    }
+
+    // El camino 'order' consulta /v1/payments/search (Payments API clasica),
+    // NUNCA /v1/payments/{id} — misma llamada que ya usa la reconciliacion.
+    private function fakeBusquedaPago(string $status, array $extra = [], string $paymentId = 'PAY-1'): void
+    {
+        Http::fake(['api.mercadopago.com/v1/payments/search*' => Http::response([
+            'results' => [array_merge([
+                'id' => $paymentId,
+                'status' => $status,
+                'transaction_amount' => (float) $this->pago->monto,
+                'external_reference' => $this->reserva->public_token,
+            ], $extra)],
+        ], 200)]);
+    }
+
     public function test_un_ruteo_desconocido_es_404_y_no_llama_a_mp(): void
     {
         $this->notificar('ruteo-que-no-existe')->assertStatus(404);
@@ -202,6 +227,49 @@ class MercadoPagoWebhookTest extends TestCase
 
         $this->assertSame(0, Turno::count());
         $this->assertSame('pending_payment', $reservaAjena->fresh()->estado);
+    }
+
+    // Bug real en produccion (2026-09-22): MP manda type=order desde la
+    // migracion a Orders API, no type=payment — el filtro viejo descartaba
+    // TODA notificacion real sin procesarla, y cada pago dependia del
+    // reconciliador (1-2 min de demora) en vez de confirmarse al toque.
+    public function test_notificacion_tipo_order_confirma_el_turno_buscando_por_external_reference(): void
+    {
+        $this->fakeBusquedaPago('approved');
+
+        $this->notificarOrden()->assertOk();
+
+        $this->assertSame('aprobado', $this->pago->fresh()->estado);
+        $this->assertSame('PAY-1', $this->pago->fresh()->mp_payment_id);
+        $this->assertSame('confirmed', $this->reserva->fresh()->estado);
+        $this->assertSame(1, Turno::count());
+
+        Http::assertSent(fn (HttpRequest $r) => str_contains($r->url(), '/v1/payments/search')
+            && $r->hasHeader('Authorization', 'Bearer APP_USR-token-de-natalia'));
+    }
+
+    public function test_notificacion_tipo_order_con_id_de_orden_desconocido_no_llama_a_mp(): void
+    {
+        $this->notificarOrden(orderId: 'orden-que-no-existe')->assertOk();
+
+        Http::assertNothingSent();
+        $this->assertSame('pendiente', $this->pago->fresh()->estado);
+    }
+
+    public function test_notificacion_tipo_order_sin_data_id_responde_200_sin_llamar_a_mp(): void
+    {
+        $this->postJson('/api/webhooks/mercadopago/'.$this->credencial->webhook_ruteo, ['type' => 'order'])->assertOk();
+
+        Http::assertNothingSent();
+    }
+
+    public function test_notificacion_tipo_order_de_otro_negocio_se_ignora(): void
+    {
+        $this->fakeBusquedaPago('approved');
+
+        $this->notificarOrden('ruteo-que-no-existe')->assertStatus(404);
+
+        Http::assertNothingSent();
     }
 
     public function test_pago_aprobado_pero_el_horario_ya_no_esta_libre_marca_requiere_reembolso_sin_crear_turno(): void

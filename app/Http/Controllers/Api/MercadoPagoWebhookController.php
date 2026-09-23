@@ -35,9 +35,19 @@ class MercadoPagoWebhookController extends Controller
             abort(404);
         }
 
+        $tipo = $request->input('type') ?? $request->input('topic');
+
+        // Bug real en produccion: desde la migracion a Orders API, MP manda
+        // type=order (no type=payment) — el filtro viejo descartaba TODAS las
+        // notificaciones reales sin procesarlas, y cada pago terminaba
+        // dependiendo del reconciliador (1-2 min de demora) en vez del
+        // webhook instantaneo.
+        if ($tipo === 'order') {
+            return $this->handleOrden($request, $credencial);
+        }
+
         // Solo nos interesan notificaciones de pago; todo lo demas se
         // reconoce sin procesar (nunca 500, MP no debe reintentar por esto).
-        $tipo = $request->input('type') ?? $request->input('topic');
         if ($tipo !== null && $tipo !== 'payment') {
             return response()->json(['ok' => true]);
         }
@@ -73,6 +83,47 @@ class MercadoPagoWebhookController extends Controller
             Log::warning('mercadopago.webhook.pago_sena_no_encontrado', ['reserva_id' => $reserva->id]);
 
             return response()->json(['ok' => true]);
+        }
+
+        $this->mercadoPago->sincronizarPago($pagoSena, $reserva, $pago);
+
+        return response()->json(['ok' => true]);
+    }
+
+    // data.id de una notificacion type=order es el ID DE LA ORDEN, no de un
+    // pago — no hay que confundirlo con el paymentId del camino 'payment' de
+    // arriba. El shape de data.transactions.payments de la orden no esta
+    // confirmado contra un pago real nuestro todavia, asi que en vez de
+    // parsearlo se reusa buscarPagoPorExternalReference() (Payments API
+    // clasica, /v1/payments/search): la MISMA consulta que ya usa la
+    // reconciliacion y que confirmo un pago real exitosamente.
+    private function handleOrden(Request $request, UserMpCredential $credencial): JsonResponse
+    {
+        $orderId = $request->input('data.id');
+        if (! $orderId) {
+            return response()->json(['ok' => true]);
+        }
+
+        $pagoSena = PagoSena::where('mp_preference_id', $orderId)
+            ->whereHas('reservaWeb', fn ($q) => $q->where('user_id', $credencial->user_id))
+            ->latest('id')
+            ->first();
+
+        if ($pagoSena === null) {
+            Log::warning('mercadopago.webhook.pago_sena_no_encontrado_por_orden', [
+                'user_id' => $credencial->user_id,
+                'order_id' => $orderId,
+            ]);
+
+            return response()->json(['ok' => true]);
+        }
+
+        $reserva = $pagoSena->reservaWeb;
+
+        $pago = $this->mercadoPago->buscarPagoPorExternalReference($credencial, $reserva->public_token);
+        if ($pago === null) {
+            // 500 a proposito, igual que el camino 'payment': que MP reintente.
+            abort(500, 'No se pudo consultar el pago de la orden.');
         }
 
         $this->mercadoPago->sincronizarPago($pagoSena, $reserva, $pago);
