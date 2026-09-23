@@ -92,27 +92,53 @@ class MercadoPagoServiceTest extends TestCase
         $this->assertSame(0, PagoSena::count());
     }
 
+    // El monto que se manda a MP y el que queda guardado en PagoSena.monto NO
+    // es sena_monto crudo: es lo que hay que cobrar para que, descontada la
+    // comision de MP, el negocio reciba los 5000 completos (ver
+    // MercadoPagoService::montoACobrar) — sincronizarPago() despues compara
+    // esto contra transaction_amount, asi que tienen que ser el MISMO numero.
     public function test_crea_la_preferencia_con_el_token_del_negocio_y_guarda_el_pago(): void
     {
         $user = $this->negocio();
         $this->conCredenciales($user, 'APP_USR-token-de-natalia');
         $reserva = $this->reserva($user);
         $this->fakeMp();
+        $montoACobrar = app(MercadoPagoService::class)->montoACobrar(5000);
+        $montoFormateado = number_format($montoACobrar, 2, '.', '');
 
         $pago = app(MercadoPagoService::class)->crearOReusarPreferencia($user, $reserva);
 
         $this->assertSame('ORDER-123', $pago->mp_preference_id);
         $this->assertSame('https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=ORDER-123', $pago->init_point);
         $this->assertSame('pendiente', $pago->estado);
-        $this->assertSame(5000.0, (float) $pago->monto);
+        $this->assertSame($montoACobrar, (float) $pago->monto);
 
-        Http::assertSent(function (HttpRequest $r) use ($reserva) {
+        Http::assertSent(function (HttpRequest $r) use ($reserva, $montoFormateado) {
             return $r->hasHeader('Authorization', 'Bearer APP_USR-token-de-natalia')
                 && $r['type'] === 'online'
-                && $r['total_amount'] === '5000.00'
+                && $r['total_amount'] === $montoFormateado
                 && $r['external_reference'] === $reserva->public_token
-                && $r['items'][0]['unit_price'] === '5000.00';
+                && $r['items'][0]['unit_price'] === $montoFormateado;
         });
+    }
+
+    // Verificacion directa e independiente de la formula (no depende de la
+    // llamada real a MP): con 6,29% (default), cobrar $5.335,58 deja al
+    // negocio con $5.000 netos.
+    public function test_monto_a_cobrar_suma_la_comision_de_mp_para_que_el_negocio_reciba_el_neto(): void
+    {
+        $montoACobrar = app(MercadoPagoService::class)->montoACobrar(5000);
+
+        // Verificacion independiente de la propiedad de negocio (no de la
+        // formula en si, para no probar la implementacion contra si misma):
+        // cobrando esto y descontando la comision, el negocio recibe 5000.
+        $this->assertGreaterThan(5000, $montoACobrar);
+        $this->assertEqualsWithDelta(5000, $montoACobrar * (1 - MercadoPagoService::COMISION_MP_DEFAULT / 100), 0.01);
+    }
+
+    public function test_monto_a_cobrar_con_sena_cero_devuelve_cero(): void
+    {
+        $this->assertSame(0.0, app(MercadoPagoService::class)->montoACobrar(0));
     }
 
     public function test_usa_processing_mode_manual_unico_valor_valido_para_checkout_pro(): void

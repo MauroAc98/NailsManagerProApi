@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Services\Reservas\MercadoPagoService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Concerns\CreaSalonPublico;
 use Tests\TestCase;
@@ -15,15 +16,20 @@ class PublicTerminosTest extends TestCase
 {
     use CreaSalonPublico, RefreshDatabase;
 
-    public function test_devuelve_el_deposito_del_negocio_y_los_valores_de_config(): void
+    // deposito ya NO es el neto de sena_monto: es lo que se le cobra a la
+    // clienta para que, descontada la comision de MP, el negocio reciba los
+    // 5000 completos (ver MercadoPagoService::montoACobrar) — tiene que
+    // coincidir con lo que despues ve en el checkout real de MP.
+    public function test_devuelve_el_deposito_a_cobrar_incluyendo_la_comision_de_mp(): void
     {
         config(['reservas.pago_minutos' => 15, 'reservas.anticipacion_minutos' => 120, 'reservas.cancelacion_horas' => 24]);
         $user = $this->crearSalon(['sena_monto' => 5000]);
+        $depositoEsperado = round(5000 / (1 - MercadoPagoService::COMISION_MP_DEFAULT / 100), 2);
 
         $this->getJson("/api/public/{$user->slug}/terminos")
             ->assertOk()
             ->assertExactJson([
-                'deposito' => 5000.0,
+                'deposito' => $depositoEsperado,
                 'ventana_pago_minutos' => 15,
                 'anticipacion_minutos' => 120,
                 'ventana_cancelacion_horas' => 24,

@@ -10,6 +10,7 @@ use App\Models\Subscription;
 use App\Models\User;
 use App\Models\WhatsappMensaje;
 use App\Services\AdminAudit;
+use App\Services\Reservas\MercadoPagoService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -432,6 +433,10 @@ class AdminController extends Controller
     {
         return response()->json([
             'dias_prueba_default' => (int) (Setting::get('dias_prueba_default') ?? 10),
+            // Ver MercadoPagoService::montoACobrar — porcentaje que se le
+            // suma al monto de la seña para que, descontada la comision de
+            // MP, el negocio reciba el neto completo.
+            'comision_mp_porcentaje' => (float) (Setting::get('comision_mp_porcentaje') ?? MercadoPagoService::COMISION_MP_DEFAULT),
         ]);
     }
 
@@ -442,19 +447,29 @@ class AdminController extends Controller
     {
         $data = $request->validate([
             'dias_prueba_default' => 'required|integer|min:1|max:90',
+            // Tope 50: una comision mayor no tiene sentido de negocio real y
+            // evita un typo (ej. "62.9" en vez de "6.29") disparando un
+            // monto absurdo en el checkout.
+            'comision_mp_porcentaje' => 'required|numeric|min:0|max:50',
         ]);
 
         Setting::updateOrCreate(
             ['key' => 'dias_prueba_default'],
             ['value' => (string) $data['dias_prueba_default']],
         );
+        Setting::updateOrCreate(
+            ['key' => 'comision_mp_porcentaje'],
+            ['value' => (string) $data['comision_mp_porcentaje']],
+        );
 
         AdminAudit::record($request->user('admin'), 'settings.actualizado', null, [
             'dias_prueba_default' => $data['dias_prueba_default'],
+            'comision_mp_porcentaje' => $data['comision_mp_porcentaje'],
         ], $request);
 
         return response()->json([
             'dias_prueba_default' => $data['dias_prueba_default'],
+            'comision_mp_porcentaje' => $data['comision_mp_porcentaje'],
         ]);
     }
 }

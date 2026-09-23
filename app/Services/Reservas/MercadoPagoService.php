@@ -5,6 +5,7 @@ namespace App\Services\Reservas;
 use App\Exceptions\ReservaPublicaException;
 use App\Models\PagoSena;
 use App\Models\ReservaWeb;
+use App\Models\Setting;
 use App\Models\User;
 use App\Models\UserMpCredential;
 use Illuminate\Support\Facades\DB;
@@ -59,10 +60,14 @@ class MercadoPagoService
         }
 
         $credencial = $user->mpCredentials;
-        $monto = round((float) ($user->sena_monto ?? 0), 2);
-        if ($credencial === null || $monto <= 0) {
+        $senaMonto = round((float) ($user->sena_monto ?? 0), 2);
+        if ($credencial === null || $senaMonto <= 0) {
             throw ReservaPublicaException::mpNoConectado();
         }
+
+        // Se cobra de mas para que, despues de la comision de MP, el negocio
+        // reciba el monto de seña completo — ver montoACobrar().
+        $monto = $this->montoACobrar($senaMonto);
 
         // reservas.base_url, NUNCA services.frontend_url (ese apunta a
         // app.turnetto.com, el dashboard) — ver comentario en config/reservas.php.
@@ -137,6 +142,33 @@ class MercadoPagoService
             'monto' => $monto,
             'estado' => 'pendiente',
         ]);
+    }
+
+    // Comision de Mercado Pago por cobro "al instante" (Setting global,
+    // panel admin > Configuracion) — el negocio la ve en su propia cuenta de
+    // MP bajo "Dinero disponible en". Constante para todos los negocios por
+    // ahora (fase 1): si algun negocio tuviera una tasa negociada distinta,
+    // pasa a ser por-negocio mas adelante.
+    // Publica: AdminController::obtenerSettings la usa como default a
+    // mostrar cuando todavia no se guardo un valor explicito.
+    public const COMISION_MP_DEFAULT = 6.29;
+
+    /**
+     * Monto a cobrarle a la clienta para que, descontada la comision de MP,
+     * el negocio reciba exactamente `$senaMonto` neto — sin esto, el negocio
+     * terminaba recibiendo la seña menos ~6% sin haberlo decidido. Formula:
+     * cobro = neto / (1 - comision). 0 se mantiene en 0 (sin seña configurada,
+     * no hay nada que cobrar de mas).
+     */
+    public function montoACobrar(float $senaMonto): float
+    {
+        if ($senaMonto <= 0) {
+            return 0.0;
+        }
+
+        $comision = (float) (Setting::get('comision_mp_porcentaje') ?? self::COMISION_MP_DEFAULT);
+
+        return round($senaMonto / (1 - $comision / 100), 2);
     }
 
     /**

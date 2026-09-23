@@ -8,6 +8,7 @@ use App\Models\Profesional;
 use App\Models\Servicio;
 use App\Models\User;
 use App\Services\Reservas\DisponibilidadService;
+use App\Services\Reservas\MercadoPagoService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -70,12 +71,15 @@ class PublicController extends Controller
     // ocupación): esto se pide UNA vez al entrar al flujo, antes de que
     // exista una reserva puntual a la que aplicarle esa regla.
     // ─────────────────────────────────────────────
-    public function terminos(string $slug): JsonResponse
+    public function terminos(string $slug, MercadoPagoService $mercadoPago): JsonResponse
     {
         $user = $this->getProfesional($slug);
 
         return response()->json([
-            'deposito' => (float) ($user->sena_monto ?? 0),
+            // Lo que se le cobra a la clienta, no el neto que pidió el
+            // negocio — tiene que coincidir con lo que ve en el checkout de
+            // MP (ver MercadoPagoService::montoACobrar).
+            'deposito' => $mercadoPago->montoACobrar((float) ($user->sena_monto ?? 0)),
             'ventana_pago_minutos' => (int) config('reservas.pago_minutos'),
             'anticipacion_minutos' => (int) config('reservas.anticipacion_minutos'),
             'ventana_cancelacion_horas' => (int) config('reservas.cancelacion_horas'),

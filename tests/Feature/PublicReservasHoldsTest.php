@@ -7,6 +7,7 @@ use App\Models\ReservaWeb;
 use App\Models\Servicio;
 use App\Models\User;
 use App\Models\UserMpCredential;
+use App\Services\Reservas\MercadoPagoService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
@@ -266,11 +267,15 @@ class PublicReservasHoldsTest extends TestCase
 
     // -- 5. estado --------------------------------------------------
 
+    // deposito ya NO es sena_monto crudo: es lo que se le cobra a la
+    // clienta para que, descontada la comision de MP, el negocio reciba los
+    // 5000 completos (ver MercadoPagoService::montoACobrar).
     public function test_estado_devuelve_el_contrato_con_resumen(): void
     {
         $this->user->update(['sena_monto' => 5000]);
         $token = $this->crearHold();
         $this->datos($token)->assertOk();
+        $depositoEsperado = app(MercadoPagoService::class)->montoACobrar(5000);
 
         $this->getJson($this->url("/{$token}"), $this->headers(self::DEVICE, null))->assertOk()->assertExactJson([
             'token' => $token,
@@ -282,7 +287,7 @@ class PublicReservasHoldsTest extends TestCase
                 'fecha' => self::FECHA,
                 'hora' => '10:00',
                 'duracion_total_minutos' => 60,
-                'deposito' => 5000,
+                'deposito' => $depositoEsperado,
                 'nota' => 'hola',
             ],
         ]);

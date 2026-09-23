@@ -124,7 +124,10 @@ class ReservaPublicaController extends Controller
             'fecha' => $this->fecha($reserva),
             'hora' => $this->hora($reserva),
             'duracion_total_minutos' => (int) $reserva->duracion_total_minutos,
-            'deposito' => $this->monto($user->sena_monto),
+            // Lo cobrado, no el neto que pidio el negocio (ver
+            // MercadoPagoService::montoACobrar) — tiene que coincidir con lo
+            // que ya vio en Resumen/terminos antes de pagar.
+            'deposito' => $this->monto($this->mercadoPago->montoACobrar((float) ($user->sena_monto ?? 0))),
             'nota' => $reserva->nota,
         ];
 

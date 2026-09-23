@@ -34,7 +34,17 @@ class AdminSettingsTest extends TestCase
         $this->actingAs($this->admin, 'admin')
             ->getJson('/api/admin/settings')
             ->assertOk()
-            ->assertJson(['dias_prueba_default' => 10]);
+            ->assertJson(['dias_prueba_default' => 10, 'comision_mp_porcentaje' => 6.29]);
+    }
+
+    public function test_get_devuelve_la_comision_de_mp_guardada(): void
+    {
+        Setting::create(['key' => 'comision_mp_porcentaje', 'value' => '7.5']);
+
+        $this->actingAs($this->admin, 'admin')
+            ->getJson('/api/admin/settings')
+            ->assertOk()
+            ->assertJson(['comision_mp_porcentaje' => 7.5]);
     }
 
     public function test_get_devuelve_el_valor_guardado(): void
@@ -56,17 +66,35 @@ class AdminSettingsTest extends TestCase
     public function test_put_actualiza_el_valor(): void
     {
         $this->actingAs($this->admin, 'admin')
-            ->putJson('/api/admin/settings', ['dias_prueba_default' => 7])
+            ->putJson('/api/admin/settings', ['dias_prueba_default' => 7, 'comision_mp_porcentaje' => 6.29])
             ->assertOk()
             ->assertJson(['dias_prueba_default' => 7]);
 
         $this->assertSame('7', Setting::get('dias_prueba_default'));
     }
 
+    public function test_put_actualiza_la_comision_de_mp(): void
+    {
+        $this->actingAs($this->admin, 'admin')
+            ->putJson('/api/admin/settings', ['dias_prueba_default' => 10, 'comision_mp_porcentaje' => 8])
+            ->assertOk()
+            ->assertJson(['comision_mp_porcentaje' => 8]);
+
+        $this->assertSame('8', Setting::get('comision_mp_porcentaje'));
+    }
+
+    public function test_put_rechaza_comision_de_mp_fuera_de_rango(): void
+    {
+        $this->actingAs($this->admin, 'admin')
+            ->putJson('/api/admin/settings', ['dias_prueba_default' => 10, 'comision_mp_porcentaje' => 51])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('comision_mp_porcentaje');
+    }
+
     public function test_put_rechaza_valor_fuera_de_rango(): void
     {
         $this->actingAs($this->admin, 'admin')
-            ->putJson('/api/admin/settings', ['dias_prueba_default' => 0])
+            ->putJson('/api/admin/settings', ['dias_prueba_default' => 0, 'comision_mp_porcentaje' => 6.29])
             ->assertStatus(422)
             ->assertJsonValidationErrors('dias_prueba_default');
     }
@@ -74,7 +102,7 @@ class AdminSettingsTest extends TestCase
     public function test_put_queda_auditado(): void
     {
         $this->actingAs($this->admin, 'admin')
-            ->putJson('/api/admin/settings', ['dias_prueba_default' => 20])
+            ->putJson('/api/admin/settings', ['dias_prueba_default' => 20, 'comision_mp_porcentaje' => 6.29])
             ->assertOk();
 
         $this->assertDatabaseHas('admin_audit_logs', [
