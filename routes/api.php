@@ -19,7 +19,6 @@ use App\Http\Controllers\Api\ServicioController;
 use App\Http\Controllers\Api\SlotDisponibleController;
 use App\Http\Controllers\Api\StatsController;
 use App\Http\Controllers\Api\TurnoController;
-use App\Http\Controllers\Api\WhatsappConnectionAdminController;
 use Illuminate\Support\Facades\Route;
 
 // ─────────────────────────────────────────────
@@ -85,12 +84,6 @@ Route::prefix('admin')->group(function () {
         Route::post('subscriptions/{user}/adjust-expiry', [AdminController::class, 'adjustExpiry']);
         // Uso de Cloud API por salón (mensajes + conversaciones de 24hs estimadas) para cotejar costo real de Meta.
         Route::get('whatsapp/uso-por-salon', [AdminController::class, 'usoWhatsappPorSalon']);
-
-        // Onboarding de Embedded Signup (design §7). El GET de estado es
-        // INGATEADO — sigue alcanzable mientras la feature está gated (Q1);
-        // la gate de Advanced Access la aplica el seam en el POST.
-        Route::get('whatsapp/connections', [WhatsappConnectionAdminController::class, 'index']);
-        Route::post('whatsapp/connections', [WhatsappConnectionAdminController::class, 'store']);
 
         // Fase 1 de Mercado Pago: carga manual del access_token por negocio
         // (sin OAuth propio) — reemplaza cargarlo por tinker.

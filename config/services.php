@@ -52,23 +52,6 @@ return [
         'autorespuesta_habilitada' => (bool) env('WHATSAPP_AUTORESPUESTA_HABILITADA', true),
     ],
 
-    // Embedded Signup (Coexistence) — onboarding del número propio de cada
-    // salón. Mismo Meta app que whatsapp_cloud: se reusa WHATSAPP_CLOUD_APP_SECRET
-    // a propósito para no duplicar el mismo secreto bajo dos nombres.
-    'whatsapp_es' => [
-        'enabled' => (bool) env('WHATSAPP_ES_ENABLED', false),
-        // CSV de user_id habilitados. Vacío = NADIE (fail-closed). Para
-        // habilitar a todos los salones hay que setear explícitamente
-        // WHATSAPP_ES_ALLOW_ALL=true; una allowlist vacía o borrada por error
-        // durante la ventana gated no debe exponer el onboarding en silencio.
-        'allowed_user_ids' => array_filter(array_map('intval', explode(',', (string) env('WHATSAPP_ES_ALLOWED_USER_IDS', '')))),
-        'allow_all' => (bool) env('WHATSAPP_ES_ALLOW_ALL', false),
-        'app_id' => env('WHATSAPP_ES_APP_ID'),
-        'app_secret' => env('WHATSAPP_CLOUD_APP_SECRET'),
-        'config_id' => env('WHATSAPP_ES_CONFIG_ID'),
-        'graph_version' => env('WHATSAPP_ES_GRAPH_VERSION', env('WHATSAPP_CLOUD_API_VERSION', 'v26.0')),
-    ],
-
     // Cloudflare Turnstile (reto anti-bot de la reserva online). Solo se usa si
     // RESERVAS_CHALLENGE_HABILITADO=true.
     'turnstile' => [
