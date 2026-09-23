@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\ClienteController;
 use App\Http\Controllers\Api\CloudApiWebhookController;
 use App\Http\Controllers\Api\GastoController;
 use App\Http\Controllers\Api\IngresoController;
+use App\Http\Controllers\Api\MercadoPagoAdminController;
 use App\Http\Controllers\Api\MercadoPagoWebhookController;
 use App\Http\Controllers\Api\ProfesionalController;
 use App\Http\Controllers\Api\PublicController;
@@ -90,6 +91,11 @@ Route::prefix('admin')->group(function () {
         // la gate de Advanced Access la aplica el seam en el POST.
         Route::get('whatsapp/connections', [WhatsappConnectionAdminController::class, 'index']);
         Route::post('whatsapp/connections', [WhatsappConnectionAdminController::class, 'store']);
+
+        // Fase 1 de Mercado Pago: carga manual del access_token por negocio
+        // (sin OAuth propio) — reemplaza cargarlo por tinker.
+        Route::get('mercadopago/connections', [MercadoPagoAdminController::class, 'index']);
+        Route::post('mercadopago/connections', [MercadoPagoAdminController::class, 'store']);
 
         // Creación de negocio (movida de auth/register) y búsqueda puntual
         // por email/slug para el flujo de renovación — ver AdminController.
