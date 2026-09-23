@@ -131,9 +131,13 @@ class MercadoPagoServiceTest extends TestCase
 
         // Verificacion independiente de la propiedad de negocio (no de la
         // formula en si, para no probar la implementacion contra si misma):
-        // cobrando esto y descontando la comision, el negocio recibe 5000.
+        // cobrando esto y descontando la comision CON IVA (21%, aplicado solo
+        // — el admin carga el % tal cual lo ve en su cuenta de MP, sin IVA),
+        // el negocio recibe 5000. Confirmado contra un cobro real: comision
+        // nominal 6,29% -> cargo efectivo 7,59% (6,29 * 1,21).
         $this->assertGreaterThan(5000, $montoACobrar);
-        $this->assertEqualsWithDelta(5000, $montoACobrar * (1 - MercadoPagoService::COMISION_MP_DEFAULT / 100), 0.01);
+        $comisionConIva = MercadoPagoService::COMISION_MP_DEFAULT * 1.21;
+        $this->assertEqualsWithDelta(5000, $montoACobrar * (1 - $comisionConIva / 100), 0.01);
     }
 
     public function test_monto_a_cobrar_con_sena_cero_devuelve_cero(): void

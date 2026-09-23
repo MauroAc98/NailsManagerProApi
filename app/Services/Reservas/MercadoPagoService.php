@@ -150,15 +150,23 @@ class MercadoPagoService
     // ahora (fase 1): si algun negocio tuviera una tasa negociada distinta,
     // pasa a ser por-negocio mas adelante.
     // Publica: AdminController::obtenerSettings la usa como default a
-    // mostrar cuando todavia no se guardo un valor explicito.
+    // mostrar cuando todavia no se guardo un valor explicito. Es la comision
+    // TAL CUAL la muestra el panel de MP ("Dinero disponible en") — SIN IVA,
+    // el admin la copia directo de ahi sin hacer ninguna cuenta.
     public const COMISION_MP_DEFAULT = 6.29;
 
+    // El cargo real que MP descuenta incluye 21% de IVA sobre su comision —
+    // confirmado contra un cobro real: comision nominal 6,29%, cargo
+    // efectivo 7,59% (6,29 * 1,21). Se aplica siempre aca, no se le pide al
+    // admin que lo sume a mano al cargar el %.
+    private const IVA_PORCENTAJE = 21;
+
     /**
-     * Monto a cobrarle a la clienta para que, descontada la comision de MP,
-     * el negocio reciba exactamente `$senaMonto` neto — sin esto, el negocio
-     * terminaba recibiendo la seña menos ~6% sin haberlo decidido. Formula:
-     * cobro = neto / (1 - comision). 0 se mantiene en 0 (sin seña configurada,
-     * no hay nada que cobrar de mas).
+     * Monto a cobrarle a la clienta para que, descontada la comision de MP
+     * (con IVA incluido), el negocio reciba exactamente `$senaMonto` neto —
+     * sin esto, el negocio terminaba recibiendo la seña menos la comision sin
+     * haberlo decidido. Formula: cobro = neto / (1 - comision_con_iva). 0 se
+     * mantiene en 0 (sin seña configurada, no hay nada que cobrar de mas).
      */
     public function montoACobrar(float $senaMonto): float
     {
@@ -166,9 +174,10 @@ class MercadoPagoService
             return 0.0;
         }
 
-        $comision = (float) (Setting::get('comision_mp_porcentaje') ?? self::COMISION_MP_DEFAULT);
+        $comisionNominal = (float) (Setting::get('comision_mp_porcentaje') ?? self::COMISION_MP_DEFAULT);
+        $comisionConIva = $comisionNominal * (1 + self::IVA_PORCENTAJE / 100);
 
-        return round($senaMonto / (1 - $comision / 100), 2);
+        return round($senaMonto / (1 - $comisionConIva / 100), 2);
     }
 
     /**
