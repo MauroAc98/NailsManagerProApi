@@ -6,6 +6,7 @@ use App\Models\AdminUser;
 use App\Models\User;
 use App\Models\UserMpCredential;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 /**
@@ -133,10 +134,65 @@ class MercadoPagoAdminControllerTest extends TestCase
 
     public function test_store_valida_los_campos_requeridos(): void
     {
+        // mp_user_id NO esta acá: es opcional, se deriva solo (ver tests de
+        // abajo) — user_id y mp_access_token siguen siendo obligatorios.
         $this->actingAs($this->admin, 'admin')
             ->postJson('/api/admin/mercadopago/connections', [])
             ->assertStatus(422)
-            ->assertJsonValidationErrors(['user_id', 'mp_access_token', 'mp_user_id']);
+            ->assertJsonValidationErrors(['user_id', 'mp_access_token']);
+    }
+
+    // Bug real evitado: antes había que pegar el access_token a mano, correr
+    // GET /users/me por separado (PowerShell/curl) y recién ahí completar
+    // mp_user_id en el form. Ahora alcanza con el access_token solo.
+    public function test_store_sin_mp_user_id_lo_deriva_llamando_a_users_me(): void
+    {
+        $salon = User::factory()->create();
+        Http::fake(['api.mercadopago.com/users/me' => Http::response(['id' => 123456789], 200)]);
+
+        $response = $this->actingAs($this->admin, 'admin')
+            ->postJson('/api/admin/mercadopago/connections', [
+                'user_id' => $salon->id,
+                'mp_access_token' => 'APP_USR-token-nuevo',
+            ])
+            ->assertStatus(201);
+
+        $this->assertSame('123456789', $response->json('mp_user_id'));
+        $this->assertSame('123456789', UserMpCredential::where('user_id', $salon->id)->firstOrFail()->mp_user_id);
+
+        Http::assertSent(fn ($r) => str_contains($r->url(), '/users/me')
+            && $r->hasHeader('Authorization', 'Bearer APP_USR-token-nuevo'));
+    }
+
+    public function test_store_con_mp_user_id_explicito_no_llama_a_mp(): void
+    {
+        $salon = User::factory()->create();
+
+        $this->actingAs($this->admin, 'admin')
+            ->postJson('/api/admin/mercadopago/connections', [
+                'user_id' => $salon->id,
+                'mp_access_token' => 'APP_USR-token-nuevo',
+                'mp_user_id' => 'MP-a-mano',
+            ])
+            ->assertStatus(201);
+
+        $this->assertSame('MP-a-mano', UserMpCredential::where('user_id', $salon->id)->firstOrFail()->mp_user_id);
+        Http::assertNothingSent();
+    }
+
+    public function test_store_con_un_access_token_invalido_no_guarda_nada(): void
+    {
+        $salon = User::factory()->create();
+        Http::fake(['api.mercadopago.com/users/me' => Http::response(['message' => 'invalid token'], 401)]);
+
+        $this->actingAs($this->admin, 'admin')
+            ->postJson('/api/admin/mercadopago/connections', [
+                'user_id' => $salon->id,
+                'mp_access_token' => 'APP_USR-token-invalido',
+            ])
+            ->assertStatus(422);
+
+        $this->assertNull(UserMpCredential::where('user_id', $salon->id)->first());
     }
 
     public function test_store_con_un_user_id_inexistente_es_422(): void

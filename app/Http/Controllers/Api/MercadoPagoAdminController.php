@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\UserMpCredential;
+use App\Services\Reservas\MercadoPagoService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -20,6 +21,8 @@ use Illuminate\Http\Request;
  */
 class MercadoPagoAdminController extends Controller
 {
+    public function __construct(private MercadoPagoService $mercadoPago) {}
+
     // GET /api/admin/mercadopago/connections
     public function index(): JsonResponse
     {
@@ -47,20 +50,35 @@ class MercadoPagoAdminController extends Controller
     }
 
     // POST /api/admin/mercadopago/connections
-    // Body `{ user_id, mp_access_token, mp_user_id }`. updateOrCreate: cargar
-    // de nuevo sobre un negocio ya conectado ROTA el token sin tocar el
-    // webhook_ruteo existente (creating() solo corre al insertar la fila).
+    // Body `{ user_id, mp_access_token, mp_user_id? }`. mp_user_id es
+    // opcional: si no se manda, se deriva llamando a GET /users/me con el
+    // access_token (misma llamada que de paso valida que el token sea real
+    // ANTES de guardar nada — antes había que pegarlo a mano corriendo esa
+    // consulta por separado). updateOrCreate: cargar de nuevo sobre un
+    // negocio ya conectado ROTA el token sin tocar el webhook_ruteo
+    // existente (creating() solo corre al insertar la fila).
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
             'user_id' => ['required', 'integer', 'exists:users,id'],
             'mp_access_token' => ['required', 'string'],
-            'mp_user_id' => ['required', 'string', 'max:100'],
+            'mp_user_id' => ['sometimes', 'nullable', 'string', 'max:100'],
         ]);
+
+        $mpUserId = $data['mp_user_id'] ?? null;
+        if (! $mpUserId) {
+            $cuenta = $this->mercadoPago->obtenerCuenta($data['mp_access_token']);
+            $mpUserId = $cuenta['id'] ?? null;
+            if (! $mpUserId) {
+                return response()->json([
+                    'message' => 'No pudimos validar el access_token con Mercado Pago. Revisá que sea correcto.',
+                ], 422);
+            }
+        }
 
         $credencial = UserMpCredential::updateOrCreate(
             ['user_id' => $data['user_id']],
-            ['mp_access_token' => $data['mp_access_token'], 'mp_user_id' => $data['mp_user_id']],
+            ['mp_access_token' => $data['mp_access_token'], 'mp_user_id' => (string) $mpUserId],
         );
 
         return response()->json([

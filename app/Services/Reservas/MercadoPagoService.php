@@ -140,6 +140,31 @@ class MercadoPagoService
     }
 
     /**
+     * GET /users/me: identifica a que cuenta de MP pertenece un access_token.
+     * Usada por el admin al cargar la credencial de un negocio (fase 1, carga
+     * manual) para derivar mp_user_id solo, sin que alguien tenga que pegarlo
+     * a mano — y de paso valida el token en el momento de guardarlo. Devuelve
+     * null en vez de lanzar: quien llama decide el shape del error HTTP (esto
+     * no es el flujo publico de reserva online, no aplica ReservaPublicaException).
+     *
+     * @return array<string, mixed>|null
+     */
+    public function obtenerCuenta(string $accessToken): ?array
+    {
+        $response = Http::withToken($accessToken)
+            ->timeout(15)
+            ->get('https://api.mercadopago.com/users/me');
+
+        if (! $response->successful()) {
+            Log::warning('mercadopago.obtener_cuenta.fallo', ['status' => $response->status()]);
+
+            return null;
+        }
+
+        return $response->json();
+    }
+
+    /**
      * Trae el estado real de un pago desde MP — nunca el que vino en el
      * cuerpo del webhook, que MP mismo advierte que puede llegar incompleto
      * o desactualizado. Falla fuerte (para que MP reintente la notificacion).
