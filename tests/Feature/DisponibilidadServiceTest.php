@@ -10,6 +10,8 @@ use App\Models\Turno;
 use App\Models\TurnoGrupo;
 use App\Models\User;
 use App\Services\Reservas\DisponibilidadService;
+use App\Services\Reservas\GrupoSuelto;
+use App\Services\Reservas\PromoInput;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Tests\Concerns\CreaSalonPublico;
@@ -704,5 +706,152 @@ class DisponibilidadServiceTest extends TestCase
         $ocupadaLaura = (new DisponibilidadService())->ocupacionDelDia($laura->id, self::FECHA, $this->ahora());
         $this->assertSame(['10:00', '11:00'], [$ocupadaAna[0][0]->format('H:i'), $ocupadaAna[0][1]->format('H:i')]);
         $this->assertSame(['11:00', '11:45'], [$ocupadaLaura[0][0]->format('H:i'), $ocupadaLaura[0][1]->format('H:i')]);
+    }
+
+    // -- 3a2: plan-based availability (promo components / loose multi-profesional) --
+
+    private function calcularConPlanes(?PromoInput $promo, array $grupos, bool $paralelo = false, ?Carbon $ahora = null): array
+    {
+        return (new DisponibilidadService())->calcularConPlanes(
+            $this->user,
+            self::FECHA,
+            $promo,
+            $grupos,
+            $paralelo,
+            $ahora ?? $this->ahora(),
+            120,
+        );
+    }
+
+    private function componente(Profesional $prof, int $duracion): array
+    {
+        return ['servicio_id' => 0, 'profesional_id' => $prof->id, 'duracion_minutos' => $duracion, 'precio' => 1000];
+    }
+
+    private function grupoSuelto(Profesional $prof, int $duracion): GrupoSuelto
+    {
+        return new GrupoSuelto($prof->id, [], $duracion);
+    }
+
+    /** Busca el slot ofrecido a $hora e ignora el detalle interno de tramos. */
+    private function assertSlotOfrecido(array $slots, string $hora, string $fin, array $profesionalIds, string $modo): void
+    {
+        $slot = collect($slots)->firstWhere('hora', $hora);
+        $this->assertNotNull($slot, "No se ofrecio el inicio {$hora}");
+        $this->assertSame($fin, $slot['fin']);
+        $this->assertSame($profesionalIds, $slot['profesional_ids']);
+        $this->assertSame($modo, $slot['modo']);
+    }
+
+    /**
+     * Rule L / characterization: sin promo componentizada y con menos de 2
+     * grupos sueltos, TramosResolver::planes() devuelve [] (input legacy) y
+     * calcularConPlanes NO debe inventar ningun inicio: el llamador sigue
+     * usando calcular() para ese caso, sin cambios.
+     */
+    public function test_calcular_con_planes_sin_promo_ni_grupos_suficientes_devuelve_vacio(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $this->crearSlot($this->user, $ana, '10:00');
+
+        $this->assertSame([], $this->calcularConPlanes(null, []));
+        $this->assertSame([], $this->calcularConPlanes(null, [$this->grupoSuelto($ana, 60)]));
+    }
+
+    public function test_calcular_con_planes_secuencial_alineado_ofrece_inicio_con_fin_y_modo(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $laura = $this->crearProfesional($this->user, 'Laura');
+        foreach (['10:00', '10:30', '11:00', '11:30', '12:00', '12:30'] as $h) {
+            $this->crearSlot($this->user, $ana, $h);
+            $this->crearSlot($this->user, $laura, $h);
+        }
+        $promo = new PromoInput('secuencia', [$this->componente($ana, 60), $this->componente($laura, 45)]);
+
+        $slots = $this->calcularConPlanes($promo, []);
+
+        $this->assertSlotOfrecido($slots, '10:00', '11:45', [$ana->id, $laura->id], 'secuencia');
+    }
+
+    public function test_calcular_con_planes_secuencial_desalineado_no_ofrece_ese_inicio(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $laura = $this->crearProfesional($this->user, 'Laura');
+        $this->crearSlot($this->user, $ana, '10:00');
+        $this->crearSlot($this->user, $ana, '10:30');
+        foreach (['10:30', '11:30', '12:30'] as $h) {
+            $this->crearSlot($this->user, $laura, $h);
+        }
+        $promo = new PromoInput('secuencia', [$this->componente($ana, 60), $this->componente($laura, 45)]);
+
+        $horas = array_column($this->calcularConPlanes($promo, []), 'hora');
+
+        // 10:00 -> Laura arrancaria 11:00 (sin slot); 10:30 -> Laura 11:30 (con slot).
+        $this->assertSame(['10:30'], $horas);
+    }
+
+    public function test_calcular_con_planes_paralelo_no_cae_a_secuencia(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $laura = $this->crearProfesional($this->user, 'Laura');
+        $this->crearSlot($this->user, $ana, '10:00');
+        $this->crearSlot($this->user, $laura, '11:00'); // no coincide con Ana a las 10:00
+        $promo = new PromoInput('paralelo', [$this->componente($ana, 60), $this->componente($laura, 45)]);
+
+        // Aunque Ana 10:00-11:00 + Laura 11:00-11:45 encajaria en secuencia, una
+        // promo en paralelo NUNCA cae a secuencia (ninguna profesional trabaja
+        // en paralelo consigo misma).
+        $this->assertSame([], $this->calcularConPlanes($promo, []));
+    }
+
+    public function test_calcular_con_planes_grupos_sueltos_elige_paralelo_cuando_coincide(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $laura = $this->crearProfesional($this->user, 'Laura');
+        $this->crearSlot($this->user, $ana, '10:00');
+        $this->crearSlot($this->user, $laura, '10:00');
+        $grupos = [$this->grupoSuelto($ana, 60), $this->grupoSuelto($laura, 45)];
+
+        $slots = $this->calcularConPlanes(null, $grupos, true);
+
+        $this->assertSlotOfrecido($slots, '10:00', '11:00', [$ana->id, $laura->id], 'paralelo');
+    }
+
+    public function test_calcular_con_planes_grupos_sueltos_cae_a_secuencia_si_paralelo_no_encaja(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $laura = $this->crearProfesional($this->user, 'Laura');
+        $this->crearSlot($this->user, $ana, '10:00');
+        $this->crearSlot($this->user, $laura, '11:00'); // sin slot de Laura a las 10:00: paralelo no encaja
+        $grupos = [$this->grupoSuelto($ana, 60), $this->grupoSuelto($laura, 45)];
+
+        $slots = $this->calcularConPlanes(null, $grupos, true);
+
+        $this->assertSlotOfrecido($slots, '10:00', '11:45', [$ana->id, $laura->id], 'secuencia');
+    }
+
+    public function test_calcular_con_planes_respeta_ocupacion_por_tramo(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $laura = $this->crearProfesional($this->user, 'Laura');
+        $this->crearSlot($this->user, $ana, '10:00');
+        $this->crearSlot($this->user, $laura, '11:00');
+        $this->turno($laura, '11:00', 45); // Laura ya ocupada en su propio tramo
+        $promo = new PromoInput('secuencia', [$this->componente($ana, 60), $this->componente($laura, 45)]);
+
+        $this->assertSame([], $this->calcularConPlanes($promo, []));
+    }
+
+    public function test_calcular_con_planes_respeta_dia_de_atencion_por_tramo(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $laura = $this->crearProfesional($this->user, 'Laura');
+        $this->crearSlot($this->user, $ana, '10:00');
+        $this->crearSlot($this->user, $laura, '11:00');
+        // self::FECHA (2099-06-10) es miercoles (dayOfWeek 3); Laura solo lunes/martes.
+        $laura->update(['dias_atencion' => [1, 2]]);
+        $promo = new PromoInput('secuencia', [$this->componente($ana, 60), $this->componente($laura, 45)]);
+
+        $this->assertSame([], $this->calcularConPlanes($promo, []));
     }
 }
