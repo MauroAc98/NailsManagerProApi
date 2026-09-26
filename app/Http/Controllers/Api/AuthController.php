@@ -167,6 +167,7 @@ class AuthController extends Controller
             'fcm_token' => 'sometimes|nullable|string',
             'password' => 'sometimes|string|min:8|confirmed',
             'locale' => 'sometimes|nullable|in:es,pt-BR,en',
+            'atiende_en_paralelo' => 'sometimes|boolean',
             // Categorías personalizadas de gastos / ingresos. Lista completa
             // (reemplaza el set actual del usuario), 1..30 ítems, cada nombre
             // string no vacío de hasta 40 chars y sin repetir. regex:/\S/
@@ -315,6 +316,28 @@ class AuthController extends Controller
                 if ($errores !== []) {
                     throw ValidationException::withMessages($errores);
                 }
+            }
+        }
+
+        // Apagar "atiende en paralelo" con promos paralelas activas dejaría
+        // su duración y su oferta cambiadas en silencio: se bloquea y se
+        // devuelve la lista para que la dueña las pase a secuencia primero.
+        // Solo cuenta la transición ON -> OFF (apagar algo ya apagado es
+        // idempotente) y solo las promos de este negocio.
+        if (array_key_exists('atiende_en_paralelo', $data) && ! $data['atiende_en_paralelo'] && $user->atiende_en_paralelo) {
+            $promosParalelas = $user->servicios()
+                ->where('es_promo', true)
+                ->where('activo', true)
+                ->where('modo_promo', 'paralelo')
+                ->orderBy('id')
+                ->get(['id', 'nombre']);
+
+            if ($promosParalelas->isNotEmpty()) {
+                return response()->json([
+                    'message' => 'No podés apagar "Atiende en paralelo" mientras tengas promos en paralelo activas. Pasalas a secuencia primero.',
+                    'code' => 'promos_paralelas_activas',
+                    'promos' => $promosParalelas->map(fn ($promo) => ['id' => $promo->id, 'nombre' => $promo->nombre])->all(),
+                ], 422);
             }
         }
 
