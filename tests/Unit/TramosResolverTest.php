@@ -161,6 +161,46 @@ class TramosResolverTest extends TestCase
         $this->resolver()->planes($promo, [], true);
     }
 
+    // ---- 1b.4 promo + loose groups: one plan, loose appended after the promo end ----
+
+    public function test_promo_secuencia_mas_suelto_agrega_el_suelto_tras_el_fin_de_la_promo(): void
+    {
+        $planes = $this->resolver()->planes($this->promo(PlanReserva::SECUENCIA), [$this->suelto(self::MARTA, 13, 30)], true);
+
+        $this->assertCount(1, $planes);
+        $this->assertSame(PlanReserva::SECUENCIA, $planes[0]->modo);
+        $this->assertSame([
+            $this->tramo(self::ANA, 0, 60, [11], 13000),
+            $this->tramo(self::LAURA, 60, 45, [12], 9000),
+            $this->tramo(self::MARTA, 105, 30, [13]),
+        ], $planes[0]->tramos);
+        $this->assertSame(135, $planes[0]->duracionTotalMinutos());
+    }
+
+    public function test_promo_paralelo_mas_suelto_agrega_el_suelto_tras_el_fin_del_paralelo(): void
+    {
+        $planes = $this->resolver()->planes($this->promo(PlanReserva::PARALELO), [$this->suelto(self::MARTA, 13, 30)], true);
+
+        $this->assertCount(1, $planes);
+        $this->assertSame(PlanReserva::PARALELO, $planes[0]->modo);
+        $this->assertSame([
+            $this->tramo(self::ANA, 0, 60, [11], 13000),
+            $this->tramo(self::LAURA, 0, 45, [12], 9000),
+            $this->tramo(self::MARTA, 60, 30, [13]),
+        ], $planes[0]->tramos);
+        $this->assertSame(90, $planes[0]->duracionTotalMinutos());
+    }
+
+    public function test_promo_mas_varios_sueltos_los_encadena_en_orden_de_seleccion(): void
+    {
+        $sueltos = [$this->suelto(self::MARTA, 13, 30), $this->suelto(self::ANA, 14, 15)];
+
+        $planes = $this->resolver()->planes($this->promo(PlanReserva::PARALELO), $sueltos, true);
+
+        $this->assertCount(1, $planes);
+        $this->assertSame([60, 90], array_column(array_slice($planes[0]->tramos, 2), 'offset_minutos'));
+    }
+
     // ---- 1b.5 loose groups only: [paralelo, secuencia] or [secuencia] ----
 
     public function test_dos_grupos_sueltos_con_paralelo_habilitado_ofrecen_paralelo_y_luego_secuencia(): void

@@ -19,7 +19,7 @@ class TramosResolver
     public function planes(?PromoInput $promo, array $grupos, bool $paraleloHabilitado): array
     {
         if ($promo !== null && $promo->componentes !== []) {
-            return [$this->planPromo($promo)];
+            return [$this->conSueltosAlFinal($this->planPromo($promo), $grupos)];
         }
 
         // Una sola profesional (o ninguna) sin promo es legacy: no hay plan.
@@ -65,6 +65,24 @@ class TramosResolver
         }
 
         return $tramos;
+    }
+
+    /**
+     * Con promo hay UN solo plan (el modo de la promo): los sueltos van en
+     * secuencia despues del fin de la promo.
+     *
+     * @param  array<int, GrupoSuelto>  $grupos
+     */
+    private function conSueltosAlFinal(PlanReserva $plan, array $grupos): PlanReserva
+    {
+        if ($grupos === []) {
+            return $plan;
+        }
+
+        return new PlanReserva($plan->modo, [
+            ...$plan->tramos,
+            ...$this->tramosEnSecuencia($grupos, $plan->duracionTotalMinutos()),
+        ]);
     }
 
     private function planPromo(PromoInput $promo): PlanReserva
