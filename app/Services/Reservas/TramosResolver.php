@@ -47,7 +47,7 @@ class TramosResolver
                 $grupos,
             ));
         }
-        $planes[] = new PlanReserva(PlanReserva::SECUENCIA, $this->tramosEnSecuencia($grupos, 0));
+        $planes[] = new PlanReserva(PlanReserva::SECUENCIA, $this->fusionar($this->tramosEnSecuencia($grupos, 0)));
 
         return $planes;
     }
@@ -79,10 +79,10 @@ class TramosResolver
             return $plan;
         }
 
-        return new PlanReserva($plan->modo, [
+        return new PlanReserva($plan->modo, $this->fusionar([
             ...$plan->tramos,
             ...$this->tramosEnSecuencia($grupos, $plan->duracionTotalMinutos()),
-        ]);
+        ]));
     }
 
     private function planPromo(PromoInput $promo): PlanReserva
@@ -107,7 +107,36 @@ class TramosResolver
             $offset += $componente['duracion_minutos'];
         }
 
-        return new PlanReserva($promo->modo, $tramos);
+        return new PlanReserva($promo->modo, $this->fusionar($tramos));
+    }
+
+    /**
+     * Un tramo cuyo offset coincide con el fin de un tramo anterior de la MISMA
+     * profesional lo extiende: duraciones sumadas, servicios concatenados y
+     * precios sugeridos no nulos sumados. En paralelo (offsets en 0) nunca fusiona.
+     *
+     * @param  array<int, array>  $tramos
+     * @return array<int, array>
+     */
+    private function fusionar(array $tramos): array
+    {
+        $fusionados = [];
+        foreach ($tramos as $tramo) {
+            foreach ($fusionados as $i => $previo) {
+                if ($previo['profesional_id'] === $tramo['profesional_id']
+                    && $previo['offset_minutos'] + $previo['duracion_minutos'] === $tramo['offset_minutos']) {
+                    $fusionados[$i]['duracion_minutos'] += $tramo['duracion_minutos'];
+                    $fusionados[$i]['servicio_ids'] = [...$previo['servicio_ids'], ...$tramo['servicio_ids']];
+                    $fusionados[$i]['precio_sugerido'] = $previo['precio_sugerido'] === null && $tramo['precio_sugerido'] === null
+                        ? null
+                        : ($previo['precio_sugerido'] ?? 0) + ($tramo['precio_sugerido'] ?? 0);
+                    continue 2;
+                }
+            }
+            $fusionados[] = $tramo;
+        }
+
+        return $fusionados;
     }
 
     /**

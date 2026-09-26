@@ -201,6 +201,71 @@ class TramosResolverTest extends TestCase
         $this->assertSame([60, 90], array_column(array_slice($planes[0]->tramos, 2), 'offset_minutos'));
     }
 
+    // ---- 1b.4 same-professional merge: offset == end of an earlier tramo of the same professional ----
+
+    public function test_secuencia_fusiona_componentes_consecutivos_de_la_misma_profesional_sumando_precios(): void
+    {
+        $promo = new PromoInput(PlanReserva::SECUENCIA, [
+            ['servicio_id' => 11, 'profesional_id' => self::ANA, 'duracion_minutos' => 60, 'precio' => 13000],
+            ['servicio_id' => 12, 'profesional_id' => self::ANA, 'duracion_minutos' => 45, 'precio' => 9000],
+        ]);
+
+        $planes = $this->resolver()->planes($promo, [], true);
+
+        $this->assertSame([$this->tramo(self::ANA, 0, 105, [11, 12], 22000)], $planes[0]->tramos);
+    }
+
+    public function test_secuencia_no_fusiona_tramos_de_la_misma_profesional_separados_por_otra(): void
+    {
+        $grupos = [$this->suelto(self::ANA, 11, 30), $this->suelto(self::LAURA, 12, 45), $this->suelto(self::ANA, 13, 30)];
+
+        $planes = $this->resolver()->planes(null, $grupos, false);
+
+        $this->assertCount(3, $planes[0]->tramos);
+    }
+
+    public function test_grupos_sueltos_consecutivos_de_la_misma_profesional_se_fusionan_en_secuencia(): void
+    {
+        $grupos = [$this->suelto(self::ANA, 11, 30), $this->suelto(self::ANA, 13, 60), $this->suelto(self::LAURA, 12, 45)];
+
+        $planes = $this->resolver()->planes(null, $grupos, true);
+
+        $this->assertSame([PlanReserva::SECUENCIA], array_map(fn ($p) => $p->modo, $planes));
+        $this->assertSame([
+            $this->tramo(self::ANA, 0, 90, [11, 13]),
+            $this->tramo(self::LAURA, 90, 45, [12]),
+        ], $planes[0]->tramos);
+    }
+
+    public function test_suelto_de_la_profesional_que_termina_al_fin_de_la_promo_extiende_su_tramo(): void
+    {
+        $planes = $this->resolver()->planes($this->promo(PlanReserva::PARALELO), [$this->suelto(self::ANA, 13, 30)], true);
+
+        $this->assertSame([
+            $this->tramo(self::ANA, 0, 90, [11, 13], 13000),
+            $this->tramo(self::LAURA, 0, 45, [12], 9000),
+        ], $planes[0]->tramos);
+    }
+
+    public function test_suelto_no_se_fusiona_con_un_tramo_que_termino_antes_del_fin_de_la_promo(): void
+    {
+        // Laura termina en 45 pero el suelto arranca en 60 (fin del paralelo): queda separado.
+        $planes = $this->resolver()->planes($this->promo(PlanReserva::PARALELO), [$this->suelto(self::LAURA, 13, 30)], true);
+
+        $this->assertCount(3, $planes[0]->tramos);
+        $this->assertSame($this->tramo(self::LAURA, 60, 30, [13]), $planes[0]->tramos[2]);
+    }
+
+    public function test_suelto_de_la_ultima_profesional_de_una_promo_secuencia_extiende_su_tramo(): void
+    {
+        $planes = $this->resolver()->planes($this->promo(PlanReserva::SECUENCIA), [$this->suelto(self::LAURA, 13, 30)], true);
+
+        $this->assertSame([
+            $this->tramo(self::ANA, 0, 60, [11], 13000),
+            $this->tramo(self::LAURA, 60, 75, [12, 13], 9000),
+        ], $planes[0]->tramos);
+    }
+
     // ---- 1b.5 loose groups only: [paralelo, secuencia] or [secuencia] ----
 
     public function test_dos_grupos_sueltos_con_paralelo_habilitado_ofrecen_paralelo_y_luego_secuencia(): void
