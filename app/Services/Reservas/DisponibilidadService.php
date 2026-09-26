@@ -146,13 +146,7 @@ class DisponibilidadService
                 if ($inicio->lt($minimo)) {
                     continue;
                 }
-                if ($this->solapaAlguno($holds[$prof->id] ?? [], $inicio, $fin)) {
-                    continue;
-                }
-                if ($this->solapaAlguno($ocupacion[$prof->id] ?? [], $inicio, $fin)) {
-                    continue;
-                }
-                if ($this->solapaAlguno($bloqueosParciales, $inicio, $fin)) {
+                if (! $this->profesionalLibre($prof->id, $inicio, $fin, $holds, $ocupacion, $bloqueosParciales)) {
                     continue;
                 }
 
@@ -264,7 +258,9 @@ class DisponibilidadService
     /**
      * Holds vivos (held/pending_payment con expira_en futuro) del rango,
      * agrupados por fecha y por profesional_id. Filas sin profesional_id
-     * (legacy) no bloquean a nadie.
+     * (legacy) no bloquean a nadie. Un hold multi-tramo (reserva.tramos no
+     * nulo) bloquea a CADA profesional involucrada en el intervalo de SU
+     * PROPIO tramo, no solo a reserva.profesional_id (la ancla).
      *
      * @return array<string, array<int, array<int, array{0: Carbon, 1: Carbon}>>> fecha => profesional_id => intervalos
      */
@@ -279,8 +275,10 @@ class DisponibilidadService
 
         $holds = [];
         foreach ($reservas as $reserva) {
-            [$fecha, $intervalo] = $this->intervaloDeHold($reserva);
-            $holds[$fecha][$reserva->profesional_id][] = $intervalo;
+            [$fecha, $tramos] = $this->tramosDeHold($reserva);
+            foreach ($tramos as $tramo) {
+                $holds[$fecha][$tramo['profesional_id']][] = [$tramo['inicio'], $tramo['fin']];
+            }
         }
 
         return $holds;
@@ -320,13 +318,41 @@ class DisponibilidadService
         return $resultado;
     }
 
-    /** @return array{0: string, 1: array{0: Carbon, 1: Carbon}} */
-    private function intervaloDeHold(ReservaWeb $reserva): array
+    /**
+     * Tramos de UN hold como intervalos [inicio, fin) por profesional. Sin
+     * reserva.tramos (legacy, un solo tramo): un unico intervalo para
+     * reserva.profesional_id (la ancla), igual que antes. Con reserva.tramos
+     * (multi-profesional): un intervalo por cada tramo, con SU PROPIO
+     * profesional_id y su propio offset/duracion — asi un hold de promo o de
+     * servicios sueltos con distintas profesionales bloquea a cada una en su
+     * propio horario, no solo a la ancla.
+     *
+     * @return array{0: string, 1: array<int, array{profesional_id: int, inicio: Carbon, fin: Carbon}>}
+     */
+    private function tramosDeHold(ReservaWeb $reserva): array
     {
         $fecha = substr((string) $reserva->getRawOriginal('fecha'), 0, 10);
-        $inicio = Carbon::parse($fecha . ' ' . $reserva->getRawOriginal('slot_hora'));
+        $inicioReserva = Carbon::parse($fecha . ' ' . $reserva->getRawOriginal('slot_hora'));
 
-        return [$fecha, [$inicio, $inicio->copy()->addMinutes((int) $reserva->duracion_total_minutos)]];
+        if ($reserva->tramos === null) {
+            return [$fecha, [[
+                'profesional_id' => $reserva->profesional_id,
+                'inicio' => $inicioReserva,
+                'fin' => $inicioReserva->copy()->addMinutes((int) $reserva->duracion_total_minutos),
+            ]]];
+        }
+
+        $tramos = [];
+        foreach ($reserva->tramos as $tramo) {
+            $inicio = $inicioReserva->copy()->addMinutes((int) $tramo['offset_minutos']);
+            $tramos[] = [
+                'profesional_id' => (int) $tramo['profesional_id'],
+                'inicio' => $inicio,
+                'fin' => $inicio->copy()->addMinutes((int) $tramo['duracion_minutos']),
+            ];
+        }
+
+        return [$fecha, $tramos];
     }
 
     /**
@@ -355,7 +381,12 @@ class DisponibilidadService
             $query->where('id', '!=', $ignorarReservaId);
         }
         foreach ($query->get() as $reserva) {
-            $intervalos[] = $this->intervaloDeHold($reserva)[1];
+            [, $tramos] = $this->tramosDeHold($reserva);
+            foreach ($tramos as $tramo) {
+                if ($tramo['profesional_id'] === $profesionalId) {
+                    $intervalos[] = [$tramo['inicio'], $tramo['fin']];
+                }
+            }
         }
 
         usort($intervalos, fn ($a, $b) => $a[0] <=> $b[0]);
@@ -387,6 +418,30 @@ class DisponibilidadService
         }
 
         return ! $this->solapaAlguno($this->ocupacionDelDia($profesionalId, $fecha, $ahora, $ignorarReservaId), $inicio, $fin);
+    }
+
+    /**
+     * Un momento [$inicio, $fin) de UNA profesional no pisa ninguno de sus
+     * propios holds vivos, turnos/ocupacion ni bloqueos parciales. Extraido de
+     * calcularDia para que un futuro loop multi-tramo (varias profesionales,
+     * un intervalo propio cada una) pueda reusar exactamente el mismo chequeo
+     * por profesional sin duplicar las tres llamadas a solapaAlguno().
+     *
+     * @param  array<int, array<int, array{0: Carbon, 1: Carbon}>>  $holds  profesional_id => intervalos
+     * @param  array<int, array<int, array{0: Carbon, 1: Carbon}>>  $ocupacion  profesional_id => intervalos
+     * @param  array<int, array{0: Carbon, 1: Carbon}>  $bloqueosParciales  intervalos ya mergeados (propios + salon-wide)
+     */
+    private function profesionalLibre(
+        int $profesionalId,
+        Carbon $inicio,
+        Carbon $fin,
+        array $holds,
+        array $ocupacion,
+        array $bloqueosParciales,
+    ): bool {
+        return ! $this->solapaAlguno($holds[$profesionalId] ?? [], $inicio, $fin)
+            && ! $this->solapaAlguno($ocupacion[$profesionalId] ?? [], $inicio, $fin)
+            && ! $this->solapaAlguno($bloqueosParciales, $inicio, $fin);
     }
 
     /** Solapamiento semi-abierto: los intervalos adyacentes no se pisan. */
