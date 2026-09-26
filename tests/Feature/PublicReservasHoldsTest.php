@@ -347,7 +347,7 @@ class PublicReservasHoldsTest extends TestCase
         }
 
         // Las lecturas de disponibilidad no dependen del flag.
-        $this->getJson("/api/public/{$this->user->slug}/disponibilidad?fecha=".self::FECHA."&servicio_ids[]={$this->servicio->id}")->assertOk();
+        $this->getJson("/api/public/{$this->user->slug}/disponibilidad?fecha=".self::FECHA."&asignaciones[0][servicio_ids][]={$this->servicio->id}")->assertOk();
     }
 
     public function test_la_ruta_vieja_post_reservas_ya_no_existe(): void

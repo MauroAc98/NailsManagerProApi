@@ -137,8 +137,11 @@ class PublicDisponibilidadDiasTest extends TestCase
         $this->hold('2099-06-11', '12:00:00', 180, $ana);
 
         foreach ([$ana->id, $bea->id, null] as $profId) {
+            // El endpoint /disponibilidad (3a3) solo acepta `asignaciones`;
+            // /disponibilidad/dias (aun sin migrar, 3a3b) sigue con el shape viejo.
+            $extraAsignaciones = $profId ? "&asignaciones[0][profesional_id]={$profId}" : '';
             $extra = $profId ? "&profesional_id={$profId}" : '';
-            $slots = $this->getJson("/api/public/{$this->user->slug}/disponibilidad?fecha=2099-06-11&servicio_ids[]={$s->id}{$extra}")->json('slots');
+            $slots = $this->getJson("/api/public/{$this->user->slug}/disponibilidad?fecha=2099-06-11&asignaciones[0][servicio_ids][]={$s->id}{$extraAsignaciones}")->json('slots');
             $dias = $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-11&servicio_ids[]={$s->id}{$extra}"))->json('dias');
 
             $this->assertSame(count($slots), $dias[0]['libres'] ?? 0, "prof {$profId}");
@@ -291,7 +294,7 @@ class PublicDisponibilidadDiasTest extends TestCase
 
         $esperado = [];
         for ($d = Carbon::parse('2099-06-10'); $d->lte(Carbon::parse('2099-06-20')); $d->addDay()) {
-            $slots = $this->getJson("/api/public/{$this->user->slug}/disponibilidad?fecha={$d->format('Y-m-d')}&servicio_ids[]={$s->id}")->json('slots');
+            $slots = $this->getJson("/api/public/{$this->user->slug}/disponibilidad?fecha={$d->format('Y-m-d')}&asignaciones[0][servicio_ids][]={$s->id}")->json('slots');
             if (count($slots) > 0) {
                 $esperado[] = ['fecha' => $d->format('Y-m-d'), 'libres' => count($slots)];
             }
