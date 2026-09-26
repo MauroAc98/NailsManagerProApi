@@ -323,6 +323,62 @@ class ServicioComponentesTest extends AdminContractTestCase
         );
     }
 
+    // 2a.5 — destroy guard
+    public function test_destroy_is_blocked_for_a_service_used_as_a_component_and_lists_the_promos(): void
+    {
+        $this->ponerComponentes($this->payloadValido())->assertOk();
+        $otraPromo = Servicio::create(['user_id' => $this->user->id, 'nombre' => 'Otra promo', 'duracion_minutos' => 60, 'precio' => 1, 'activo' => true, 'es_promo' => true]);
+        $this->admin()->putJson("/api/servicios/{$otraPromo->id}/componentes", [
+            'modo_promo' => 'secuencia',
+            'componentes' => [['servicio_id' => $this->softgel->id, 'profesional_id' => $this->ana->id]],
+        ])->assertOk();
+
+        $this->admin()->deleteJson("/api/servicios/{$this->softgel->id}")
+            ->assertStatus(422)
+            ->assertJsonPath('code', 'servicio_en_promo')
+            ->assertJsonPath('promos', [
+                ['id' => $this->promo->id, 'nombre' => 'Softgel + Semis pies'],
+                ['id' => $otraPromo->id, 'nombre' => 'Otra promo'],
+            ])
+            ->assertJsonStructure(['message']);
+
+        $this->assertDatabaseHas('servicios', ['id' => $this->softgel->id]);
+    }
+
+    public function test_destroy_of_a_service_not_used_as_a_component_is_unchanged(): void
+    {
+        $this->ponerComponentes($this->payloadValido())->assertOk();
+        $libre = Servicio::create(['user_id' => $this->user->id, 'nombre' => 'Libre', 'duracion_minutos' => 30, 'precio' => 1, 'activo' => true]);
+
+        $this->admin()->deleteJson("/api/servicios/{$libre->id}")
+            ->assertOk()->assertExactJson(['message' => 'Servicio eliminado correctamente.']);
+
+        $this->assertDatabaseMissing('servicios', ['id' => $libre->id]);
+    }
+
+    public function test_destroying_the_promo_itself_still_works_and_frees_its_components(): void
+    {
+        $this->ponerComponentes($this->payloadValido())->assertOk();
+
+        $this->admin()->deleteJson("/api/servicios/{$this->promo->id}")->assertOk();
+        $this->admin()->deleteJson("/api/servicios/{$this->softgel->id}")->assertOk();
+
+        $this->assertDatabaseCount('servicio_componentes', 0);
+    }
+
+    public function test_legacy_turnos_conflict_takes_precedence_over_the_promo_guard(): void
+    {
+        $this->admin()->putJson("/api/servicios/{$this->promo->id}/componentes", [
+            'modo_promo' => 'secuencia',
+            'componentes' => [['servicio_id' => $this->servicio->id, 'profesional_id' => $this->ana->id]],
+        ])->assertOk();
+        $this->crearTurno();
+
+        $this->admin()->deleteJson("/api/servicios/{$this->servicio->id}")
+            ->assertStatus(409)
+            ->assertJsonMissingPath('code');
+    }
+
     public function test_parallel_is_treated_as_off_with_a_single_active_professional(): void
     {
         $this->encenderParalelo();
