@@ -22,7 +22,49 @@ class TramosResolver
             return [$this->planPromo($promo)];
         }
 
-        return [];
+        // Una sola profesional (o ninguna) sin promo es legacy: no hay plan.
+        if (count($grupos) < 2) {
+            return [];
+        }
+
+        return $this->planesSueltos($grupos, $paraleloHabilitado);
+    }
+
+    /**
+     * Grupos sueltos sin promo: paralelo primero (solo si el estudio atiende en
+     * paralelo y las profesionales son todas distintas), secuencia siempre.
+     *
+     * @param  array<int, GrupoSuelto>  $grupos
+     * @return array<int, PlanReserva>
+     */
+    private function planesSueltos(array $grupos, bool $paraleloHabilitado): array
+    {
+        $profesionales = array_map(fn (GrupoSuelto $g) => $g->profesionalId, $grupos);
+        $planes = [];
+        if ($paraleloHabilitado && count(array_unique($profesionales)) === count($profesionales)) {
+            $planes[] = new PlanReserva(PlanReserva::PARALELO, array_map(
+                fn (GrupoSuelto $g) => $this->tramo($g->profesionalId, 0, $g->duracionMinutos, $g->servicioIds, null),
+                $grupos,
+            ));
+        }
+        $planes[] = new PlanReserva(PlanReserva::SECUENCIA, $this->tramosEnSecuencia($grupos, 0));
+
+        return $planes;
+    }
+
+    /**
+     * @param  array<int, GrupoSuelto>  $grupos
+     * @return array<int, array>
+     */
+    private function tramosEnSecuencia(array $grupos, int $offset): array
+    {
+        $tramos = [];
+        foreach ($grupos as $grupo) {
+            $tramos[] = $this->tramo($grupo->profesionalId, $offset, $grupo->duracionMinutos, $grupo->servicioIds, null);
+            $offset += $grupo->duracionMinutos;
+        }
+
+        return $tramos;
     }
 
     private function planPromo(PromoInput $promo): PlanReserva

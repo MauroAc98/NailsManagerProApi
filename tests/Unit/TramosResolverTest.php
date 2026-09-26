@@ -160,4 +160,59 @@ class TramosResolverTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
         $this->resolver()->planes($promo, [], true);
     }
+
+    // ---- 1b.5 loose groups only: [paralelo, secuencia] or [secuencia] ----
+
+    public function test_dos_grupos_sueltos_con_paralelo_habilitado_ofrecen_paralelo_y_luego_secuencia(): void
+    {
+        $grupos = [$this->suelto(self::ANA, 11, 60), $this->suelto(self::LAURA, 12, 45)];
+
+        $planes = $this->resolver()->planes(null, $grupos, true);
+
+        $this->assertSame([PlanReserva::PARALELO, PlanReserva::SECUENCIA], array_map(fn ($p) => $p->modo, $planes));
+        $this->assertSame([
+            $this->tramo(self::ANA, 0, 60, [11]),
+            $this->tramo(self::LAURA, 0, 45, [12]),
+        ], $planes[0]->tramos);
+        $this->assertSame(60, $planes[0]->duracionTotalMinutos());
+        $this->assertSame([
+            $this->tramo(self::ANA, 0, 60, [11]),
+            $this->tramo(self::LAURA, 60, 45, [12]),
+        ], $planes[1]->tramos);
+        $this->assertSame(105, $planes[1]->duracionTotalMinutos());
+    }
+
+    public function test_dos_grupos_sueltos_con_paralelo_deshabilitado_solo_ofrecen_secuencia(): void
+    {
+        $grupos = [$this->suelto(self::ANA, 11, 60), $this->suelto(self::LAURA, 12, 45)];
+
+        $planes = $this->resolver()->planes(null, $grupos, false);
+
+        $this->assertSame([PlanReserva::SECUENCIA], array_map(fn ($p) => $p->modo, $planes));
+    }
+
+    public function test_la_secuencia_de_grupos_sueltos_respeta_el_orden_de_seleccion(): void
+    {
+        $grupos = [$this->suelto(self::LAURA, 12, 45), $this->suelto(self::ANA, 11, 60)];
+
+        $planes = $this->resolver()->planes(null, $grupos, false);
+
+        $this->assertSame([
+            $this->tramo(self::LAURA, 0, 45, [12]),
+            $this->tramo(self::ANA, 45, 60, [11]),
+        ], $planes[0]->tramos);
+    }
+
+    public function test_paralelo_de_grupos_sueltos_se_omite_si_se_repite_una_profesional(): void
+    {
+        $grupos = [
+            $this->suelto(self::ANA, 11, 30),
+            $this->suelto(self::LAURA, 12, 45),
+            $this->suelto(self::ANA, 13, 30),
+        ];
+
+        $planes = $this->resolver()->planes(null, $grupos, true);
+
+        $this->assertSame([PlanReserva::SECUENCIA], array_map(fn ($p) => $p->modo, $planes));
+    }
 }
