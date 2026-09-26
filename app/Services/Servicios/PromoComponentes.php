@@ -107,15 +107,74 @@ class PromoComponentes
 
     /**
      * Additive keys appended to the GET-one servicio response. A servicio
-     * without components yields "nothing configured" values.
+     * without components yields "nothing configured" values. The derived
+     * duration and price are computed live from the components' current
+     * services, so they stay right even when the persisted values go stale.
+     * A promo with `problemas` is not bookable online.
      */
     public function detalle(Servicio $servicio): array
     {
+        $componentes = $servicio->componentes()->with(['componenteServicio', 'profesional'])->get();
+
+        if ($componentes->isEmpty()) {
+            return [
+                'componentes' => [],
+                'problemas' => [],
+                'duracion_derivada' => null,
+                'precio_componentes' => null,
+            ];
+        }
+
+        $duraciones = $componentes->map(fn ($c) => $c->componenteServicio->duracion_minutos);
+
         return [
-            'componentes' => [],
-            'problemas' => [],
-            'duracion_derivada' => null,
-            'precio_componentes' => null,
+            'componentes' => $componentes->map(fn ($c) => [
+                'orden' => $c->orden,
+                'servicio_id' => $c->componente_servicio_id,
+                'nombre' => $c->componenteServicio->nombre,
+                'duracion_minutos' => $c->componenteServicio->duracion_minutos,
+                'precio' => $c->componenteServicio->precio,
+                'profesional_id' => $c->profesional_id,
+                'profesional_nombre' => $c->profesional->nombre,
+            ])->all(),
+            'problemas' => $this->problemas($componentes),
+            'duracion_derivada' => $servicio->modo_promo === self::MODO_PARALELO ? $duraciones->max() : $duraciones->sum(),
+            'precio_componentes' => round($componentes->sum(fn ($c) => (float) $c->componenteServicio->precio), 2),
         ];
+    }
+
+    /**
+     * Configuration warnings: a component whose professional was deactivated
+     * or no longer offers the component's service.
+     *
+     * @return array<int, array{codigo:string, orden:int, profesional_id:int, servicio_id:int, mensaje:string}>
+     */
+    private function problemas($componentes): array
+    {
+        $problemas = [];
+
+        foreach ($componentes as $componente) {
+            $profesional = $componente->profesional;
+            $servicio = $componente->componenteServicio;
+            $base = [
+                'orden' => $componente->orden,
+                'profesional_id' => $profesional->id,
+                'servicio_id' => $servicio->id,
+            ];
+
+            if (! $profesional->activo) {
+                $problemas[] = ['codigo' => 'profesional_inactiva'] + $base + [
+                    'mensaje' => "{$profesional->nombre} está inactiva y no puede hacer {$servicio->nombre}.",
+                ];
+            }
+
+            if (! $profesional->servicios()->whereKey($servicio->id)->exists()) {
+                $problemas[] = ['codigo' => 'servicio_desvinculado'] + $base + [
+                    'mensaje' => "{$profesional->nombre} ya no ofrece el servicio {$servicio->nombre}.",
+                ];
+            }
+        }
+
+        return $problemas;
     }
 }
