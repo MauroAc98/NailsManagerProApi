@@ -7,6 +7,7 @@ use App\Models\Cliente;
 use App\Models\Profesional;
 use App\Models\ReservaWeb;
 use App\Models\Turno;
+use App\Models\TurnoGrupo;
 use App\Models\User;
 use App\Services\Reservas\DisponibilidadService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -220,7 +221,7 @@ class DisponibilidadServiceTest extends TestCase
 
     // -- 1.10 -----------------------------------------------------
 
-    private function reserva(?Profesional $prof, string $slotHora, int $duracion, ?int $expiraEn, string $estado = 'held'): ReservaWeb
+    private function reserva(?Profesional $prof, string $slotHora, int $duracion, ?int $expiraEn, string $estado = 'held', ?array $tramos = null): ReservaWeb
     {
         return ReservaWeb::create([
             'user_id' => $this->user->id,
@@ -232,7 +233,20 @@ class DisponibilidadServiceTest extends TestCase
             'duracion_total_minutos' => $duracion,
             'estado' => $estado,
             'expira_en' => $expiraEn,
+            'tramos' => $tramos,
         ]);
+    }
+
+    /** @return array{profesional_id: int, offset_minutos: int, duracion_minutos: int, servicio_ids: array, precio_sugerido: null} */
+    private function tramo(Profesional $prof, int $offset, int $duracion): array
+    {
+        return [
+            'profesional_id' => $prof->id,
+            'offset_minutos' => $offset,
+            'duracion_minutos' => $duracion,
+            'servicio_ids' => [],
+            'precio_sugerido' => null,
+        ];
     }
 
     public function test_un_hold_de_una_profesional_no_bloquea_a_otra(): void
@@ -608,5 +622,87 @@ class DisponibilidadServiceTest extends TestCase
         $this->reserva($ana, '14:30:00', 60, $ahora->timestamp + 300); // [14:30, 15:30)
 
         $this->assertSame(['14:00', '15:30'], $this->horas($this->calcular([$s], $ana, $ahora)));
+    }
+
+    // -- 3a1: hold-interval expansion (multi-tramo) -----------------
+
+    /**
+     * reserva.profesional_id (la ancla) es Ana, pero reserva.tramos trae un
+     * segundo tramo secuencial para Laura. El hold debe bloquear a Laura en
+     * SU propio horario (11:00-11:45), no solo a Ana en el suyo.
+     */
+    public function test_un_hold_con_tramos_bloquea_a_cada_profesional_en_su_propio_tramo(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $laura = $this->crearProfesional($this->user, 'Laura');
+        $sAna = $this->crearServicio($this->user, 'Softgel', 60, true, $ana);
+        $sLaura = $this->crearServicio($this->user, 'Semis', 45, true, $laura);
+        $this->crearSlot($this->user, $ana, '10:00');
+        $this->crearSlot($this->user, $laura, '11:00');
+        $ahora = $this->ahora();
+
+        $this->reserva($ana, '10:00:00', 105, $ahora->timestamp + 300, 'held', [
+            $this->tramo($ana, 0, 60),
+            $this->tramo($laura, 60, 45),
+        ]);
+
+        $this->assertSame([], $this->calcular([$sAna], $ana, $ahora));
+        $this->assertSame([], $this->calcular([$sLaura], $laura, $ahora));
+    }
+
+    /**
+     * Triangulacion: un hold en paralelo (offset 0 para ambas) tambien
+     * bloquea a la profesional NO-ancla en su propio horario, y una
+     * profesional totalmente ajena al hold sigue libre.
+     */
+    public function test_un_hold_con_tramos_en_paralelo_bloquea_a_la_no_ancla_y_no_afecta_a_terceras(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $laura = $this->crearProfesional($this->user, 'Laura');
+        $mia = $this->crearProfesional($this->user, 'Mia');
+        $sLaura = $this->crearServicio($this->user, 'Semis', 45, true, $laura);
+        $sMia = $this->crearServicio($this->user, 'Retiro', 30, true, $mia);
+        $this->crearSlot($this->user, $laura, '10:00');
+        $this->crearSlot($this->user, $mia, '10:00');
+        $ahora = $this->ahora();
+
+        $this->reserva($ana, '10:00:00', 60, $ahora->timestamp + 300, 'held', [
+            $this->tramo($ana, 0, 60),
+            $this->tramo($laura, 0, 45),
+        ]);
+
+        $this->assertSame([], $this->calcular([$sLaura], $laura, $ahora));
+        $this->assertSame(['10:00'], $this->horas($this->calcular([$sMia], $mia, $ahora)));
+    }
+
+    // -- 3a1: regresion de aislamiento por profesional en turnos agrupados --
+
+    /**
+     * Documenta (sin cambio de produccion necesario: cada Turno de un grupo
+     * ya guarda su PROPIA profesional_id/fecha_hora/duracion) que un turno
+     * agrupado bloquea a cada profesional SOLO en su propio tramo — ni Ana
+     * bloquea el horario de Laura, ni viceversa, via ocupacionDelDia ni via
+     * calcular().
+     */
+    public function test_un_turno_agrupado_bloquea_a_cada_profesional_en_su_propio_tramo(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $laura = $this->crearProfesional($this->user, 'Laura');
+        $sAna = $this->crearServicio($this->user, 'Softgel', 60, true, $ana);
+        $sLaura = $this->crearServicio($this->user, 'Semis', 45, true, $laura);
+        $this->crearSlot($this->user, $ana, '10:00');
+        $this->crearSlot($this->user, $laura, '11:00');
+
+        $grupo = TurnoGrupo::create(['modo' => 'secuencia']);
+        $this->turno($ana, '10:00', 60)->update(['grupo_id' => $grupo->id]);
+        $this->turno($laura, '11:00', 45)->update(['grupo_id' => $grupo->id]);
+
+        $this->assertSame([], $this->calcular([$sAna], $ana));
+        $this->assertSame([], $this->calcular([$sLaura], $laura));
+
+        $ocupadaAna = (new DisponibilidadService())->ocupacionDelDia($ana->id, self::FECHA, $this->ahora());
+        $ocupadaLaura = (new DisponibilidadService())->ocupacionDelDia($laura->id, self::FECHA, $this->ahora());
+        $this->assertSame(['10:00', '11:00'], [$ocupadaAna[0][0]->format('H:i'), $ocupadaAna[0][1]->format('H:i')]);
+        $this->assertSame(['11:00', '11:45'], [$ocupadaLaura[0][0]->format('H:i'), $ocupadaLaura[0][1]->format('H:i')]);
     }
 }
