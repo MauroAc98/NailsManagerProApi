@@ -33,20 +33,42 @@ class TramosResolver
             throw new InvalidArgumentException('Una promo en paralelo exige profesionales distintas.');
         }
 
+        $precios = $this->prorratear($promo);
         $tramos = [];
         $offset = 0;
-        foreach ($promo->componentes as $componente) {
+        foreach ($promo->componentes as $i => $componente) {
             $tramos[] = $this->tramo(
                 $componente['profesional_id'],
                 $paralelo ? 0 : $offset,
                 $componente['duracion_minutos'],
                 [$componente['servicio_id']],
-                $componente['precio'],
+                $precios[$i],
             );
             $offset += $componente['duracion_minutos'];
         }
 
         return new PlanReserva($promo->modo, $tramos);
+    }
+
+    /**
+     * Precio del tramo = precioPromo x standalone / suma de standalone, half-up a
+     * pesos enteros; el ULTIMO recibe precioPromo menos lo repartido (suma exacta).
+     *
+     * @return array<int, int>
+     */
+    private function prorratear(PromoInput $promo): array
+    {
+        $standalone = array_column($promo->componentes, 'precio');
+        $suma = array_sum($standalone);
+        $total = $promo->precioPromo ?? $suma;
+
+        $precios = [];
+        foreach (array_slice($standalone, 0, -1, true) as $i => $precio) {
+            $precios[$i] = $suma > 0 ? intdiv(2 * $total * $precio + $suma, 2 * $suma) : 0;
+        }
+        $precios[array_key_last($standalone)] = $total - array_sum($precios);
+
+        return $precios;
     }
 
     private function tramo(int $profesionalId, int $offset, int $duracion, array $servicioIds, ?int $precio): array

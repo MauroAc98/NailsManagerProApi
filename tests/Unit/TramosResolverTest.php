@@ -98,6 +98,58 @@ class TramosResolverTest extends TestCase
         $this->assertSame(60, $planes[0]->duracionTotalMinutos());
     }
 
+    // ---- 1b.3 proportional proration (half-up, remainder to the last tramo) ----
+
+    public function test_prorrateo_del_precio_pisado_reparte_proporcional_con_el_resto_al_ultimo(): void
+    {
+        $tramos = $this->resolver()->planes($this->promo(PlanReserva::SECUENCIA, 18000), [], false)[0]->tramos;
+
+        $this->assertSame([10636, 7364], array_column($tramos, 'precio_sugerido'));
+    }
+
+    public function test_prorrateo_sin_pisar_precio_devuelve_los_precios_standalone(): void
+    {
+        $tramos = $this->resolver()->planes($this->promo(PlanReserva::SECUENCIA, 22000), [], false)[0]->tramos;
+
+        $this->assertSame([13000, 9000], array_column($tramos, 'precio_sugerido'));
+    }
+
+    public function test_prorrateo_de_tres_componentes_iguales_deja_el_resto_en_el_ultimo(): void
+    {
+        $componentes = array_map(fn (int $i) => [
+            'servicio_id' => 20 + $i, 'profesional_id' => 30 + $i, 'duracion_minutos' => 30, 'precio' => 1000,
+        ], [1, 2, 3]);
+
+        $tramos = $this->resolver()->planes(new PromoInput(PlanReserva::PARALELO, $componentes, 10000), [], false)[0]->tramos;
+
+        $this->assertSame([3333, 3333, 3334], array_column($tramos, 'precio_sugerido'));
+    }
+
+    public function test_prorrateo_redondea_half_up(): void
+    {
+        // 1 x 1/2 = 0.5 -> 1 (half-up); el resto queda en el ultimo.
+        $componentes = [
+            ['servicio_id' => 21, 'profesional_id' => 31, 'duracion_minutos' => 30, 'precio' => 1],
+            ['servicio_id' => 22, 'profesional_id' => 32, 'duracion_minutos' => 30, 'precio' => 1],
+        ];
+
+        $tramos = $this->resolver()->planes(new PromoInput(PlanReserva::SECUENCIA, $componentes, 1), [], false)[0]->tramos;
+
+        $this->assertSame([1, 0], array_column($tramos, 'precio_sugerido'));
+    }
+
+    public function test_prorrateo_con_precios_standalone_en_cero_deja_todo_en_el_ultimo(): void
+    {
+        $componentes = [
+            ['servicio_id' => 21, 'profesional_id' => 31, 'duracion_minutos' => 30, 'precio' => 0],
+            ['servicio_id' => 22, 'profesional_id' => 32, 'duracion_minutos' => 30, 'precio' => 0],
+        ];
+
+        $tramos = $this->resolver()->planes(new PromoInput(PlanReserva::SECUENCIA, $componentes, 500), [], false)[0]->tramos;
+
+        $this->assertSame([0, 500], array_column($tramos, 'precio_sugerido'));
+    }
+
     public function test_promo_paralelo_exige_profesionales_distintas(): void
     {
         $promo = new PromoInput(PlanReserva::PARALELO, [
