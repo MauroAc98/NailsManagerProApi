@@ -8,7 +8,10 @@ use App\Models\Profesional;
 use App\Models\Servicio;
 use App\Models\User;
 use App\Services\Reservas\DisponibilidadService;
+use App\Services\Reservas\GrupoSuelto;
 use App\Services\Reservas\MercadoPagoService;
+use App\Services\Reservas\PromoInput;
+use App\Services\Servicios\PromoComponentes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -155,40 +158,147 @@ class PublicController extends Controller
     }
 
     // ─────────────────────────────────────────────
-    // GET /api/public/{slug}/disponibilidad?fecha=
-    // Slots disponibles para una fecha
+    // GET /api/public/{slug}/disponibilidad?fecha=&asignaciones[]=
+    // Slots disponibles para una fecha. `asignaciones` es la UNICA forma de
+    // pedir disponibilidad (combo-multi-profesional, PR 3a3): un grupo por
+    // servicio(s) + profesional elegida (o null = "Cualquiera", solo valido
+    // con un unico grupo). Un grupo cuyo unico servicio es una promo
+    // componentizada no lleva profesional propia (la fijan sus componentes).
     // ─────────────────────────────────────────────
-    public function disponibilidad(Request $request, string $slug, DisponibilidadService $disponibilidad): JsonResponse
-    {
-        $data = $request->validate([
+    public function disponibilidad(
+        Request $request,
+        string $slug,
+        DisponibilidadService $disponibilidad,
+        PromoComponentes $promoComponentes,
+    ): JsonResponse {
+        $data = $request->validate($this->reglasAsignaciones() + [
             'fecha' => 'required|date_format:Y-m-d|after_or_equal:today',
-            'servicio_ids' => 'required|array|min:1',
-            'servicio_ids.*' => 'integer',
-            'profesional_id' => 'nullable|integer',
         ]);
 
         $user = $this->getProfesional($slug);
 
-        $resuelto = $this->resolverServiciosYProfesional($user, $data);
+        $resuelto = $this->resolverAsignaciones($user, $data['asignaciones'], $promoComponentes);
         if ($resuelto instanceof JsonResponse) {
             return $resuelto;
         }
-        [$servicios, $profesional] = $resuelto;
 
-        $slots = $disponibilidad->calcular(
+        if (! $resuelto['usarPlanes']) {
+            $servicios = $resuelto['servicios'];
+            $slots = $disponibilidad->calcular(
+                $user,
+                $data['fecha'],
+                $servicios,
+                $resuelto['profesional'],
+                Carbon::now(),
+                (int) config('reservas.anticipacion_minutos', 120),
+            );
+
+            return response()->json([
+                'fecha' => $data['fecha'],
+                'duracion_total_minutos' => (int) $servicios->sum('duracion_minutos'),
+                'slots' => $slots,
+            ]);
+        }
+
+        // Plan-based (promo componentizada y/o grupos sueltos multi-profesional):
+        // cada slot ya trae su propio 'fin' (ver DisponibilidadService::calcularConPlanes),
+        // asi que no hay un 'duracion_total_minutos' unico y estable para todo el dia.
+        $slots = $disponibilidad->calcularConPlanes(
             $user,
             $data['fecha'],
-            $servicios,
-            $profesional,
+            $resuelto['promo'],
+            $resuelto['gruposSueltos'],
+            $promoComponentes->paraleloHabilitado($user),
             Carbon::now(),
             (int) config('reservas.anticipacion_minutos', 120),
         );
 
         return response()->json([
             'fecha' => $data['fecha'],
-            'duracion_total_minutos' => (int) $servicios->sum('duracion_minutos'),
             'slots' => $slots,
         ]);
+    }
+
+    /** @return array<string, string> */
+    private function reglasAsignaciones(): array
+    {
+        return [
+            'asignaciones' => 'required|array|min:1',
+            'asignaciones.*.servicio_ids' => 'required|array|min:1',
+            'asignaciones.*.servicio_ids.*' => 'integer',
+            'asignaciones.*.profesional_id' => 'nullable|integer',
+        ];
+    }
+
+    /**
+     * Resuelve los grupos de `asignaciones` en lo que necesita
+     * DisponibilidadService: legacy (una profesional o "Cualquiera", un
+     * unico grupo) o un PromoInput/GrupoSuelto[] para calcularConPlanes. Con
+     * 2+ grupos, cada grupo SUELTO exige una profesional explicita (nunca
+     * "Cualquiera"); un grupo de promo componentizada no lleva profesional y
+     * por eso queda afuera de esa regla. Dos promos combinadas no estan
+     * soportadas (un solo PromoInput por reserva).
+     *
+     * @param  array<int, array{servicio_ids: array<int,int>, profesional_id?: int|null}>  $asignaciones
+     * @return array{usarPlanes: bool, servicios?: Collection, profesional?: ?Profesional, promo?: ?PromoInput, gruposSueltos?: array<int, GrupoSuelto>}|JsonResponse
+     */
+    private function resolverAsignaciones(User $user, array $asignaciones, PromoComponentes $promoComponentes): array|JsonResponse
+    {
+        $todosLosIds = array_values(array_unique(array_merge(
+            ...array_map(fn (array $a) => $a['servicio_ids'], $asignaciones),
+        )));
+        $servicios = Servicio::where('user_id', $user->id)
+            ->where('activo', true)
+            ->whereIn('id', $todosLosIds)
+            ->get()
+            ->keyBy('id');
+
+        if ($servicios->count() !== count($todosLosIds)) {
+            return response()->json(['message' => 'Uno o más servicios no son válidos.'], 422);
+        }
+
+        $multiplesGrupos = count($asignaciones) >= 2;
+        $promo = null;
+        $gruposSueltos = [];
+        $legacy = null;
+
+        foreach ($asignaciones as $asignacion) {
+            $ids = array_values(array_unique($asignacion['servicio_ids']));
+            $grupoServicios = $servicios->only($ids)->values();
+            $unico = $grupoServicios->first();
+
+            if (count($ids) === 1 && $unico->es_promo && $unico->componentes()->exists()) {
+                if ($promo !== null) {
+                    return response()->json(['message' => 'No se pueden combinar dos promos en la misma reserva.'], 422);
+                }
+                $promo = $promoComponentes->promoInput($unico);
+                continue;
+            }
+
+            $profesionalId = $asignacion['profesional_id'] ?? null;
+            $profesional = null;
+            if ($profesionalId !== null) {
+                $profesional = Profesional::resolverParaUsuario($user, (int) $profesionalId);
+                $ofrecidos = $profesional->servicios()->pluck('servicios.id')->all();
+
+                if (count(array_diff($ids, $ofrecidos)) > 0) {
+                    return response()->json(['message' => 'La profesional no ofrece todos los servicios elegidos.'], 422);
+                }
+            } elseif ($multiplesGrupos) {
+                return response()->json(['message' => 'Elegí una profesional para cada servicio.'], 422);
+            }
+
+            $legacy = [$grupoServicios, $profesional];
+            if ($profesional !== null) {
+                $gruposSueltos[] = new GrupoSuelto($profesional->id, $ids, (int) $grupoServicios->sum('duracion_minutos'));
+            }
+        }
+
+        if ($promo === null && count($gruposSueltos) < 2) {
+            return ['usarPlanes' => false, 'servicios' => $legacy[0], 'profesional' => $legacy[1]];
+        }
+
+        return ['usarPlanes' => true, 'promo' => $promo, 'gruposSueltos' => $gruposSueltos];
     }
 
     /**
