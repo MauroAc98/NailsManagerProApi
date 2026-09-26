@@ -60,6 +60,125 @@ class DisponibilidadService
     }
 
     /**
+     * Disponibilidad para una promo componentizada y/o grupos sueltos de
+     * distintas profesionales (combo-multi-profesional). `[]` de
+     * TramosResolver::planes() significa input legacy (sin promo
+     * componentizada y menos de 2 grupos): el llamador sigue usando
+     * calcular() para ese caso, sin cambios. El candidato de inicio S sale
+     * de los slots activos de la profesional del PRIMER tramo (igual en
+     * todos los planes, porque comparten el mismo primer grupo/componente);
+     * para cada S se prueban los planes EN ORDEN (paralelo antes que
+     * secuencia cuando ambos existen) y se ofrece el primero que: (a) cada
+     * tramo arranca en un slot activo de SU PROPIA profesional
+     * (AlineacionSlots), y (b) cada tramo respeta el dia de atencion, los
+     * bloqueos de dia completo y esta libre (holds/turnos/bloqueos
+     * parciales) de SU PROPIA profesional.
+     *
+     * @param  array<int, GrupoSuelto>  $gruposSueltos  en el orden que la clienta eligio
+     * @return array<int, array{hora: string, fin: string, profesional_ids: array<int,int>, modo: string, tramos: array}>
+     */
+    public function calcularConPlanes(
+        User $user,
+        string $fecha,
+        ?PromoInput $promo,
+        array $gruposSueltos,
+        bool $paraleloHabilitado,
+        Carbon $ahora,
+        int $anticipacionMinutos,
+    ): array {
+        $planes = (new TramosResolver())->planes($promo, $gruposSueltos, $paraleloHabilitado);
+        if ($planes === []) {
+            return [];
+        }
+
+        $profesionalIds = array_values(array_unique(array_merge(
+            ...array_map(fn (PlanReserva $p) => array_column($p->tramos, 'profesional_id'), $planes),
+        )));
+        $profesionales = Profesional::where('user_id', $user->id)->whereIn('id', $profesionalIds)->get()->keyBy('id');
+
+        $slotsPorProfesional = $this->slotsPorProfesional($user, $profesionales->values());
+        $holds = $this->holdsVigentes($user, $fecha, $fecha, $ahora)[$fecha] ?? [];
+        $ocupacion = $this->turnosDelRango($user, $fecha, $fecha, $profesionalIds);
+        $bloqueos = $this->bloqueosDelRango($user, $fecha, $fecha)[$fecha] ?? null;
+        $diaCompleto = $bloqueos['diaCompleto'] ?? [];
+        $parcial = $bloqueos['parcial'] ?? [];
+        $minimo = $ahora->copy()->addMinutes($anticipacionMinutos);
+        $diaDeLaSemana = Carbon::parse($fecha);
+        $alineacion = new AlineacionSlots();
+
+        $lider = $planes[0]->tramos[0]['profesional_id'];
+        $resultado = [];
+        foreach ($slotsPorProfesional[$lider] ?? [] as $hora) {
+            $inicioLider = Carbon::parse("{$fecha} {$hora}");
+            if ($inicioLider->lt($minimo)) {
+                continue;
+            }
+
+            foreach ($planes as $plan) {
+                if ($alineacion->primerDesalineado($plan->tramos, $hora, $slotsPorProfesional) !== null) {
+                    continue;
+                }
+                if (! $this->planCabe($plan, $inicioLider, $profesionales, $diaDeLaSemana, $diaCompleto, $parcial, $holds, $ocupacion)) {
+                    continue;
+                }
+
+                $resultado[] = [
+                    'hora' => $hora,
+                    'fin' => $inicioLider->copy()->addMinutes($plan->duracionTotalMinutos())->format('H:i'),
+                    'profesional_ids' => array_values(array_unique(array_column($plan->tramos, 'profesional_id'))),
+                    'modo' => $plan->modo,
+                    'tramos' => $plan->tramos,
+                ];
+                continue 2;
+            }
+        }
+
+        return $resultado;
+    }
+
+    /**
+     * Un plan cabe en $inicioLider si CADA tramo, en su propio horario,
+     * respeta el dia de atencion de su profesional, los bloqueos de dia
+     * completo (propios y salon-wide) y esta libre (profesionalLibre).
+     *
+     * @param  Collection<int, Profesional>  $profesionales  indexada por id
+     * @param  array<int,bool>  $diaCompleto
+     * @param  array<int, array<int, array{0: Carbon, 1: Carbon}>>  $parcial
+     * @param  array<int, array<int, array{0: Carbon, 1: Carbon}>>  $holds
+     * @param  array<int, array<int, array{0: Carbon, 1: Carbon}>>  $ocupacion
+     */
+    private function planCabe(
+        PlanReserva $plan,
+        Carbon $inicioLider,
+        Collection $profesionales,
+        Carbon $diaDeLaSemana,
+        array $diaCompleto,
+        array $parcial,
+        array $holds,
+        array $ocupacion,
+    ): bool {
+        foreach ($plan->tramos as $tramo) {
+            $prof = $profesionales[$tramo['profesional_id']] ?? null;
+            if ($prof === null || ! $prof->atiendeEl($diaDeLaSemana)) {
+                return false;
+            }
+            if (isset($diaCompleto[0]) || isset($diaCompleto[$prof->id])) {
+                return false;
+            }
+
+            $inicio = $inicioLider->copy()->addMinutes($tramo['offset_minutos']);
+            $fin = $inicio->copy()->addMinutes($tramo['duracion_minutos']);
+            $bloqueosParciales = array_merge($parcial[0] ?? [], $parcial[$prof->id] ?? []);
+
+            if (! $this->profesionalLibre($prof->id, $inicio, $fin, $holds, $ocupacion, $bloqueosParciales)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
      * Cuenta los inicios libres de cada dia del rango [$desde, $hasta]
      * (Y-m-d, inclusive) y devuelve solo los dias con al menos uno. Carga
      * profesionales, slots, turnos y holds UNA vez para todo el rango y
