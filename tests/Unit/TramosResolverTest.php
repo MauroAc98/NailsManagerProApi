@@ -69,4 +69,43 @@ class TramosResolverTest extends TestCase
 
         $this->assertSame([], $planes);
     }
+
+    // ---- 1b.2 promo timelines ----
+
+    public function test_promo_secuencia_va_una_tras_otra_y_dura_la_suma(): void
+    {
+        $planes = $this->resolver()->planes($this->promo(PlanReserva::SECUENCIA), [], false);
+
+        $this->assertCount(1, $planes);
+        $this->assertSame(PlanReserva::SECUENCIA, $planes[0]->modo);
+        $this->assertSame([
+            $this->tramo(self::ANA, 0, 60, [11], 13000),
+            $this->tramo(self::LAURA, 60, 45, [12], 9000),
+        ], $planes[0]->tramos);
+        $this->assertSame(105, $planes[0]->duracionTotalMinutos());
+    }
+
+    public function test_promo_paralelo_arranca_todo_en_cero_y_dura_el_maximo(): void
+    {
+        $planes = $this->resolver()->planes($this->promo(PlanReserva::PARALELO), [], false);
+
+        $this->assertCount(1, $planes);
+        $this->assertSame(PlanReserva::PARALELO, $planes[0]->modo);
+        $this->assertSame([
+            $this->tramo(self::ANA, 0, 60, [11], 13000),
+            $this->tramo(self::LAURA, 0, 45, [12], 9000),
+        ], $planes[0]->tramos);
+        $this->assertSame(60, $planes[0]->duracionTotalMinutos());
+    }
+
+    public function test_promo_paralelo_exige_profesionales_distintas(): void
+    {
+        $promo = new PromoInput(PlanReserva::PARALELO, [
+            ['servicio_id' => 11, 'profesional_id' => self::ANA, 'duracion_minutos' => 60, 'precio' => 13000],
+            ['servicio_id' => 12, 'profesional_id' => self::ANA, 'duracion_minutos' => 45, 'precio' => 9000],
+        ]);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->resolver()->planes($promo, [], true);
+    }
 }
