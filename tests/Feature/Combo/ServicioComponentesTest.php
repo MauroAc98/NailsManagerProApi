@@ -238,6 +238,91 @@ class ServicioComponentesTest extends AdminContractTestCase
         ])->assertStatus(422)->assertJsonValidationErrors(['componentes.1.profesional_id']);
     }
 
+    // 2a.4 — GET-one detail
+    protected function detalle(): array
+    {
+        return $this->admin()->getJson("/api/servicios/{$this->promo->id}")->assertOk()->json();
+    }
+
+    public function test_show_lists_components_in_order_with_live_derived_duration_and_price(): void
+    {
+        $this->ponerComponentes($this->payloadValido(['precio' => 18000]))->assertOk();
+
+        $json = $this->detalle();
+
+        $this->assertSame([
+            [
+                'orden' => 1, 'servicio_id' => $this->softgel->id, 'nombre' => 'Softgel', 'duracion_minutos' => 60,
+                'precio' => '13000.00', 'profesional_id' => $this->ana->id, 'profesional_nombre' => $this->ana->nombre,
+            ],
+            [
+                'orden' => 2, 'servicio_id' => $this->semis->id, 'nombre' => 'Semis pies', 'duracion_minutos' => 45,
+                'precio' => '9000.00', 'profesional_id' => $this->laura->id, 'profesional_nombre' => 'Laura',
+            ],
+        ], $json['componentes']);
+        $this->assertSame(105, $json['duracion_derivada']);
+        $this->assertEquals(22000, $json['precio_componentes']);
+        $this->assertSame('18000.00', $json['precio']); // override untouched
+        $this->assertSame([], $json['problemas']);
+    }
+
+    public function test_show_derives_the_max_duration_for_parallel_and_follows_component_edits_live(): void
+    {
+        $this->encenderParalelo();
+        $this->ponerComponentes($this->payloadValido(['modo_promo' => 'paralelo']))->assertOk();
+        $this->assertSame(60, $this->detalle()['duracion_derivada']);
+
+        $this->semis->update(['duracion_minutos' => 75, 'precio' => 10000]);
+
+        $json = $this->detalle();
+        $this->assertSame(75, $json['duracion_derivada']);
+        $this->assertEquals(23000, $json['precio_componentes']);
+        $this->assertSame(60, $json['duracion_minutos']); // persisted value goes stale, live one does not
+    }
+
+    public function test_show_reports_an_inactive_component_professional_naming_her_and_the_service(): void
+    {
+        $this->ponerComponentes($this->payloadValido())->assertOk();
+        $this->laura->update(['activo' => false]);
+
+        $problemas = $this->detalle()['problemas'];
+
+        $this->assertCount(1, $problemas);
+        $this->assertSame('profesional_inactiva', $problemas[0]['codigo']);
+        $this->assertSame(2, $problemas[0]['orden']);
+        $this->assertSame($this->laura->id, $problemas[0]['profesional_id']);
+        $this->assertSame($this->semis->id, $problemas[0]['servicio_id']);
+        $this->assertStringContainsString('Laura', $problemas[0]['mensaje']);
+        $this->assertStringContainsString('Semis pies', $problemas[0]['mensaje']);
+    }
+
+    public function test_show_reports_a_service_the_professional_no_longer_offers(): void
+    {
+        $this->ponerComponentes($this->payloadValido())->assertOk();
+        $this->ana->servicios()->detach($this->softgel->id);
+
+        $problemas = $this->detalle()['problemas'];
+
+        $this->assertCount(1, $problemas);
+        $this->assertSame('servicio_desvinculado', $problemas[0]['codigo']);
+        $this->assertSame(1, $problemas[0]['orden']);
+        $this->assertStringContainsString($this->ana->nombre, $problemas[0]['mensaje']);
+        $this->assertStringContainsString('Softgel', $problemas[0]['mensaje']);
+    }
+
+    public function test_show_reports_one_problem_per_cause_and_component(): void
+    {
+        $this->ponerComponentes($this->payloadValido())->assertOk();
+        $this->laura->update(['activo' => false]);
+        $this->laura->servicios()->detach($this->semis->id);
+        $this->ana->servicios()->detach($this->softgel->id);
+
+        $this->assertSame(
+            [[1, 'servicio_desvinculado'], [2, 'profesional_inactiva'], [2, 'servicio_desvinculado']],
+            collect($this->detalle()['problemas'])->map(fn ($p) => [$p['orden'], $p['codigo']])->all(),
+        );
+    }
+
     public function test_parallel_is_treated_as_off_with_a_single_active_professional(): void
     {
         $this->encenderParalelo();
