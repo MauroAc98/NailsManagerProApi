@@ -4,6 +4,7 @@ namespace App\Services\Servicios;
 
 use App\Models\Profesional;
 use App\Models\Servicio;
+use App\Models\ServicioComponente;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -103,6 +104,21 @@ class PromoComponentes
         if ($errores !== []) {
             throw ValidationException::withMessages($errores);
         }
+    }
+
+    /**
+     * Promos that use the servicio as a component (blocks deleting it: the
+     * component FK is restrictive).
+     *
+     * @return array<int, array{id:int, nombre:string}>
+     */
+    public function promosQueUsan(Servicio $servicio): array
+    {
+        return Servicio::whereIn('id', ServicioComponente::where('componente_servicio_id', $servicio->id)->select('servicio_id'))
+            ->orderBy('id')
+            ->get(['id', 'nombre'])
+            ->map(fn ($promo) => ['id' => $promo->id, 'nombre' => $promo->nombre])
+            ->all();
     }
 
     /**

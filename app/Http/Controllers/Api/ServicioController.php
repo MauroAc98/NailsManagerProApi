@@ -229,6 +229,17 @@ class ServicioController extends Controller
             ], 409);
         }
 
+        // Un servicio usado como componente de una promo no se puede borrar
+        // (FK restrict). Va DESPUES del 409 de turnos: el camino legacy no cambia.
+        $promos = $this->promoComponentes->promosQueUsan($servicio);
+        if ($promos !== []) {
+            return response()->json([
+                'message' => 'Este servicio es parte de una promo, no se puede eliminar. Sacalo de la promo primero.',
+                'code' => 'servicio_en_promo',
+                'promos' => $promos,
+            ], 422);
+        }
+
         // Hard delete es seguro: profesional_servicio tiene cascadeOnDelete
         // sobre servicio_id, así que ese pivot se limpia solo.
         $servicio->delete();
