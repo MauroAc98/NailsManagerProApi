@@ -10,6 +10,7 @@ use App\Services\Reservas\AlineacionSlots;
 use App\Services\Reservas\DisponibilidadService;
 use App\Services\Reservas\PromoInput;
 use App\Services\Reservas\TramosResolver;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -120,6 +121,31 @@ class PromoComponentes
     }
 
     /**
+     * Builds a PromoInput from a promo's own current components and price
+     * (combo-multi-profesional, PR 3a3). `$componentes` may be passed
+     * already eager-loaded (see detalle()/alineacionSlots()) to avoid a
+     * second query; otherwise it is fetched here. The promo's own `precio`
+     * is always the price to prorate: reemplazar() keeps it equal to the
+     * override when set, or the standalone sum otherwise, so passing it
+     * here (instead of null) never changes the default-price result.
+     */
+    public function promoInput(Servicio $promo, ?Collection $componentes = null): PromoInput
+    {
+        $componentes ??= $promo->componentes()->with('componenteServicio')->get();
+
+        return new PromoInput(
+            $promo->modo_promo ?? self::MODO_SECUENCIA,
+            $componentes->map(fn ($c) => [
+                'servicio_id' => $c->componente_servicio_id,
+                'profesional_id' => $c->profesional_id,
+                'duracion_minutos' => $c->componenteServicio->duracion_minutos,
+                'precio' => (int) round((float) $c->componenteServicio->precio),
+            ])->all(),
+            (int) round((float) $promo->precio),
+        );
+    }
+
+    /**
      * Promos that use the servicio as a component (blocks deleting it: the
      * component FK is restrictive).
      *
@@ -194,15 +220,7 @@ class PromoComponentes
      */
     private function alineacionSlots(Servicio $promo, $componentes): array
     {
-        $plan = $this->tramos->planes(new PromoInput(
-            $promo->modo_promo ?? self::MODO_SECUENCIA,
-            $componentes->map(fn ($c) => [
-                'servicio_id' => $c->componente_servicio_id,
-                'profesional_id' => $c->profesional_id,
-                'duracion_minutos' => $c->componenteServicio->duracion_minutos,
-                'precio' => (int) round((float) $c->componenteServicio->precio),
-            ])->all(),
-        ), [], false)[0];
+        $plan = $this->tramos->planes($this->promoInput($promo, $componentes), [], false)[0];
 
         $slots = [];
         $nombres = [];
