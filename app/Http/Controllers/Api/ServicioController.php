@@ -157,6 +157,66 @@ class ServicioController extends Controller
     }
 
     // ─────────────────────────────────────────────
+    // PUT /api/servicios/{id}/componentes
+    // Reemplaza los componentes de una promo (servicio es_promo): cada uno
+    // es un servicio individual con una profesional fija; el orden es la
+    // posicion en el array. `componentes: []` devuelve la promo a legacy.
+    // ─────────────────────────────────────────────
+    public function componentes(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $servicio = Servicio::delUsuario($user)->findOrFail($id);
+
+        $data = $request->validate([
+            'modo_promo' => [
+                'nullable',
+                Rule::in([PromoComponentes::MODO_PARALELO, PromoComponentes::MODO_SECUENCIA]),
+                Rule::requiredIf(fn () => ! empty($request->input('componentes'))),
+            ],
+            'precio'                        => 'nullable|numeric|min:0',
+            'componentes'                   => 'present|array|max:10',
+            'componentes.*.servicio_id'     => [
+                'required',
+                'integer',
+                Rule::exists('servicios', 'id')->where(
+                    fn($q) => $q->where('user_id', $user->id)->where('activo', true)->where('es_promo', false)
+                ),
+            ],
+            'componentes.*.profesional_id'  => [
+                'required',
+                'integer',
+                Rule::exists('profesionales', 'id')->where(
+                    fn($q) => $q->where('user_id', $user->id)->where('activo', true)
+                ),
+            ],
+        ]);
+
+        if (! $servicio->es_promo) {
+            throw ValidationException::withMessages([
+                'servicio' => ['Solo una promo puede tener componentes.'],
+            ]);
+        }
+
+        $modo = $data['modo_promo'] ?? null;
+
+        if ($modo === PromoComponentes::MODO_PARALELO && ! $this->promoComponentes->paraleloHabilitado($user)) {
+            return response()->json([
+                'message' => 'Para armar una promo en paralelo activá "Atiende en paralelo" en la configuración del negocio.',
+                'code' => 'paralelo_no_habilitado',
+            ], 422);
+        }
+
+        $this->promoComponentes->reemplazar(
+            $servicio,
+            $modo,
+            $data['componentes'],
+            isset($data['precio']) ? (float) $data['precio'] : null,
+        );
+
+        return response()->json($this->conDetalleDePromo($servicio->fresh()->load('fotos')));
+    }
+
+    // ─────────────────────────────────────────────
     // DELETE /api/servicios/{id}
     // ─────────────────────────────────────────────
     public function destroy(Request $request, int $id): JsonResponse
