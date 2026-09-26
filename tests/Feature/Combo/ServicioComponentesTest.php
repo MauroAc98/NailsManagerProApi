@@ -4,6 +4,7 @@ namespace Tests\Feature\Combo;
 
 use App\Models\Profesional;
 use App\Models\Servicio;
+use App\Models\SlotDisponible;
 use App\Models\User;
 use Tests\Feature\Contract\AdminContractTestCase;
 
@@ -388,5 +389,67 @@ class ServicioComponentesTest extends AdminContractTestCase
             'modo_promo' => 'paralelo',
             'componentes' => [['servicio_id' => $this->softgel->id, 'profesional_id' => $this->ana->id]],
         ])->assertStatus(422)->assertJsonPath('code', 'paralelo_no_habilitado');
+    }
+
+    // 2c — alineacion_slots (config-time slot alignment of the promo's own components)
+    protected function darSlots(Profesional $profesional, array $horas): void
+    {
+        foreach ($horas as $hora) {
+            SlotDisponible::create(['user_id' => $this->user->id, 'profesional_id' => $profesional->id, 'hora' => $hora, 'activo' => true]);
+        }
+    }
+
+    public function test_servicios_without_components_report_an_empty_alineacion_slots(): void
+    {
+        $vacio = ['inicios_validos' => [], 'descartados' => []];
+
+        $this->assertSame($vacio, $this->admin()->getJson("/api/servicios/{$this->servicio->id}")->json('alineacion_slots'));
+        $this->assertSame($vacio, $this->detalle()['alineacion_slots']);
+        $this->assertSame([], $this->detalle()['problemas']);
+    }
+
+    public function test_sequential_promo_names_the_professional_the_missing_time_and_the_start_not_offered(): void
+    {
+        // Ana: 09:00 and 18:00 (base fixture). Laura only has 10:00, so 18:00 -> she would need 19:00.
+        $this->darSlots($this->laura, ['10:00:00']);
+        $this->ponerComponentes($this->payloadValido())->assertOk();
+
+        $json = $this->detalle();
+
+        $this->assertSame(['09:00'], $json['alineacion_slots']['inicios_validos']);
+        $this->assertSame([[
+            'hora_inicio' => '18:00',
+            'profesional_id' => $this->laura->id,
+            'profesional_nombre' => 'Laura',
+            'hora_requerida' => '19:00',
+            'mensaje' => 'Laura no tiene slot a las 19:00, esta promo no se ofrecerá a las 18:00',
+        ]], $json['alineacion_slots']['descartados']);
+        $this->assertSame([], $json['problemas']); // a valid start remains: still bookable
+    }
+
+    public function test_aligned_slots_yield_no_warning(): void
+    {
+        $this->darSlots($this->laura, ['10:00:00', '19:00:00']);
+        $this->ponerComponentes($this->payloadValido())->assertOk();
+
+        $json = $this->detalle();
+
+        $this->assertSame(['09:00', '18:00'], $json['alineacion_slots']['inicios_validos']);
+        $this->assertSame([], $json['alineacion_slots']['descartados']);
+    }
+
+    public function test_a_promo_with_no_aligned_start_is_reported_as_a_non_blocking_problema(): void
+    {
+        // Laura has no slots at all (base fixture): every Ana start is dropped.
+        $this->ponerComponentes($this->payloadValido())->assertOk(); // saving is never blocked
+
+        $json = $this->detalle();
+
+        $this->assertSame([], $json['alineacion_slots']['inicios_validos']);
+        $this->assertSame(['09:00', '18:00'], array_column($json['alineacion_slots']['descartados'], 'hora_inicio'));
+        $this->assertCount(1, $json['problemas']);
+        $this->assertSame('sin_inicios_alineados', $json['problemas'][0]['codigo']);
+        $this->assertNull($json['problemas'][0]['orden']);
+        $this->assertNotSame('', $json['problemas'][0]['mensaje']);
     }
 }
