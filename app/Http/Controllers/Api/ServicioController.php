@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Servicio;
+use App\Services\Servicios\PromoComponentes;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -18,6 +19,17 @@ class ServicioController extends Controller
     // ProfesionalController::MAX_FOTOS_HISTORIA_PRECIOS: no confiar en que
     // el cliente respete el límite.
     private const MAX_FOTOS_SERVICIO = 12;
+
+    public function __construct(private PromoComponentes $promoComponentes)
+    {
+    }
+
+    // GET-one: el servicio tal cual + las claves aditivas de componentes de
+    // promo (vacias para un servicio o promo legacy sin componentes).
+    private function conDetalleDePromo(Servicio $servicio): array
+    {
+        return $servicio->toArray() + $this->promoComponentes->detalle($servicio);
+    }
 
     // ─────────────────────────────────────────────
     // GET /api/servicios
@@ -97,7 +109,7 @@ class ServicioController extends Controller
     {
         $servicio = Servicio::delUsuario($request->user())->with('fotos')->findOrFail($id);
 
-        return response()->json($servicio);
+        return response()->json($this->conDetalleDePromo($servicio));
     }
 
     // ─────────────────────────────────────────────
