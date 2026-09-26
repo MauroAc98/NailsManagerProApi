@@ -12,6 +12,7 @@ class Turno extends Model
         'profesional_id',
         'cliente_id',
         'reserva_web_id',
+        'grupo_id',
         'fecha_hora',
         'duracion_total_minutos',
         'estado',
@@ -113,9 +114,14 @@ class Turno extends Model
         return $this->belongsTo(ReservaWeb::class);
     }
 
+    public function grupo()
+    {
+        return $this->belongsTo(TurnoGrupo::class, 'grupo_id');
+    }
+
     public function servicios()
     {
-        return $this->belongsToMany(Servicio::class, 'turno_servicio')->withPivot('precio');
+        return $this->belongsToMany(Servicio::class, 'turno_servicio')->withPivot('precio', 'precio_sugerido');
     }
 
     public function whatsappMensajes()

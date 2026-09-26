@@ -41,12 +41,16 @@ class ReservaWeb extends Model
         'requiere_reembolso',
         'confirmada_en',
         'motivo_cierre',
+        'tramos',
+        'tramos_modo',
     ];
 
     protected function casts(): array
     {
         return [
             'servicio_ids'           => 'array',
+            // Offsets/duraciones en minutos enteros: JSON puro, sin fechas.
+            'tramos'                 => 'array',
             'duracion_total_minutos' => 'integer',
             'expira_en'              => 'integer',
             'confirmada_en'          => 'integer',

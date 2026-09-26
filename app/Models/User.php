@@ -43,6 +43,7 @@ class User extends Authenticatable
         'locale',
         'categorias_gasto',
         'categorias_ingreso',
+        'atiende_en_paralelo',
     ];
 
     protected $hidden = [
@@ -85,6 +86,7 @@ class User extends Authenticatable
             'longitud'                => 'float',
             'whatsapp_pide_sena'      => 'boolean',
             'debe_cambiar_password'   => 'boolean',
+            'atiende_en_paralelo'     => 'boolean',
             'notificaciones_vistas_at' => 'datetime',
         ];
     }

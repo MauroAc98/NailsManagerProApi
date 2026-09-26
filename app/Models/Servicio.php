@@ -15,6 +15,7 @@ class Servicio extends Model
         'es_promo',
         'orden',
         'categoria_id',
+        'modo_promo',
     ];
 
     protected function casts(): array
@@ -44,6 +45,12 @@ class Servicio extends Model
     public function turnos()
     {
         return $this->belongsToMany(Turno::class, 'turno_servicio')->withPivot('precio');
+    }
+
+    // Componentes de una promo, en orden de ejecucion. Vacio = promo legacy.
+    public function componentes()
+    {
+        return $this->hasMany(ServicioComponente::class)->orderBy('orden');
     }
 
     public function profesionales()
