@@ -247,6 +247,7 @@ class ServicioComponentesTest extends AdminContractTestCase
 
     public function test_show_lists_components_in_order_with_live_derived_duration_and_price(): void
     {
+        $this->darSlots($this->laura, ['10:00:00']); // aligned with Ana 09:00 + 60: no sin_inicios_alineados
         $this->ponerComponentes($this->payloadValido(['precio' => 18000]))->assertOk();
 
         $json = $this->detalle();

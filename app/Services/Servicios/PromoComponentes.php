@@ -6,6 +6,10 @@ use App\Models\Profesional;
 use App\Models\Servicio;
 use App\Models\ServicioComponente;
 use App\Models\User;
+use App\Services\Reservas\AlineacionSlots;
+use App\Services\Reservas\DisponibilidadService;
+use App\Services\Reservas\PromoInput;
+use App\Services\Reservas\TramosResolver;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -17,6 +21,15 @@ class PromoComponentes
 {
     public const MODO_PARALELO = 'paralelo';
     public const MODO_SECUENCIA = 'secuencia';
+
+    private const SIN_ALINEACION = ['inicios_validos' => [], 'descartados' => []];
+
+    public function __construct(
+        private DisponibilidadService $disponibilidad,
+        private TramosResolver $tramos,
+        private AlineacionSlots $alineacion,
+    ) {
+    }
 
     /**
      * "Atiende en paralelo" only means something with more than one active
@@ -136,12 +149,24 @@ class PromoComponentes
             return [
                 'componentes' => [],
                 'problemas' => [],
+                'alineacion_slots' => self::SIN_ALINEACION,
                 'duracion_derivada' => null,
                 'precio_componentes' => null,
             ];
         }
 
         $duraciones = $componentes->map(fn ($c) => $c->componenteServicio->duracion_minutos);
+        $problemas = $this->problemas($componentes);
+
+        // Slot alignment only means something for a promo that is bookable in
+        // principle; with a broken component it is already flagged as a problema.
+        $alineacion = $problemas === [] ? $this->alineacionSlots($servicio, $componentes) : self::SIN_ALINEACION;
+        if ($problemas === [] && $alineacion['inicios_validos'] === []) {
+            $problemas[] = [
+                'codigo' => 'sin_inicios_alineados', 'orden' => null, 'profesional_id' => null, 'servicio_id' => null,
+                'mensaje' => 'Ningún horario de esta promo coincide con los slots de todas las profesionales: no se ofrecerá online.',
+            ];
+        }
 
         return [
             'componentes' => $componentes->map(fn ($c) => [
@@ -153,10 +178,40 @@ class PromoComponentes
                 'profesional_id' => $c->profesional_id,
                 'profesional_nombre' => $c->profesional->nombre,
             ])->all(),
-            'problemas' => $this->problemas($componentes),
+            'problemas' => $problemas,
+            'alineacion_slots' => $alineacion,
             'duracion_derivada' => $servicio->modo_promo === self::MODO_PARALELO ? $duraciones->max() : $duraciones->sum(),
             'precio_componentes' => round($componentes->sum(fn ($c) => (float) $c->componenteServicio->precio), 2),
         ];
+    }
+
+    /**
+     * Client-flow slot rule applied to the promo's own components (loose
+     * services are never part of this analysis): which starts of the lead
+     * professional can be offered and which are dropped, and why.
+     *
+     * @return array{inicios_validos: array<int, string>, descartados: array<int, array>}
+     */
+    private function alineacionSlots(Servicio $promo, $componentes): array
+    {
+        $plan = $this->tramos->planes(new PromoInput(
+            $promo->modo_promo ?? self::MODO_SECUENCIA,
+            $componentes->map(fn ($c) => [
+                'servicio_id' => $c->componente_servicio_id,
+                'profesional_id' => $c->profesional_id,
+                'duracion_minutos' => $c->componenteServicio->duracion_minutos,
+                'precio' => (int) round((float) $c->componenteServicio->precio),
+            ])->all(),
+        ), [], false)[0];
+
+        $slots = [];
+        $nombres = [];
+        foreach ($componentes as $componente) {
+            $slots[$componente->profesional_id] = $this->disponibilidad->horasActivas($promo->user, $componente->profesional);
+            $nombres[$componente->profesional_id] = $componente->profesional->nombre;
+        }
+
+        return $this->alineacion->analizarPromo($plan->tramos, $slots, $nombres);
     }
 
     /**
