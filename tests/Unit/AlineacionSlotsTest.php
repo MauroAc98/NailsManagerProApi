@@ -147,8 +147,10 @@ class AlineacionSlotsTest extends TestCase
     public function test_aligned_30_minute_slots_yield_no_warning(): void
     {
         $horas = ['10:00', '10:30', '11:00', '11:30', '12:00', '12:30'];
+        // Laura covers every required time: each Ana start + 60 min.
+        $lauraHoras = [...$horas, '13:00', '13:30'];
 
-        $analisis = $this->alineacion()->analizarPromo($this->secuencia(), [self::ANA => $horas, self::LAURA => $horas], self::NOMBRES);
+        $analisis = $this->alineacion()->analizarPromo($this->secuencia(), [self::ANA => $horas, self::LAURA => $lauraHoras], self::NOMBRES);
 
         $this->assertSame($horas, $analisis['inicios_validos']);
         $this->assertSame([], $analisis['descartados']);
