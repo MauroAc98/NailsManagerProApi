@@ -33,9 +33,35 @@ class PublicDisponibilidadDiasTest extends TestCase
         parent::tearDown();
     }
 
-    private function url(string $query): string
+    /**
+     * Construye la query string de `asignaciones` (mismo shape que
+     * /disponibilidad desde PR 3a3, ahora tambien la UNICA forma de pedir
+     * este endpoint, PR 3a3b). Cada grupo es `[servicio_ids, profesional_id|null]`;
+     * `profesional_id` null se omite (= "Cualquiera").
+     *
+     * @param  array<int, array{0: array<int,int>, 1: int|null}>  $grupos
+     */
+    private function asignaciones(array $grupos): string
     {
-        return "/api/public/{$this->user->slug}/disponibilidad/dias?{$query}";
+        $partes = [];
+        foreach ($grupos as $i => [$servicioIds, $profesionalId]) {
+            foreach ($servicioIds as $id) {
+                $partes[] = "asignaciones[{$i}][servicio_ids][]={$id}";
+            }
+            if ($profesionalId !== null) {
+                $partes[] = "asignaciones[{$i}][profesional_id]={$profesionalId}";
+            }
+        }
+
+        return implode('&', $partes);
+    }
+
+    /** @param  array<int, array{0: array<int,int>, 1: int|null}>  $grupos */
+    private function url(string $desde, string $hasta, array $grupos): string
+    {
+        $query = $this->asignaciones($grupos);
+
+        return "/api/public/{$this->user->slug}/disponibilidad/dias?desde={$desde}&hasta={$hasta}&{$query}";
     }
 
     private function turno($prof, string $fechaHora, int $duracion): Turno
@@ -83,7 +109,7 @@ class PublicDisponibilidadDiasTest extends TestCase
     {
         [, $s] = $this->salonBasico(); // slots 12:00 y 13:00 -> 2 inicios por dia (sin horarios intermedios)
 
-        $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-12&servicio_ids[]={$s->id}"))
+        $this->getJson($this->url('2099-06-11', '2099-06-12', [[[$s->id], null]]))
             ->assertOk()
             ->assertExactJson(['dias' => [
                 ['fecha' => '2099-06-11', 'libres' => 2],
@@ -101,7 +127,7 @@ class PublicDisponibilidadDiasTest extends TestCase
         $this->crearSlot($this->user, $ana, '16:00', false);
         $this->turno($ana, '2099-06-11 09:00:00', 90); // saca 09:00 y 09:30
 
-        $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-12&servicio_ids[]={$s->id}"))
+        $this->getJson($this->url('2099-06-11', '2099-06-12', [[[$s->id], null]]))
             ->assertOk()
             ->assertExactJson(['dias' => [
                 ['fecha' => '2099-06-11', 'libres' => 2],
@@ -114,7 +140,7 @@ class PublicDisponibilidadDiasTest extends TestCase
         $ana = $this->crearProfesional($this->user, 'Ana');
         $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
 
-        $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-13&servicio_ids[]={$s->id}"))
+        $this->getJson($this->url('2099-06-11', '2099-06-13', [[[$s->id], null]]))
             ->assertOk()->assertExactJson(['dias' => []]);
     }
 
@@ -123,7 +149,7 @@ class PublicDisponibilidadDiasTest extends TestCase
         [$ana, $s] = $this->salonBasico('12:00', '13:00', 30);
         $this->turno($ana, '2099-06-11 11:30:00', 180); // tapa los dos slots (12:00 y 13:00)
 
-        $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-12&servicio_ids[]={$s->id}"))
+        $this->getJson($this->url('2099-06-11', '2099-06-12', [[[$s->id], null]]))
             ->assertOk()
             ->assertExactJson(['dias' => [['fecha' => '2099-06-12', 'libres' => 2]]]);
     }
@@ -137,19 +163,16 @@ class PublicDisponibilidadDiasTest extends TestCase
         $this->hold('2099-06-11', '12:00:00', 180, $ana);
 
         foreach ([$ana->id, $bea->id, null] as $profId) {
-            // El endpoint /disponibilidad (3a3) solo acepta `asignaciones`;
-            // /disponibilidad/dias (aun sin migrar, 3a3b) sigue con el shape viejo.
             $extraAsignaciones = $profId ? "&asignaciones[0][profesional_id]={$profId}" : '';
-            $extra = $profId ? "&profesional_id={$profId}" : '';
             $slots = $this->getJson("/api/public/{$this->user->slug}/disponibilidad?fecha=2099-06-11&asignaciones[0][servicio_ids][]={$s->id}{$extraAsignaciones}")->json('slots');
-            $dias = $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-11&servicio_ids[]={$s->id}{$extra}"))->json('dias');
+            $dias = $this->getJson($this->url('2099-06-11', '2099-06-11', [[[$s->id], $profId]]))->json('dias');
 
             $this->assertSame(count($slots), $dias[0]['libres'] ?? 0, "prof {$profId}");
         }
 
-        $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-11&servicio_ids[]={$s->id}&profesional_id={$ana->id}"))
+        $this->getJson($this->url('2099-06-11', '2099-06-11', [[[$s->id], $ana->id]]))
             ->assertExactJson(['dias' => []]);
-        $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-11&servicio_ids[]={$s->id}&profesional_id={$bea->id}"))
+        $this->getJson($this->url('2099-06-11', '2099-06-11', [[[$s->id], $bea->id]]))
             ->assertExactJson(['dias' => [['fecha' => '2099-06-11', 'libres' => 1]]]);
     }
 
@@ -158,7 +181,7 @@ class PublicDisponibilidadDiasTest extends TestCase
         [, $s] = $this->salonBasico('12:00', '13:00', 30);
         $this->hold('2099-06-11', '11:30:00', 180);
 
-        $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-12&servicio_ids[]={$s->id}"))
+        $this->getJson($this->url('2099-06-11', '2099-06-12', [[[$s->id], null]]))
             ->assertOk()
             ->assertJsonPath('dias.0.fecha', '2099-06-12')
             ->assertJsonCount(1, 'dias');
@@ -170,7 +193,7 @@ class PublicDisponibilidadDiasTest extends TestCase
         $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
         $this->crearSlot($this->user, $ana, '10:00'); // ahora 09:00 + 120 = 11:00
 
-        $this->getJson($this->url("desde=2099-06-10&hasta=2099-06-11&servicio_ids[]={$s->id}"))
+        $this->getJson($this->url('2099-06-10', '2099-06-11', [[[$s->id], null]]))
             ->assertOk()
             ->assertExactJson(['dias' => [['fecha' => '2099-06-11', 'libres' => 1]]]);
     }
@@ -179,7 +202,7 @@ class PublicDisponibilidadDiasTest extends TestCase
     {
         [, $s] = $this->salonBasico();
 
-        $this->getJson($this->url("desde=2099-06-01&hasta=2099-06-11&servicio_ids[]={$s->id}"))
+        $this->getJson($this->url('2099-06-01', '2099-06-11', [[[$s->id], null]]))
             ->assertOk()
             ->assertJsonPath('dias.0.fecha', '2099-06-10')
             ->assertJsonPath('dias.1.fecha', '2099-06-11')
@@ -190,7 +213,7 @@ class PublicDisponibilidadDiasTest extends TestCase
     {
         [, $s] = $this->salonBasico('12:00', '12:00');
 
-        $r = $this->getJson($this->url("desde=2099-07-08&hasta=2099-07-20&servicio_ids[]={$s->id}"))->assertOk();
+        $r = $this->getJson($this->url('2099-07-08', '2099-07-20', [[[$s->id], null]]))->assertOk();
         $this->assertSame(['2099-07-08', '2099-07-09', '2099-07-10'], array_column($r->json('dias'), 'fecha'));
     }
 
@@ -198,7 +221,7 @@ class PublicDisponibilidadDiasTest extends TestCase
     {
         [, $s] = $this->salonBasico();
 
-        $this->getJson($this->url("desde=2099-08-01&hasta=2099-08-10&servicio_ids[]={$s->id}"))
+        $this->getJson($this->url('2099-08-01', '2099-08-10', [[[$s->id], null]]))
             ->assertOk()->assertExactJson(['dias' => []]);
     }
 
@@ -207,25 +230,26 @@ class PublicDisponibilidadDiasTest extends TestCase
         [, $s] = $this->salonBasico();
 
         // 2099-06-10 .. 2099-07-24 = 45 dias inclusive
-        $this->getJson($this->url("desde=2099-06-10&hasta=2099-07-24&servicio_ids[]={$s->id}"))->assertOk();
-        $this->getJson($this->url("desde=2099-06-10&hasta=2099-07-25&servicio_ids[]={$s->id}"))->assertStatus(422);
+        $this->getJson($this->url('2099-06-10', '2099-07-24', [[[$s->id], null]]))->assertOk();
+        $this->getJson($this->url('2099-06-10', '2099-07-25', [[[$s->id], null]]))->assertStatus(422);
     }
 
     public function test_hasta_menor_que_desde_da_422(): void
     {
         [, $s] = $this->salonBasico();
 
-        $this->getJson($this->url("desde=2099-06-12&hasta=2099-06-11&servicio_ids[]={$s->id}"))->assertStatus(422);
+        $this->getJson($this->url('2099-06-12', '2099-06-11', [[[$s->id], null]]))->assertStatus(422);
     }
 
     public function test_formato_de_fecha_estricto_y_parametros_requeridos(): void
     {
         [, $s] = $this->salonBasico();
+        $asignaciones = $this->asignaciones([[[$s->id], null]]);
 
-        $this->getJson($this->url("desde=manana&hasta=2099-06-11&servicio_ids[]={$s->id}"))->assertStatus(422);
-        $this->getJson($this->url("desde=2099-6-11&hasta=2099-06-12&servicio_ids[]={$s->id}"))->assertStatus(422);
-        $this->getJson($this->url("hasta=2099-06-11&servicio_ids[]={$s->id}"))->assertStatus(422);
-        $this->getJson($this->url('desde=2099-06-11&hasta=2099-06-12'))->assertStatus(422);
+        $this->getJson("/api/public/{$this->user->slug}/disponibilidad/dias?desde=manana&hasta=2099-06-11&{$asignaciones}")->assertStatus(422);
+        $this->getJson("/api/public/{$this->user->slug}/disponibilidad/dias?desde=2099-6-11&hasta=2099-06-12&{$asignaciones}")->assertStatus(422);
+        $this->getJson("/api/public/{$this->user->slug}/disponibilidad/dias?hasta=2099-06-11&{$asignaciones}")->assertStatus(422);
+        $this->getJson("/api/public/{$this->user->slug}/disponibilidad/dias?desde=2099-06-11&hasta=2099-06-12")->assertStatus(422);
     }
 
     public function test_servicio_ajeno_o_inactivo_da_422(): void
@@ -234,8 +258,8 @@ class PublicDisponibilidadDiasTest extends TestCase
         $ajeno = $this->crearServicio($otro, 'Ajeno');
         $inactivo = $this->crearServicio($this->user, 'Inactivo', 30, false);
 
-        $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-12&servicio_ids[]={$ajeno->id}"))->assertStatus(422);
-        $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-12&servicio_ids[]={$inactivo->id}"))->assertStatus(422);
+        $this->getJson($this->url('2099-06-11', '2099-06-12', [[[$ajeno->id], null]]))->assertStatus(422);
+        $this->getJson($this->url('2099-06-11', '2099-06-12', [[[$inactivo->id], null]]))->assertStatus(422);
     }
 
     public function test_profesional_que_no_ofrece_el_servicio_da_422_y_ajena_da_404(): void
@@ -245,8 +269,8 @@ class PublicDisponibilidadDiasTest extends TestCase
         $s = $this->crearServicio($this->user, 'S', 30, true, $ana);
         $ajena = $this->crearProfesional($this->crearSalon(), 'Ajena');
 
-        $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-12&servicio_ids[]={$s->id}&profesional_id={$bea->id}"))->assertStatus(422);
-        $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-12&servicio_ids[]={$s->id}&profesional_id={$ajena->id}"))->assertNotFound();
+        $this->getJson($this->url('2099-06-11', '2099-06-12', [[[$s->id], $bea->id]]))->assertStatus(422);
+        $this->getJson($this->url('2099-06-11', '2099-06-12', [[[$s->id], $ajena->id]]))->assertNotFound();
     }
 
     public function test_con_profesional_id_filtra_a_esa_profesional(): void
@@ -259,9 +283,9 @@ class PublicDisponibilidadDiasTest extends TestCase
         $this->crearSlot($this->user, $bea, '13:00');
         $this->turno($bea, '2099-06-11 12:30:00', 120); // Bea ocupada 12:30-14:30
 
-        $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-11&servicio_ids[]={$s->id}&profesional_id={$bea->id}"))
+        $this->getJson($this->url('2099-06-11', '2099-06-11', [[[$s->id], $bea->id]]))
             ->assertOk()->assertExactJson(['dias' => []]);
-        $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-11&servicio_ids[]={$s->id}&profesional_id={$ana->id}"))
+        $this->getJson($this->url('2099-06-11', '2099-06-11', [[[$s->id], $ana->id]]))
             ->assertOk()->assertExactJson(['dias' => [['fecha' => '2099-06-11', 'libres' => 1]]]);
     }
 
@@ -269,9 +293,10 @@ class PublicDisponibilidadDiasTest extends TestCase
     {
         $vencido = $this->crearSalon(['is_exempt' => false]);
         $this->crearSuscripcion($vencido, 'VENCIDO', now()->subDay());
+        $asignaciones = $this->asignaciones([[[1], null]]);
 
-        $this->getJson("/api/public/{$vencido->slug}/disponibilidad/dias?desde=2099-06-11&hasta=2099-06-12&servicio_ids[]=1")->assertNotFound();
-        $this->getJson('/api/public/no-existe/disponibilidad/dias?desde=2099-06-11&hasta=2099-06-12&servicio_ids[]=1')->assertNotFound();
+        $this->getJson("/api/public/{$vencido->slug}/disponibilidad/dias?desde=2099-06-11&hasta=2099-06-12&{$asignaciones}")->assertNotFound();
+        $this->getJson("/api/public/no-existe/disponibilidad/dias?desde=2099-06-11&hasta=2099-06-12&{$asignaciones}")->assertNotFound();
     }
 
     public function test_los_slots_de_otro_salon_no_se_mezclan(): void
@@ -281,7 +306,7 @@ class PublicDisponibilidadDiasTest extends TestCase
         $otro = $this->crearSalon();
         $this->crearSlot($otro, $this->crearProfesional($otro, 'Ajena'), '15:00');
 
-        $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-12&servicio_ids[]={$s->id}"))
+        $this->getJson($this->url('2099-06-11', '2099-06-12', [[[$s->id], null]]))
             ->assertOk()->assertExactJson(['dias' => []]);
     }
 
@@ -302,7 +327,7 @@ class PublicDisponibilidadDiasTest extends TestCase
 
         $this->assertNotEmpty($esperado);
         $this->assertLessThan(11, count($esperado)); // algun dia quedo excluido
-        $this->getJson($this->url("desde=2099-06-10&hasta=2099-06-20&servicio_ids[]={$s->id}"))
+        $this->getJson($this->url('2099-06-10', '2099-06-20', [[[$s->id], null]]))
             ->assertOk()->assertExactJson(['dias' => $esperado]);
     }
 
@@ -312,13 +337,31 @@ class PublicDisponibilidadDiasTest extends TestCase
 
         DB::flushQueryLog();
         DB::enableQueryLog();
-        $this->getJson($this->url("desde=2099-06-11&hasta=2099-06-11&servicio_ids[]={$s->id}"))->assertOk();
+        $this->getJson($this->url('2099-06-11', '2099-06-11', [[[$s->id], null]]))->assertOk();
         $uno = count(DB::getQueryLog());
 
         DB::flushQueryLog();
-        $this->getJson($this->url("desde=2099-06-11&hasta=2099-07-10&servicio_ids[]={$s->id}"))->assertOk();
+        $this->getJson($this->url('2099-06-11', '2099-07-10', [[[$s->id], null]]))->assertOk();
         $treinta = count(DB::getQueryLog());
 
         $this->assertSame($uno, $treinta);
+    }
+
+    // ── 3a3b: grupos sueltos multi-profesional usan calcularConPlanes() ──
+
+    public function test_dias_con_grupos_sueltos_multiprofesional_usa_calcularconplanes(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $laura = $this->crearProfesional($this->user, 'Laura');
+        $x = $this->crearServicio($this->user, 'X', 60, true, $ana);
+        $y = $this->crearServicio($this->user, 'Y', 45, true, $laura);
+        $this->crearSlot($this->user, $ana, '10:00');
+        $this->crearSlot($this->user, $laura, '11:00');
+        // El 12 Laura queda ocupada en su unico slot -> el plan no entra ese dia.
+        $this->turno($laura, '2099-06-12 11:00:00', 45);
+
+        $this->getJson($this->url('2099-06-11', '2099-06-12', [[[$x->id], $ana->id], [[$y->id], $laura->id]]))
+            ->assertOk()
+            ->assertExactJson(['dias' => [['fecha' => '2099-06-11', 'libres' => 1]]]);
     }
 }
