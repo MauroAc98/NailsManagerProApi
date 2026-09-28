@@ -225,6 +225,46 @@ class DisponibilidadService
     }
 
     /**
+     * Igual que contarLibresPorDia() pero para promo componentizada y/o
+     * grupos sueltos multi-profesional (combo-multi-profesional, PR 3a3b):
+     * un loop simple por dia que llama a calcularConPlanes() una vez por
+     * dia. Tradeoff de performance deliberado: a diferencia de
+     * contarLibresPorDia(), que precarga profesionales/slots/turnos/holds
+     * UNA vez para todo el rango, aca cada dia repite esas consultas
+     * (calcularConPlanes ya las hace por dia). Se acepta porque el
+     * recorrido de dias con promo componentizada o grupos sueltos
+     * multi-profesional es un camino mucho menos frecuente que el de un
+     * unico servicio/profesional (ese sigue con la version batch).
+     *
+     * @param  array<int, GrupoSuelto>  $gruposSueltos
+     * @return array<string, int> fecha => cantidad de inicios libres
+     */
+    public function contarLibresPorDiaConPlanes(
+        User $user,
+        string $desde,
+        string $hasta,
+        ?PromoInput $promo,
+        array $gruposSueltos,
+        bool $paraleloHabilitado,
+        Carbon $ahora,
+        int $anticipacionMinutos,
+    ): array {
+        $resultado = [];
+        $dia = Carbon::parse($desde)->startOfDay();
+        $ultimo = Carbon::parse($hasta)->startOfDay();
+        while ($dia->lte($ultimo)) {
+            $fecha = $dia->format('Y-m-d');
+            $slots = $this->calcularConPlanes($user, $fecha, $promo, $gruposSueltos, $paraleloHabilitado, $ahora, $anticipacionMinutos);
+            if ($slots !== []) {
+                $resultado[$fecha] = count($slots);
+            }
+            $dia->addDay();
+        }
+
+        return $resultado;
+    }
+
+    /**
      * @param  Collection<int, Profesional>  $profesionales
      * @return array<int, array{hora: string, profesional_ids: array<int,int>}>
      */

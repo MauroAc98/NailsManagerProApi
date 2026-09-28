@@ -301,50 +301,23 @@ class PublicController extends Controller
         return ['usarPlanes' => true, 'promo' => $promo, 'gruposSueltos' => $gruposSueltos];
     }
 
-    /**
-     * Valida servicios (activos y del salon) y profesional (404 si es ajena o
-     * inactiva; 422 si no ofrece todos los servicios). Comun a los dos
-     * endpoints de disponibilidad.
-     *
-     * @return array{0: Collection, 1: ?Profesional}|JsonResponse
-     */
-    private function resolverServiciosYProfesional(User $user, array $data): array|JsonResponse
-    {
-        $ids = array_values(array_unique($data['servicio_ids']));
-        $servicios = Servicio::where('user_id', $user->id)
-            ->where('activo', true)
-            ->whereIn('id', $ids)
-            ->get();
-
-        if ($servicios->count() !== count($ids)) {
-            return response()->json(['message' => 'Uno o más servicios no son válidos.'], 422);
-        }
-
-        $profesional = null;
-        if (! empty($data['profesional_id'])) {
-            $profesional = Profesional::resolverParaUsuario($user, (int) $data['profesional_id']);
-            $ofrecidos = $profesional->servicios()->pluck('servicios.id')->all();
-
-            if (count(array_diff($ids, $ofrecidos)) > 0) {
-                return response()->json(['message' => 'La profesional no ofrece todos los servicios elegidos.'], 422);
-            }
-        }
-
-        return [$servicios, $profesional];
-    }
-
     // ─────────────────────────────────────────────
-    // GET /api/public/{slug}/disponibilidad/dias?desde=&hasta=
-    // Dias del rango con al menos un inicio libre (y cuantos)
+    // GET /api/public/{slug}/disponibilidad/dias?desde=&hasta=&asignaciones[]=
+    // Dias del rango con al menos un inicio libre (y cuantos). Misma forma
+    // `asignaciones` que /disponibilidad (combo-multi-profesional, PR 3a3b):
+    // un unico grupo sin promo componentizada degrada byte-a-byte al conteo
+    // legacy (contarLibresPorDia); con promo/2+ grupos se cuenta dia por dia
+    // via calcularConPlanes (ver DisponibilidadService::contarLibresPorDiaConPlanes).
     // ─────────────────────────────────────────────
-    public function disponibilidadDias(Request $request, string $slug, DisponibilidadService $disponibilidad): JsonResponse
-    {
-        $data = $request->validate([
+    public function disponibilidadDias(
+        Request $request,
+        string $slug,
+        DisponibilidadService $disponibilidad,
+        PromoComponentes $promoComponentes,
+    ): JsonResponse {
+        $data = $request->validate($this->reglasAsignaciones() + [
             'desde' => 'required|date_format:Y-m-d',
             'hasta' => 'required|date_format:Y-m-d|after_or_equal:desde',
-            'servicio_ids' => 'required|array|min:1',
-            'servicio_ids.*' => 'integer',
-            'profesional_id' => 'nullable|integer',
         ]);
 
         $desde = Carbon::parse($data['desde'])->startOfDay();
@@ -355,11 +328,10 @@ class PublicController extends Controller
 
         $user = $this->getProfesional($slug);
 
-        $resuelto = $this->resolverServiciosYProfesional($user, $data);
+        $resuelto = $this->resolverAsignaciones($user, $data['asignaciones'], $promoComponentes);
         if ($resuelto instanceof JsonResponse) {
             return $resuelto;
         }
-        [$servicios, $profesional] = $resuelto;
 
         // Recorte a [hoy, hoy + ventana].
         $ahora = Carbon::now();
@@ -375,15 +347,29 @@ class PublicController extends Controller
             return response()->json(['dias' => []]);
         }
 
-        $libres = $disponibilidad->contarLibresPorDia(
-            $user,
-            $desde->format('Y-m-d'),
-            $hasta->format('Y-m-d'),
-            $servicios,
-            $profesional,
-            $ahora,
-            (int) config('reservas.anticipacion_minutos', 120),
-        );
+        $anticipacionMinutos = (int) config('reservas.anticipacion_minutos', 120);
+        if (! $resuelto['usarPlanes']) {
+            $libres = $disponibilidad->contarLibresPorDia(
+                $user,
+                $desde->format('Y-m-d'),
+                $hasta->format('Y-m-d'),
+                $resuelto['servicios'],
+                $resuelto['profesional'],
+                $ahora,
+                $anticipacionMinutos,
+            );
+        } else {
+            $libres = $disponibilidad->contarLibresPorDiaConPlanes(
+                $user,
+                $desde->format('Y-m-d'),
+                $hasta->format('Y-m-d'),
+                $resuelto['promo'],
+                $resuelto['gruposSueltos'],
+                $promoComponentes->paraleloHabilitado($user),
+                $ahora,
+                $anticipacionMinutos,
+            );
+        }
 
         $dias = [];
         foreach ($libres as $fecha => $cantidad) {
