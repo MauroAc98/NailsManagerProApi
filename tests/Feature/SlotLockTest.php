@@ -89,10 +89,9 @@ class SlotLockTest extends TestCase
 
     // ── conLocks (combo-multi-profesional, PR 3b) ──────────────────
 
-    /** Ids de las filas "profesionales" lockeadas (SELECT ... FOR UPDATE), en el orden real de adquisicion. */
-    private function ordenDeAdquisicion(array $ids): array
+    /** Registra en $vistos (por referencia) los ids "profesionales" lockeados (SELECT ... FOR UPDATE), en el orden real de adquisicion. */
+    private function registrarAdquisiciones(array &$vistos, array $ids): void
     {
-        $vistos = [];
         DB::listen(function ($q) use (&$vistos, $ids) {
             if (! str_contains($q->sql, 'from "profesionales"')) {
                 return;
@@ -102,15 +101,14 @@ class SlotLockTest extends TestCase
                 $vistos[] = $match[0];
             }
         });
-
-        return $vistos;
     }
 
     public function test_conlocks_adquiere_en_orden_ascendente_sin_importar_el_orden_de_entrada(): void
     {
         $a = $this->profesional();
         $b = $this->profesional();
-        $vistos = $this->ordenDeAdquisicion([$a->id, $b->id]);
+        $vistos = [];
+        $this->registrarAdquisiciones($vistos, [$a->id, $b->id]);
 
         (new SlotLock('sqlite'))->conLocks([$b->id, $a->id], fn () => null);
 
@@ -120,7 +118,8 @@ class SlotLockTest extends TestCase
     public function test_conlocks_deduplica_ids_repetidos(): void
     {
         $a = $this->profesional();
-        $vistos = $this->ordenDeAdquisicion([$a->id]);
+        $vistos = [];
+        $this->registrarAdquisiciones($vistos, [$a->id]);
 
         (new SlotLock('sqlite'))->conLocks([$a->id, $a->id], fn () => null);
 
