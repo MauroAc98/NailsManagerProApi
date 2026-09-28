@@ -4,8 +4,10 @@ namespace App\Services\Reservas;
 
 use App\Jobs\EnviarMensajeConfirmacion;
 use App\Models\Cliente;
+use App\Models\Profesional;
 use App\Models\ReservaWeb;
 use App\Models\Turno;
+use App\Models\TurnoGrupo;
 use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -30,6 +32,13 @@ class ConfirmarReservaService
         // Sin profesional (fila legacy) no hay agenda que resolver.
         if ($reserva->profesional_id === null) {
             return $this->needsRefund($reserva, 'sin_profesional', $ahora);
+        }
+
+        // combo-multi-profesional (PR 3c): reserva con tramos (promo componentizada
+        // o grupos sueltos multi-profesional) sigue un camino aparte; el legacy de
+        // abajo queda byte-identico (Rule L).
+        if ($reserva->tramos !== null) {
+            return $this->confirmarGrupo($reserva, $ahora);
         }
 
         return $this->lock->conLock($reserva->profesional_id, function () use ($reserva, $ahora) {
@@ -106,6 +115,143 @@ class ConfirmarReservaService
         $turno->servicios()->attach($r->servicio_ids);
 
         return $turno;
+    }
+
+    /**
+     * combo-multi-profesional (PR 3c): reserva con `tramos` (promo componentizada
+     * y/o grupos sueltos multi-profesional). Lockea TODAS las profesionales del
+     * plan (SlotLock::conLocks, mismo orden que HoldService::intentarPlan) y
+     * re-valida CADA tramo (alineacion + libre) antes de confirmar: la promo
+     * pudo desconfigurarse o la duena pudo agendar encima de un tramo desde el
+     * hold. Sin re-precio: usa el precio_sugerido ya prorrateado en el hold
+     * (spec: "no auto-repricing").
+     */
+    private function confirmarGrupo(ReservaWeb $reserva, Carbon $ahora): ConfirmacionResultado
+    {
+        $profesionalIds = array_values(array_unique(array_column($reserva->tramos, 'profesional_id')));
+
+        return $this->lock->conLocks($profesionalIds, function () use ($reserva, $ahora) {
+            $r = ReservaWeb::whereKey($reserva->id)->lockForUpdate()->firstOrFail();
+
+            if ($r->estado === 'confirmed') {
+                return new ConfirmacionResultado(
+                    ConfirmacionResultado::ALREADY_CONFIRMED,
+                    Turno::where('reserva_web_id', $r->id)->orderBy('id')->first(),
+                );
+            }
+
+            if (! $r->nombre || ! $r->telefono) {
+                return $this->needsRefund($r, 'datos_incompletos', $ahora);
+            }
+
+            if (! $this->grupoSigueValido($r, $ahora)) {
+                return $this->needsRefund($r, 'slot_desalineado', $ahora);
+            }
+
+            $turno = $this->crearGrupo($r);
+            $r->update(['estado' => 'confirmed', 'confirmada_en' => $ahora->timestamp, 'motivo_cierre' => null]);
+
+            DB::afterCommit(fn () => EnviarMensajeConfirmacion::dispatch($turno->id));
+
+            Log::info('reserva.confirmed', [
+                'user_id' => $r->user_id,
+                'profesional_id' => $r->profesional_id,
+                'reserva_id' => $r->id,
+                'device_prefix' => $r->device_hash ? substr($r->device_hash, 0, 8) : null,
+                'motivo' => null,
+            ]);
+
+            return new ConfirmacionResultado(ConfirmacionResultado::CONFIRMED, $turno);
+        });
+    }
+
+    /**
+     * Cada tramo (ya prorrateado y persistido en el hold) sigue alineado a un
+     * slot activo de su propia profesional (AlineacionSlots) y sigue libre en
+     * su propio horario (estaLibre, ignorando esta misma reserva). No recalcula
+     * el plan con TramosResolver: solo re-chequea agenda, nunca re-precia.
+     */
+    private function grupoSigueValido(ReservaWeb $r, Carbon $ahora): bool
+    {
+        $fecha = substr((string) $r->getRawOriginal('fecha'), 0, 10);
+        $hora = substr((string) $r->getRawOriginal('slot_hora'), 0, 5);
+        $user = User::findOrFail($r->user_id);
+
+        $profesionales = Profesional::whereIn('id', array_column($r->tramos, 'profesional_id'))->get();
+        $slotsPorProfesional = $profesionales->mapWithKeys(
+            fn (Profesional $p) => [$p->id => $this->disponibilidad->horasActivas($user, $p)],
+        )->all();
+        if ((new AlineacionSlots())->primerDesalineado($r->tramos, $hora, $slotsPorProfesional) !== null) {
+            return false;
+        }
+
+        $inicio = Carbon::parse("{$fecha} {$hora}");
+        foreach ($r->tramos as $tramo) {
+            $inicioTramo = $inicio->copy()->addMinutes((int) $tramo['offset_minutos']);
+            $libre = $this->disponibilidad->estaLibre(
+                (int) $tramo['profesional_id'], $fecha, $inicioTramo->format('H:i'),
+                (int) $tramo['duracion_minutos'], $ahora, $r->id, null,
+            );
+            if (! $libre) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /** Crea turno_grupos + UN Turno por tramo, todos ligados; devuelve el lider (primer tramo = ancla). */
+    private function crearGrupo(ReservaWeb $r): Turno
+    {
+        $user = User::findOrFail($r->user_id);
+        $cliente = Cliente::todosPorTelefono($user, (string) $r->telefono)->first()
+            ?? $user->clientes()->create([
+                'nombre' => $r->nombre,
+                'apellido' => $r->apellido,
+                'telefono' => $r->telefono,
+            ]);
+
+        $grupo = TurnoGrupo::create(['reserva_web_id' => $r->id, 'modo' => $r->tramos_modo]);
+
+        $fecha = substr((string) $r->getRawOriginal('fecha'), 0, 10);
+        $inicio = Carbon::parse($fecha . ' ' . $r->getRawOriginal('slot_hora'));
+        $lider = null;
+
+        foreach ($r->tramos as $tramo) {
+            $turno = Turno::create([
+                'user_id' => $r->user_id,
+                'profesional_id' => $tramo['profesional_id'],
+                'cliente_id' => $cliente->id,
+                'reserva_web_id' => $r->id,
+                'grupo_id' => $grupo->id,
+                'fecha_hora' => $inicio->copy()->addMinutes((int) $tramo['offset_minutos'])->format('Y-m-d H:i:s'),
+                'duracion_total_minutos' => $tramo['duracion_minutos'],
+                'estado' => 'confirmado',
+                'origen' => 'web',
+                'notas' => $r->nota,
+            ]);
+            $turno->servicios()->attach($this->pivotServicios($tramo['servicio_ids'], $tramo['precio_sugerido'] ?? null));
+            $lider ??= $turno;
+        }
+
+        return $lider;
+    }
+
+    /** Reparte precio_sugerido (entero, ya prorrateado) entre los servicios de un tramo fusionado; null si el tramo no tiene precio sugerido. */
+    private function pivotServicios(array $servicioIds, ?int $precioSugerido): array
+    {
+        $n = count($servicioIds);
+        if ($precioSugerido === null || $n === 1) {
+            return collect($servicioIds)->mapWithKeys(fn ($id) => [$id => ['precio_sugerido' => $precioSugerido]])->all();
+        }
+
+        $base = intdiv($precioSugerido, $n);
+        $pivote = [];
+        foreach (array_values($servicioIds) as $i => $id) {
+            $pivote[$id] = ['precio_sugerido' => $i < $n - 1 ? $base : $precioSugerido - $base * ($n - 1)];
+        }
+
+        return $pivote;
     }
 
     /** Marca la reserva para reembolso; si seguia viva la cierra (expired) para liberar el horario. */
