@@ -50,12 +50,18 @@ class HoldServiceRetenerTest extends TestCase
         return app(HoldService::class);
     }
 
+    /**
+     * Combo-multi-profesional (PR 3b): retener() ahora recibe `asignaciones`
+     * (misma forma que disponibilidad) + `modo`. Un unico grupo sin promo
+     * componentizada sigue el camino legacy sin cambios (Rule L); este helper
+     * arma ese unico grupo, con `modo` siempre null (no se usa fuera de plan).
+     */
     private function retener(string $hora, ?int $profId, string $device = 'dev-1', string $key = 'key-1', ?array $servicioIds = null)
     {
         return $this->svc()->retener(
             $this->user,
-            $servicioIds ?? [$this->servicio->id],
-            $profId,
+            [['servicio_ids' => $servicioIds ?? [$this->servicio->id], 'profesional_id' => $profId]],
+            null,
             self::FECHA,
             $hora,
             (new ReputacionService())->hashDevice($device),
@@ -194,10 +200,11 @@ class HoldServiceRetenerTest extends TestCase
     {
         config(['reservas.anticipacion_minutos' => 120]);
 
-        $r = $this->svc()->retener($this->user, [$this->servicio->id], $this->ana->id, self::FECHA, '10:00', 'h', 'k', Carbon::parse(self::FECHA . ' 07:30:00'));
+        $asignaciones = [['servicio_ids' => [$this->servicio->id], 'profesional_id' => $this->ana->id]];
+        $r = $this->svc()->retener($this->user, $asignaciones, null, self::FECHA, '10:00', 'h', 'k', Carbon::parse(self::FECHA . ' 07:30:00'));
         $this->assertSame('held', $r->reserva->estado); // 10:00 >= 07:30 + 2h
 
-        $this->assertSame('slot_taken', $this->codigo(fn () => $this->svc()->retener($this->user, [$this->servicio->id], $this->ana->id, self::FECHA, '11:00', 'h2', 'k2', Carbon::parse(self::FECHA . ' 09:30:00'))));
+        $this->assertSame('slot_taken', $this->codigo(fn () => $this->svc()->retener($this->user, $asignaciones, null, self::FECHA, '11:00', 'h2', 'k2', Carbon::parse(self::FECHA . ' 09:30:00'))));
     }
 
     public function test_g5_un_segundo_hold_del_mismo_dispositivo_libera_el_primero(): void
@@ -252,7 +259,8 @@ class HoldServiceRetenerTest extends TestCase
             ]);
         };
 
-        $this->assertSame('slot_taken', $this->codigo(fn () => $svc->retener($this->user, [$this->servicio->id], $this->ana->id, self::FECHA, '10:00', 'h', 'k', $this->ahora())));
+        $asignaciones = [['servicio_ids' => [$this->servicio->id], 'profesional_id' => $this->ana->id]];
+        $this->assertSame('slot_taken', $this->codigo(fn () => $svc->retener($this->user, $asignaciones, null, self::FECHA, '10:00', 'h', 'k', $this->ahora())));
         // (El competidor del seam corre en la misma conexion, asi que su fila se revierte con el intento;
         // lo que se prueba es que el indice unico rechaza el insert y NO queda fila del solicitante.)
         $this->assertSame(0, ReservaWeb::where('idempotency_key', 'k')->count());

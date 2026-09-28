@@ -72,9 +72,10 @@ class PublicReservasHoldsTest extends TestCase
         return $h;
     }
 
+    /** combo-multi-profesional (PR 3b): el body de /holds ahora usa `asignaciones` (misma forma que disponibilidad). */
     private function body(string $hora = '10:00', ?int $profId = null, array $extra = []): array
     {
-        return array_merge(['servicio_ids' => [$this->servicio->id], 'profesional_id' => $profId ?? $this->ana->id, 'fecha' => self::FECHA, 'hora' => $hora], $extra);
+        return array_merge(['asignaciones' => [['servicio_ids' => [$this->servicio->id], 'profesional_id' => $profId ?? $this->ana->id]], 'fecha' => self::FECHA, 'hora' => $hora], $extra);
     }
 
     private function crearHold(string $hora = '10:00', string $device = self::DEVICE, string $key = 'key-1'): string
@@ -117,7 +118,7 @@ class PublicReservasHoldsTest extends TestCase
     public function test_hold_sin_profesional_asigna_una_libre(): void
     {
         $body = $this->body();
-        unset($body['profesional_id']);
+        $body['asignaciones'][0]['profesional_id'] = null;
 
         $this->postJson($this->url('/holds'), $body, $this->headers())
             ->assertCreated()->assertJsonPath('profesional_id', $this->ana->id);
@@ -134,10 +135,10 @@ class PublicReservasHoldsTest extends TestCase
 
     public function test_body_invalido_es_422_con_code_validation_y_errores(): void
     {
-        $this->postJson($this->url('/holds'), ['servicio_ids' => [], 'fecha' => 'ayer', 'hora' => '25:00'], $this->headers())
+        $this->postJson($this->url('/holds'), ['asignaciones' => [['servicio_ids' => []]], 'fecha' => 'ayer', 'hora' => '25:00'], $this->headers())
             ->assertStatus(422)
             ->assertJsonPath('code', 'validation')
-            ->assertJsonStructure(['message', 'code', 'errors' => ['servicio_ids', 'fecha', 'hora']]);
+            ->assertJsonStructure(['message', 'code', 'errors' => ['asignaciones.0.servicio_ids', 'fecha', 'hora']]);
     }
 
     public function test_device_token_ausente_o_mal_formado_es_422_device_token_required(): void
