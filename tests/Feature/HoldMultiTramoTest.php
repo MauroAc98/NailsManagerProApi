@@ -150,6 +150,7 @@ class HoldMultiTramoTest extends TestCase
 
     public function test_hold_multi_tramo_le_pasa_a_conlocks_todas_las_profesionales_del_plan(): void
     {
+        $this->user->update(['atiende_en_paralelo' => true]);
         $spy = new class('sqlite') extends SlotLock {
             public array $vistos = [];
 
@@ -162,9 +163,10 @@ class HoldMultiTramoTest extends TestCase
         };
         $this->app->instance(SlotLock::class, $spy);
 
-        // Laura (mayor id) elegida ANTES que Ana en la lista de asignaciones:
+        // Laura (mayor id) elegida ANTES que Ana en la lista de asignaciones;
+        // paralelo = ambos tramos en offset 0, sin problema de alineacion.
         // conLocks() (ya probado en SlotLockTest) es quien ordena, no el caller.
-        $this->retener([$this->asignacion($this->laura, $this->semis), $this->asignacion($this->ana, $this->softgel)], 'secuencia');
+        $this->retener([$this->asignacion($this->laura, $this->semis), $this->asignacion($this->ana, $this->softgel)], 'paralelo');
 
         sort($spy->vistos);
         $this->assertSame([$this->ana->id, $this->laura->id], $spy->vistos);

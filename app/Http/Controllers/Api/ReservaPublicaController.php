@@ -57,8 +57,8 @@ class ReservaPublicaController extends Controller
 
         $resultado = $this->holds->retener(
             $user,
-            array_map('intval', $request->input('servicio_ids')),
-            $request->filled('profesional_id') ? (int) $request->input('profesional_id') : null,
+            $request->input('asignaciones'),
+            $request->input('modo'),
             $request->input('fecha'),
             $request->input('hora'),
             $deviceHash,
@@ -181,13 +181,35 @@ class ReservaPublicaController extends Controller
         ];
     }
 
+    /**
+     * combo-multi-profesional (PR 3b): un hold de un unico tramo (legacy)
+     * mantiene el contrato exacto de siempre. Un hold multi-tramo (tramos no
+     * nulo) suma `fin` y `tramos` (profesional_id/hora/fin/servicio_ids de
+     * cada uno) — `profesional_id` arriba sigue siendo la ancla.
+     */
     private function payloadHold(ReservaWeb $r): array
     {
-        return $this->payloadBasico($r) + [
+        $base = $this->payloadBasico($r) + [
             'profesional_id' => $r->profesional_id,
             'fecha' => $this->fecha($r),
             'hora' => $this->hora($r),
             'duracion_total_minutos' => (int) $r->duracion_total_minutos,
+        ];
+
+        if ($r->tramos === null) {
+            return $base;
+        }
+
+        $inicio = Carbon::parse($this->fecha($r) . ' ' . $this->hora($r));
+
+        return $base + [
+            'fin' => $inicio->copy()->addMinutes((int) $r->duracion_total_minutos)->format('H:i'),
+            'tramos' => array_map(fn (array $t) => [
+                'profesional_id' => $t['profesional_id'],
+                'hora' => $inicio->copy()->addMinutes($t['offset_minutos'])->format('H:i'),
+                'fin' => $inicio->copy()->addMinutes($t['offset_minutos'] + $t['duracion_minutos'])->format('H:i'),
+                'servicio_ids' => $t['servicio_ids'],
+            ], $r->tramos),
         ];
     }
 

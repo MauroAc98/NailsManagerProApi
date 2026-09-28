@@ -7,6 +7,7 @@ use App\Models\Profesional;
 use App\Models\ReservaWeb;
 use App\Models\Servicio;
 use App\Models\User;
+use App\Services\Servicios\PromoComponentes;
 use Closure;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
@@ -18,6 +19,14 @@ use Illuminate\Support\Facades\Log;
  * Ciclo de vida de un hold de reserva online (reservas_web). Toda decision
  * sobre la agenda de una profesional corre dentro de SlotLock, y el indice
  * unico parcial (profesional, fecha, hora) es la ultima linea de defensa.
+ *
+ * combo-multi-profesional (PR 3b): retener() recibe `asignaciones` (misma
+ * forma que disponibilidad). Un unico grupo sin promo componentizada sigue el
+ * camino LEGACY sin cambios (retenerLegacy/intentar, un solo SlotLock::conLock,
+ * Rule L). Una promo componentizada o 2+ grupos sueltos exige `modo` (el que
+ * el inicio ofrecido tenia) y corre por retenerPlan/intentarPlan, lockeando
+ * TODAS las profesionales involucradas con SlotLock::conLocks (orden
+ * ascendente, sin deadlocks) y re-validando el plan EXACTO dentro del lock.
  */
 class HoldService
 {
@@ -35,6 +44,7 @@ class HoldService
         private PoliticaHold $politica,
         private ExpirarHoldsService $expirar,
         private ReputacionService $reputacion,
+        private PromoComponentes $promoComponentes,
     ) {
     }
 
@@ -48,14 +58,14 @@ class HoldService
     }
 
     /**
-     * @param  array<int, int>  $servicioIds
+     * @param  array<int, array{servicio_ids: array<int,int>, profesional_id?: int|null}>  $asignaciones
      * @throws ReservaPublicaException validation 422 | slot_taken 409
      * @throws \Illuminate\Database\Eloquent\ModelNotFoundException profesional ajena o inactiva (404)
      */
     public function retener(
         User $user,
-        array $servicioIds,
-        ?int $profesionalId,
+        array $asignaciones,
+        ?string $modo,
         string $fecha,
         string $hora,
         string $deviceHash,
@@ -71,6 +81,30 @@ class HoldService
         $this->expirar->expirarVencidos($ahora->timestamp, $deviceHash);
 
         $hora = Carbon::parse($hora)->format('H:i');
+        $resuelto = $this->resolverAsignaciones($user, $asignaciones);
+
+        if (! $resuelto['usarPlanes']) {
+            return $this->retenerLegacy($user, $resuelto['servicioIds'], $resuelto['profesionalId'], $fecha, $hora, $deviceHash, $idempotencyKey, $ahora);
+        }
+
+        if ($modo === null) {
+            throw ReservaPublicaException::validacion('Falta el modo de la reserva.');
+        }
+
+        return $this->retenerPlan($user, $resuelto['promo'], $resuelto['gruposSueltos'], $modo, $fecha, $hora, $deviceHash, $idempotencyKey, $ahora);
+    }
+
+    /** Camino LEGACY (un unico grupo, sin promo componentizada): identico a antes de PR 3b (Rule L). */
+    private function retenerLegacy(
+        User $user,
+        array $servicioIds,
+        ?int $profesionalId,
+        string $fecha,
+        string $hora,
+        string $deviceHash,
+        string $idempotencyKey,
+        Carbon $ahora,
+    ): HoldResultado {
         [$servicios, $candidatas] = $this->resolver($user, $servicioIds, $profesionalId);
         $duracion = (int) $servicios->sum('duracion_minutos');
 
@@ -110,6 +144,128 @@ class HoldService
         ]);
 
         throw ReservaPublicaException::slotTaken();
+    }
+
+    /**
+     * Camino PLAN (promo componentizada y/o 2+ grupos sueltos multi-profesional):
+     * `modo` debe ser exactamente el de un plan calculado ahora mismo (si ya
+     * no lo es -stale offer-, 409 slot_taken: mismo codigo que slot_taken
+     * legacy, sin codigo nuevo). Lockea TODAS las profesionales del plan.
+     *
+     * @param  array<int, GrupoSuelto>  $gruposSueltos
+     */
+    private function retenerPlan(
+        User $user,
+        ?PromoInput $promo,
+        array $gruposSueltos,
+        string $modo,
+        string $fecha,
+        string $hora,
+        string $deviceHash,
+        string $idempotencyKey,
+        Carbon $ahora,
+    ): HoldResultado {
+        $anticipacion = (int) config('reservas.anticipacion_minutos', 120);
+        if (Carbon::parse("{$fecha} {$hora}")->lt($ahora->copy()->addMinutes($anticipacion))) {
+            throw ReservaPublicaException::slotTaken();
+        }
+
+        $planes = (new TramosResolver())->planes($promo, $gruposSueltos, $this->promoComponentes->paraleloHabilitado($user));
+        $plan = collect($planes)->first(fn (PlanReserva $p) => $p->modo === $modo);
+        if ($plan === null) {
+            throw ReservaPublicaException::slotTaken();
+        }
+
+        $profesionalIds = array_values(array_unique(array_column($plan->tramos, 'profesional_id')));
+
+        try {
+            $reserva = $this->lock->conLocks($profesionalIds, fn () => $this->intentarPlan(
+                $user, $plan, $fecha, $hora, $deviceHash, $idempotencyKey, $ahora,
+            ));
+        } catch (SlotNoDisponible) {
+            Log::info('reserva.hold.slot_taken', [
+                'user_id' => $user->id,
+                'profesional_id' => $plan->tramos[0]['profesional_id'],
+                'reserva_id' => null,
+                'device_prefix' => substr($deviceHash, 0, 8),
+                'motivo' => 'slot_taken',
+            ]);
+            throw ReservaPublicaException::slotTaken();
+        } catch (QueryException $e) {
+            $previa = ReservaWeb::where('user_id', $user->id)->where('device_hash', $deviceHash)->where('idempotency_key', $idempotencyKey)->first();
+            if ($previa) {
+                return new HoldResultado($previa, true);
+            }
+            throw $e;
+        }
+
+        Log::info('reserva.hold.created', $this->contexto($reserva) + ['motivo' => null]);
+
+        return new HoldResultado($reserva);
+    }
+
+    /**
+     * Resuelve `asignaciones` (misma regla que PublicController::resolverAsignaciones):
+     * un unico grupo sin promo componentizada es legacy; una promo componentizada
+     * o 2+ grupos (cada uno con profesional explicita) usa planes.
+     *
+     * @param  array<int, array{servicio_ids: array<int,int>, profesional_id?: int|null}>  $asignaciones
+     * @return array{usarPlanes: bool, servicioIds?: array<int,int>, profesionalId?: ?int, promo?: ?PromoInput, gruposSueltos?: array<int, GrupoSuelto>}
+     */
+    private function resolverAsignaciones(User $user, array $asignaciones): array
+    {
+        $todosLosIds = array_values(array_unique(array_merge(
+            ...array_map(fn (array $a) => $a['servicio_ids'], $asignaciones),
+        )));
+        $servicios = Servicio::where('user_id', $user->id)->where('activo', true)->whereIn('id', $todosLosIds)->get()->keyBy('id');
+        if ($servicios->count() !== count($todosLosIds)) {
+            throw ReservaPublicaException::validacion('Uno o más servicios no son válidos.');
+        }
+
+        $multiplesGrupos = count($asignaciones) >= 2;
+        $promo = null;
+        $gruposSueltos = [];
+        $legacy = null;
+
+        foreach ($asignaciones as $asignacion) {
+            $ids = array_values(array_unique($asignacion['servicio_ids']));
+            $grupoServicios = $servicios->only($ids)->values();
+            $unico = $grupoServicios->first();
+
+            if (count($ids) === 1 && $unico->es_promo && $unico->componentes()->exists()) {
+                if ($promo !== null) {
+                    throw ReservaPublicaException::validacion('No se pueden combinar dos promos en la misma reserva.');
+                }
+                $promo = $this->promoComponentes->promoInput($unico);
+                continue;
+            }
+
+            $profesionalId = $asignacion['profesional_id'] ?? null;
+            if ($profesionalId === null) {
+                if ($multiplesGrupos) {
+                    throw ReservaPublicaException::validacion('Elegí una profesional para cada servicio.');
+                }
+                $legacy = [$ids, null];
+                continue;
+            }
+
+            if (! $multiplesGrupos) {
+                $legacy = [$ids, (int) $profesionalId];
+                continue;
+            }
+
+            $profesional = Profesional::resolverParaUsuario($user, (int) $profesionalId);
+            if (count(array_diff($ids, $profesional->servicios()->pluck('servicios.id')->all())) > 0) {
+                throw ReservaPublicaException::validacion('La profesional no ofrece todos los servicios elegidos.');
+            }
+            $gruposSueltos[] = new GrupoSuelto($profesional->id, $ids, (int) $grupoServicios->sum('duracion_minutos'));
+        }
+
+        if ($promo === null && count($gruposSueltos) < 2) {
+            return ['usarPlanes' => false, 'servicioIds' => $legacy[0], 'profesionalId' => $legacy[1]];
+        }
+
+        return ['usarPlanes' => true, 'promo' => $promo, 'gruposSueltos' => $gruposSueltos];
     }
 
     // ─────────────────────────────────────────────
@@ -335,19 +491,7 @@ class HoldService
         Carbon $ahora,
     ): ReservaWeb {
         // 1) Un hold vivo por dispositivo: libera el anterior (se revierte si esto falla).
-        $liberadas = ReservaWeb::where('user_id', $user->id)
-            ->where('device_hash', $deviceHash)
-            ->bloqueantes()
-            ->update(['estado' => 'cancelled', 'motivo_cierre' => 'reemplazada', 'updated_at' => now()]);
-        if ($liberadas > 0) {
-            Log::info('reserva.hold.released', [
-                'user_id' => $user->id,
-                'profesional_id' => $profesional->id,
-                'reserva_id' => null,
-                'device_prefix' => substr($deviceHash, 0, 8),
-                'motivo' => 'reemplazada',
-            ]);
-        }
+        $this->liberarHoldAnterior($user, $deviceHash, $profesional->id);
 
         // 2) Re-check bajo lock: turnos confirmados + holds vivos de ESTA profesional + lead time.
         $anticipacion = (int) config('reservas.anticipacion_minutos', 120);
@@ -356,13 +500,7 @@ class HoldService
         }
 
         // 3) Ordena filas vencidas en este mismo inicio para que no choquen con el indice unico.
-        ReservaWeb::where('profesional_id', $profesional->id)
-            ->where('fecha', $fecha)
-            ->where('slot_hora', $hora . ':00')
-            ->bloqueantes()
-            ->where('expira_en', '<=', $ahora->timestamp)
-            ->get()
-            ->each(fn (ReservaWeb $vieja) => $this->expirar->expirarUna($vieja, $ahora->timestamp));
+        $this->expirarVencidasEnElInicio($profesional->id, $fecha, $hora, $ahora);
 
         // 4) Alta ocupacion (snapshot) y duracion del hold.
         $alta = $this->politica->esAlta(
@@ -397,6 +535,99 @@ class HoldService
             }
             throw $e;
         }
+    }
+
+    /**
+     * Corre DENTRO de SlotLock::conLocks (transaccion abierta, TODAS las
+     * profesionales del plan ya lockeadas). Re-valida el plan EXACTO: cada
+     * tramo sigue alineado a un slot activo de su propia profesional
+     * (AlineacionSlots) y sigue libre (estaLibre) en su propio horario. La
+     * ancla (para el indice unico y el log) es la profesional del primer tramo.
+     */
+    private function intentarPlan(
+        User $user,
+        PlanReserva $plan,
+        string $fecha,
+        string $hora,
+        string $deviceHash,
+        string $idempotencyKey,
+        Carbon $ahora,
+    ): ReservaWeb {
+        $ancla = (int) $plan->tramos[0]['profesional_id'];
+        $this->liberarHoldAnterior($user, $deviceHash, $ancla);
+
+        $profesionalIds = array_values(array_unique(array_column($plan->tramos, 'profesional_id')));
+        $slotsPorProfesional = Profesional::whereIn('id', $profesionalIds)->get()
+            ->mapWithKeys(fn (Profesional $p) => [$p->id => $this->disponibilidad->horasActivas($user, $p)])->all();
+        if ((new AlineacionSlots())->primerDesalineado($plan->tramos, $hora, $slotsPorProfesional) !== null) {
+            throw new SlotNoDisponible();
+        }
+
+        $inicioLider = Carbon::parse("{$fecha} {$hora}");
+        foreach ($plan->tramos as $tramo) {
+            $inicio = $inicioLider->copy()->addMinutes($tramo['offset_minutos']);
+            if (! $this->disponibilidad->estaLibre($tramo['profesional_id'], $fecha, $inicio->format('H:i'), $tramo['duracion_minutos'], $ahora)) {
+                throw new SlotNoDisponible();
+            }
+        }
+
+        $this->expirarVencidasEnElInicio($ancla, $fecha, $hora, $ahora);
+
+        try {
+            return ReservaWeb::create([
+                'user_id' => $user->id,
+                'profesional_id' => $ancla,
+                'public_token' => ReservaWeb::generarToken(),
+                'servicio_ids' => array_values(array_unique(array_merge(...array_column($plan->tramos, 'servicio_ids')))),
+                'fecha' => $fecha,
+                'slot_hora' => $hora . ':00',
+                'duracion_total_minutos' => $plan->duracionTotalMinutos(),
+                'estado' => 'held',
+                // Alta ocupacion no se calcula para multi-tramo (deviation documentada):
+                // siempre usa la ventana estandar de hold, nunca la acortada.
+                'expira_en' => $ahora->timestamp + $this->politica->holdMinutos(false) * 60,
+                'alta_ocupacion' => false,
+                'device_hash' => $deviceHash,
+                'idempotency_key' => $idempotencyKey,
+                'tramos' => $plan->tramos,
+                'tramos_modo' => $plan->modo,
+            ]);
+        } catch (QueryException $e) {
+            if ($this->esViolacionDeUnicoDeSlot($e)) {
+                throw new SlotNoDisponible();
+            }
+            throw $e;
+        }
+    }
+
+    /** Libera el hold bloqueante previo de ESTE dispositivo (si lo hay); se revierte si el intento falla. */
+    private function liberarHoldAnterior(User $user, string $deviceHash, int $profesionalIdParaLog): void
+    {
+        $liberadas = ReservaWeb::where('user_id', $user->id)
+            ->where('device_hash', $deviceHash)
+            ->bloqueantes()
+            ->update(['estado' => 'cancelled', 'motivo_cierre' => 'reemplazada', 'updated_at' => now()]);
+        if ($liberadas > 0) {
+            Log::info('reserva.hold.released', [
+                'user_id' => $user->id,
+                'profesional_id' => $profesionalIdParaLog,
+                'reserva_id' => null,
+                'device_prefix' => substr($deviceHash, 0, 8),
+                'motivo' => 'reemplazada',
+            ]);
+        }
+    }
+
+    /** Ordena (expira) filas vencidas de ESTE mismo inicio para que no choquen con el indice unico parcial. */
+    private function expirarVencidasEnElInicio(int $profesionalId, string $fecha, string $hora, Carbon $ahora): void
+    {
+        ReservaWeb::where('profesional_id', $profesionalId)
+            ->where('fecha', $fecha)
+            ->where('slot_hora', $hora . ':00')
+            ->bloqueantes()
+            ->where('expira_en', '<=', $ahora->timestamp)
+            ->get()
+            ->each(fn (ReservaWeb $vieja) => $this->expirar->expirarUna($vieja, $ahora->timestamp));
     }
 
     /**

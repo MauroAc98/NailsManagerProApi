@@ -653,6 +653,30 @@ class DisponibilidadServiceTest extends TestCase
     }
 
     /**
+     * combo-multi-profesional, PR 3b: estaLibre()/ocupacionDelDia() -no solo
+     * calcular()/holdsVigentes()- deben ver el tramo de la profesional
+     * NO-ancla. HoldService::intentar()/intentarPlan() re-chequean con
+     * estaLibre() DENTRO del lock: si esto no viera el tramo de Laura, un
+     * segundo hold legacy para Laura sola pisaria su propio compromiso.
+     */
+    public function test_esta_libre_ve_el_tramo_de_la_profesional_no_ancla_de_un_hold_multi_tramo(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $laura = $this->crearProfesional($this->user, 'Laura');
+        $ahora = $this->ahora();
+
+        $this->reserva($ana, '10:00:00', 105, $ahora->timestamp + 300, 'held', [
+            $this->tramo($ana, 0, 60),
+            $this->tramo($laura, 60, 45),
+        ]);
+
+        $this->assertFalse($this->estaLibre($laura, '11:00', 45, $ahora));
+        $this->assertTrue($this->estaLibre($laura, '12:00', 45, $ahora));
+        $ocupadaLaura = (new DisponibilidadService())->ocupacionDelDia($laura->id, self::FECHA, $ahora);
+        $this->assertSame(['11:00', '11:45'], [$ocupadaLaura[0][0]->format('H:i'), $ocupadaLaura[0][1]->format('H:i')]);
+    }
+
+    /**
      * Triangulacion: un hold en paralelo (offset 0 para ambas) tambien
      * bloquea a la profesional NO-ancla en su propio horario, y una
      * profesional totalmente ajena al hold sigue libre.

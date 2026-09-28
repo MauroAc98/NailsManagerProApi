@@ -29,8 +29,8 @@ while (! file_exists($largada) && microtime(true) < $deadline) {
 try {
     app(HoldService::class)->retener(
         User::findOrFail((int) $userId),
-        [(int) $servicioId],
-        (int) $profesionalId,
+        [['servicio_ids' => [(int) $servicioId], 'profesional_id' => (int) $profesionalId]],
+        null,
         $fecha,
         $hora,
         app(ReputacionService::class)->hashDevice($device),

@@ -519,6 +519,17 @@ class DisponibilidadService
      * confirmados + holds vivos. Sirve a PoliticaHold (alta ocupacion) y a los
      * chequeos de HoldService / ConfirmarReservaService.
      *
+     * La clausula OR de reservas_web (combo-multi-profesional, PR 3b) es
+     * deliberada: $profesionalId puede ser SOLO un tramo (no la ancla) de un
+     * hold multi-tramo, asi que filtrar por `profesional_id = $profesionalId`
+     * a secas -como antes de esta correccion- dejaba invisible su propio
+     * compromiso para HoldService::intentar()/intentarPlan() (estaLibre
+     * corre DENTRO del lock: sin esto, dos holds podian pisarse en el tramo
+     * de una profesional NO-ancla). `tramos` no tiene indice por
+     * profesional_id: se acepta traer holds vivos de OTRAS profesionales del
+     * mismo dia y filtrarlos en PHP (perfil de trafico bajo hoy; ver
+     * tramosDeHold()/holdsVigentes(), que ya usan el mismo patron).
+     *
      * @return array<int, array{0: Carbon, 1: Carbon}> ordenados por inicio
      */
     public function ocupacionDelDia(int $profesionalId, string $fecha, Carbon $ahora, ?int $ignorarReservaId = null): array
@@ -533,7 +544,7 @@ class DisponibilidadService
             $intervalos[] = [$inicio, $inicio->copy()->addMinutes((int) $turno->duracion_total_minutos)];
         }
 
-        $query = ReservaWeb::where('profesional_id', $profesionalId)
+        $query = ReservaWeb::where(fn ($q) => $q->where('profesional_id', $profesionalId)->orWhereNotNull('tramos'))
             ->vivos($ahora->timestamp)
             ->whereDate('fecha', $fecha);
         if ($ignorarReservaId) {

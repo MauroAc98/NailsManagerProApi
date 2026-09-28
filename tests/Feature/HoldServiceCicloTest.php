@@ -49,7 +49,9 @@ class HoldServiceCicloTest extends TestCase
 
     private function hold(string $hora = '10:00', string $device = 'dev-1', string $key = 'k1'): ReservaWeb
     {
-        return $this->svc()->retener($this->user, [$this->servicio->id], $this->ana->id, self::FECHA, $hora, (new ReputacionService())->hashDevice($device), $key, $this->ahora())->reserva;
+        $asignaciones = [['servicio_ids' => [$this->servicio->id], 'profesional_id' => $this->ana->id]];
+
+        return $this->svc()->retener($this->user, $asignaciones, null, self::FECHA, $hora, (new ReputacionService())->hashDevice($device), $key, $this->ahora())->reserva;
     }
 
     private function datos(ReservaWeb $r, string $tel = '+5491155551234', int $offset = 0)
@@ -121,7 +123,8 @@ class HoldServiceCicloTest extends TestCase
         app(ExpirarHoldsService::class)->expirarVencidos($this->ahora(601)->timestamp);
         $this->assertSame('expired', $vencido->fresh()->estado);
 
-        $nuevo = $this->svc()->retener($this->user, [$this->servicio->id], $this->ana->id, self::FECHA, '11:00', $rep->hashDevice('dev-2'), 'k2', $this->ahora(700))->reserva;
+        $asignaciones = [['servicio_ids' => [$this->servicio->id], 'profesional_id' => $this->ana->id]];
+        $nuevo = $this->svc()->retener($this->user, $asignaciones, null, self::FECHA, '11:00', $rep->hashDevice('dev-2'), 'k2', $this->ahora(700))->reserva;
 
         try {
             $this->svc()->guardarDatos($this->user, $nuevo->public_token, 'A', 'B', '+54 9 11 5555-1234', null, $this->ahora(700));
@@ -134,7 +137,7 @@ class HoldServiceCicloTest extends TestCase
         $this->assertSame('cancelled', $nuevo->fresh()->estado);
 
         // pasados los 30 minutos: OK
-        $otro = $this->svc()->retener($this->user, [$this->servicio->id], $this->ana->id, self::FECHA, '11:00', $rep->hashDevice('dev-2'), 'k3', $this->ahora(601 + 1801))->reserva;
+        $otro = $this->svc()->retener($this->user, $asignaciones, null, self::FECHA, '11:00', $rep->hashDevice('dev-2'), 'k3', $this->ahora(601 + 1801))->reserva;
         $this->assertSame('held', $this->svc()->guardarDatos($this->user, $otro->public_token, 'A', 'B', '+5491155551234', null, $this->ahora(601 + 1801))->reserva->estado);
     }
 
