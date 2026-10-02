@@ -85,6 +85,13 @@ Route::prefix('admin')->group(function () {
         // Uso de Cloud API por salón (mensajes + conversaciones de 24hs estimadas) para cotejar costo real de Meta.
         Route::get('whatsapp/uso-por-salon', [AdminController::class, 'usoWhatsappPorSalon']);
 
+        // Tablero de supervisión de uso — turnos agendados y mensajes
+        // automáticos (confirmación/recordatorio/fallos) por negocio, con
+        // desglose día a día y hora a hora. Ver AdminController.
+        Route::get('uso/negocios', [AdminController::class, 'usoResumenPorNegocio']);
+        Route::get('uso/negocios/{user}', [AdminController::class, 'usoDetalleNegocio']);
+        Route::get('uso/negocios/{user}/dia', [AdminController::class, 'usoDetalleNegocioPorDia']);
+
         // Fase 1 de Mercado Pago: carga manual del access_token por negocio
         // (sin OAuth propio) — reemplaza cargarlo por tinker.
         Route::get('mercadopago/connections', [MercadoPagoAdminController::class, 'index']);
