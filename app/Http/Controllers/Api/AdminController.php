@@ -51,7 +51,7 @@ class AdminController extends Controller
         }
 
         $subscription->update([
-            'ends_at' => now()->max($subscription->ends_at)->copy()->addDays(30),
+            'ends_at' => now()->max($subscription->ends_at)->copy()->addMonthsNoOverflow(),
             'status'  => 'ACTIVO',
             'renewed_at' => now(),
         ]);
