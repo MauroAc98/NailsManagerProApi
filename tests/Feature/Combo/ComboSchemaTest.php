@@ -169,7 +169,13 @@ class ComboSchemaTest extends AdminContractTestCase
 
     public function test_rollback_of_the_seven_migrations_removes_every_new_object_and_reapplies(): void
     {
-        Artisan::call('migrate:rollback', ['--step' => 7]);
+        // Roll back the seven combo migrations plus any later ones (newer migrations
+        // on main land after them), so the step count is derived, not hardcoded.
+        $desdeCombo = count(array_filter(
+            glob(database_path('migrations/*.php')),
+            fn (string $ruta) => basename($ruta) >= '2026_09_27_100000'
+        ));
+        Artisan::call('migrate:rollback', ['--step' => $desdeCombo]);
 
         $this->assertFalse(Schema::hasTable('servicio_componentes'));
         $this->assertFalse(Schema::hasTable('turno_grupos'));
