@@ -174,7 +174,7 @@ class ReprogramarGrupoTest extends AdminContractTestCase
     public function test_editar_un_turno_comun_con_put_sigue_igual_y_no_toca_a_otros(): void
     {
         $turno = $this->crearTurno('confirmado', '2099-06-10 10:00:00');
-        $otro = $this->crearTurno('confirmado', '2099-06-10 12:00:00');
+        $otro = $this->crearTurno('confirmado', '2099-06-11 12:00:00');
 
         $json = $this->admin()->putJson("/api/turnos/{$turno->id}", [
             'cliente_id' => $this->cliente->id, 'servicio_ids' => [$this->servicio->id], 'fecha_hora' => '2099-06-10 11:00:00',
@@ -182,6 +182,6 @@ class ReprogramarGrupoTest extends AdminContractTestCase
 
         $this->assertArrayNotHasKey('grupo', $json);
         $this->assertSame('2099-06-10 11:00:00', $this->hora($turno));
-        $this->assertSame('2099-06-10 12:00:00', $this->hora($otro));
+        $this->assertSame('2099-06-11 12:00:00', $this->hora($otro));
     }
 }

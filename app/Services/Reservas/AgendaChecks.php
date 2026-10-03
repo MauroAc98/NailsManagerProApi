@@ -41,7 +41,7 @@ class AgendaChecks
         int $profesionalId,
         string $fechaHora,
         int $duracion,
-        ?int $excluirId = null,
+        int|array|null $excluirId = null,
     ): ?Turno {
         $inicio = Carbon::parse($fechaHora);
         $fin = $inicio->copy()->addMinutes($duracion);
@@ -54,10 +54,38 @@ class AgendaChecks
             ->solapaCon($inicio, $fin);
 
         if ($excluirId) {
-            $query->where('id', '!=', $excluirId);
+            $query->whereNotIn('id', (array) $excluirId);
         }
 
         return $query->first();
+    }
+
+    /**
+     * Primer problema de UN tramo de la duena (rango de atencion, choque con
+     * otro turno, hold online vivo) como cuerpo de un 422 `{message, code?}`,
+     * o null si la profesional esta libre. `$excluirTurnoIds` = turnos propios
+     * que no cuentan como choque (reprogramar un grupo).
+     *
+     * @param  int[]  $excluirTurnoIds
+     * @return array{message: string, code?: string}|null
+     */
+    public function problemaDeTramo(int $profesionalId, string $nombre, Carbon $desde, int $duracion, array $excluirTurnoIds = []): ?array
+    {
+        if ($error = $this->horarioAtencion($profesionalId, $desde)) {
+            return ['message' => "{$nombre}: {$error}"];
+        }
+        $inicio = $desde->format('Y-m-d H:i:s');
+        if ($this->choque($profesionalId, $inicio, $duracion, $excluirTurnoIds)) {
+            return ['message' => "{$nombre} ya tiene un turno que se pisa con este horario. Elegí otro horario."];
+        }
+        if ($this->holdVivo($profesionalId, $inicio, $duracion)) {
+            return [
+                'message' => 'Una clienta está reservando ese horario en este momento. Probá en unos minutos o elegí otro horario.',
+                'code' => 'slot_held',
+            ];
+        }
+
+        return null;
     }
 
     public function holdVivo(int $profesionalId, string $fechaHora, int $duracion): bool

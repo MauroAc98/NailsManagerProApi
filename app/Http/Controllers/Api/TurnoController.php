@@ -13,6 +13,8 @@ use App\Models\Cliente;
 use App\Services\Reservas\AgendaChecks;
 use App\Services\Reservas\ConfirmarReservaService;
 use App\Services\Reservas\PromoInput;
+use App\Services\Reservas\ReprogramacionException;
+use App\Services\Reservas\ReprogramarGrupoService;
 use App\Services\Reservas\SlotLock;
 use App\Services\Reservas\TramosResolver;
 use App\Services\Servicios\PromoComponentes;
@@ -390,15 +392,9 @@ class TurnoController extends Controller
         $resultado = app(SlotLock::class)->conLocks($profesionalIds, function () use ($plan, $inicio, $checks, $nombres, $user, $cliente, $promo, $input, $data) {
             foreach ($plan->tramos as $t) {
                 $desde = $inicio->copy()->addMinutes($t['offset_minutos']);
-                $nombre = $nombres[$t['profesional_id']] ?? '';
-                if ($error = $checks->horarioAtencion($t['profesional_id'], $desde)) {
-                    return response()->json(['message' => "{$nombre}: {$error}"], 422);
-                }
-                if ($checks->choque($t['profesional_id'], $desde->format('Y-m-d H:i:s'), $t['duracion_minutos'])) {
-                    return response()->json(['message' => "{$nombre} ya tiene un turno que se pisa con este horario. Elegí otro horario."], 422);
-                }
-                if ($checks->holdVivo($t['profesional_id'], $desde->format('Y-m-d H:i:s'), $t['duracion_minutos'])) {
-                    return $this->respuestaHoldVivo();
+                $problema = $checks->problemaDeTramo($t['profesional_id'], $nombres[$t['profesional_id']] ?? '', $desde, $t['duracion_minutos']);
+                if ($problema) {
+                    return response()->json($problema, 422);
                 }
             }
 
@@ -432,6 +428,28 @@ class TurnoController extends Controller
         $this->adjuntarGrupos(collect([$resultado]));
 
         return response()->json($resultado, 201);
+    }
+
+    /**
+     * POST /api/turnos/grupos/{grupo}/reprogramar (combo-multi-profesional, PR 6d).
+     * Mueve el grupo entero a `fecha_hora` (inicio del tramo ancla); ver ReprogramarGrupoService.
+     */
+    public function reprogramarGrupo(Request $request, int $grupo, ReprogramarGrupoService $service): JsonResponse
+    {
+        $data = $request->validate(['fecha_hora' => 'required|date|after_or_equal:today']);
+        $user = $request->user();
+        abort_unless(Turno::delUsuario($user)->where('grupo_id', $grupo)->exists(), 404);
+
+        try {
+            $movidos = $service->reprogramar($user, $grupo, Carbon::parse($data['fecha_hora']));
+        } catch (ReprogramacionException $e) {
+            return response()->json(['message' => $e->getMessage()] + ($e->codigo ? ['code' => $e->codigo] : []), 422);
+        }
+
+        $ancla = $movidos->first();
+        $this->adjuntarGrupos(collect([$ancla]));
+
+        return response()->json(['grupo' => $ancla->getAttribute('grupo'), 'movidos' => $movidos->pluck('id')->all()]);
     }
 
     public function update(Request $request, int $id): JsonResponse
