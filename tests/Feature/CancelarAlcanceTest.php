@@ -77,14 +77,46 @@ class CancelarAlcanceTest extends AdminContractTestCase
         $this->assertSame('previo', $a->fresh()->motivo_cancelacion);
     }
 
-    public function test_alcance_grupo_es_todo_o_nada_si_un_tramo_ya_se_atendio(): void
+    public function test_alcance_grupo_nunca_toca_un_tramo_completado_y_cancela_los_demas(): void
     {
         [$a, $b] = $this->crearGrupo();
         $b->update(['estado' => 'completado']);
 
-        $this->cancelar($a, ['alcance' => 'grupo'])->assertStatus(422)->assertJsonPath('code', 'grupo_en_curso');
+        $this->cancelar($a, ['alcance' => 'grupo'])->assertOk()->assertJsonPath('cancelados', [$a->id]);
 
-        $this->assertSame('confirmado', $a->fresh()->estado);
+        $this->assertSame('cancelado', $a->fresh()->estado);
+        $this->assertSame('completado', $b->fresh()->estado);
+        $this->assertNull($b->fresh()->motivo_cancelacion);
+    }
+
+    public function test_alcance_grupo_cancela_tambien_un_tramo_cuyo_horario_ya_paso_sin_finalizar(): void
+    {
+        [$a, $b] = $this->crearGrupo();
+        $b->update(['fecha_hora' => '2020-01-01 10:00:00']);
+
+        $this->cancelar($a, ['alcance' => 'grupo'])->assertOk()->assertJsonPath('cancelados', [$a->id, $b->id]);
+
+        $this->assertSame('cancelado', $b->fresh()->estado);
+    }
+
+    public function test_alcance_grupo_desde_un_tramo_pasado_sin_finalizar_tambien_funciona(): void
+    {
+        [$a, $b] = $this->crearGrupo();
+        $a->update(['fecha_hora' => '2020-01-01 10:00:00']);
+
+        $this->cancelar($a, ['alcance' => 'grupo'])->assertOk()->assertJsonPath('cancelados', [$a->id, $b->id]);
+    }
+
+    public function test_alcance_grupo_sin_tramos_pendientes_es_422_y_no_cambia_nada(): void
+    {
+        [$a, $b] = $this->crearGrupo();
+        $a->update(['estado' => 'cancelado', 'motivo_cancelacion' => 'previo']);
+        $b->update(['estado' => 'completado']);
+
+        $this->cancelar($b, ['alcance' => 'grupo'])->assertStatus(422)->assertJsonPath('code', 'grupo_sin_pendientes');
+
+        $this->assertSame('previo', $a->fresh()->motivo_cancelacion);
+        $this->assertSame('completado', $b->fresh()->estado);
     }
 
     public function test_alcance_grupo_en_un_turno_sin_grupo_cancela_solo_ese_turno(): void
