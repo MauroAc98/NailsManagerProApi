@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\AdminUser;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 class AdminRenewSubscriptionTest extends TestCase
@@ -24,6 +25,13 @@ class AdminRenewSubscriptionTest extends TestCase
         ]);
     }
 
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
+    }
+
     public function test_renovacion_temprana_preserva_dias_restantes(): void
     {
         $user = User::factory()->create();
@@ -37,7 +45,7 @@ class AdminRenewSubscriptionTest extends TestCase
             ->postJson("/api/admin/subscriptions/{$user->id}/renew")
             ->assertOk();
 
-        $expected = now()->addDays(40);
+        $expected = now()->addDays(10)->addMonthsNoOverflow();
 
         $this->assertEqualsWithDelta(
             $expected->timestamp,
@@ -59,8 +67,8 @@ class AdminRenewSubscriptionTest extends TestCase
             ->postJson("/api/admin/subscriptions/{$user->id}/renew")
             ->assertOk();
 
-        $expected = now()->addDays(30);
-        $staleExpected = now()->subDays(5)->addDays(30);
+        $expected = now()->addMonthsNoOverflow();
+        $staleExpected = now()->subDays(5)->addMonthsNoOverflow();
 
         $freshEndsAt = $subscription->fresh()->ends_at;
 
@@ -82,7 +90,7 @@ class AdminRenewSubscriptionTest extends TestCase
             ->postJson("/api/admin/subscriptions/{$user->id}/renew")
             ->assertOk();
 
-        $expected = $ahora->copy()->addDays(30);
+        $expected = $ahora->copy()->addMonthsNoOverflow();
 
         $this->assertEqualsWithDelta(
             $expected->timestamp,
@@ -144,7 +152,7 @@ class AdminRenewSubscriptionTest extends TestCase
             ->assertOk();
 
         $this->assertEqualsWithDelta(
-            now()->addDays(40)->timestamp,
+            now()->addDays(10)->addMonthsNoOverflow()->timestamp,
             $subscription->fresh()->ends_at->timestamp,
             5
         );
@@ -189,9 +197,53 @@ class AdminRenewSubscriptionTest extends TestCase
             ->assertOk();
 
         $this->assertEqualsWithDelta(
-            now()->addDays(40)->timestamp,
+            now()->addDays(10)->addMonthsNoOverflow()->timestamp,
             $subscription->fresh()->ends_at->timestamp,
             5
         );
+    }
+
+    public function test_renovacion_preserva_el_dia_de_vencimiento_a_traves_de_fin_de_mes(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-01-15 10:00:00'));
+
+        $user = User::factory()->create();
+
+        $subscription = $user->subscription()->create([
+            'ends_at' => Carbon::parse('2026-01-31 23:59:59'),
+            'status' => 'ACTIVO',
+        ]);
+
+        $this->actingAs($this->admin, 'admin')
+            ->postJson("/api/admin/subscriptions/{$user->id}/renew")
+            ->assertOk();
+
+        $this->assertSame('2026-02-28 23:59:59', $subscription->fresh()->ends_at->toDateTimeString());
+    }
+
+    public function test_renovaciones_sucesivas_no_arrastran_el_dia_de_vencimiento(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-01-02 10:00:00'));
+
+        $user = User::factory()->create();
+
+        $subscription = $user->subscription()->create([
+            'ends_at' => Carbon::parse('2026-01-10 23:59:59'),
+            'status' => 'ACTIVO',
+        ]);
+
+        $this->actingAs($this->admin, 'admin')
+            ->postJson("/api/admin/subscriptions/{$user->id}/renew")
+            ->assertOk();
+
+        $this->assertSame(10, $subscription->fresh()->ends_at->day);
+
+        Carbon::setTestNow(Carbon::parse('2026-02-05 10:00:00'));
+
+        $this->actingAs($this->admin, 'admin')
+            ->postJson("/api/admin/subscriptions/{$user->id}/renew")
+            ->assertOk();
+
+        $this->assertSame(10, $subscription->fresh()->ends_at->day);
     }
 }
