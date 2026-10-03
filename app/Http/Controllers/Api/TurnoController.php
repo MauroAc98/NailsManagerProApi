@@ -9,6 +9,7 @@ use App\Models\Servicio;
 use App\Models\SlotDisponible;
 use App\Models\ReservaWeb;
 use App\Models\Turno;
+use App\Services\Reservas\AgendaChecks;
 use App\Models\TurnoGrupo;
 use App\Models\User;
 use App\Models\WhatsappMensaje;
@@ -930,24 +931,7 @@ class TurnoController extends Controller
     // ─────────────────────────────────────────────
     private function validarHorarioAtencion(int $profesionalId, Carbon $fechaHora): ?string
     {
-        $slots = SlotDisponible::where('profesional_id', $profesionalId)->activos()->orderBy('hora')->get();
-
-        if ($slots->isEmpty()) {
-            return 'No tenés horarios de atención configurados. Configurálos en Ajustes.';
-        }
-
-        $horaMin = Carbon::parse($slots->first()->hora)->format('H:i:s');
-        $horaMax = Carbon::parse($slots->last()->hora)->format('H:i:s');
-        $horaTurno = $fechaHora->format('H:i:s');
-
-        if ($horaTurno < $horaMin || $horaTurno > $horaMax) {
-            $minFmt = Carbon::parse($horaMin)->format('H:i');
-            $maxFmt = Carbon::parse($horaMax)->format('H:i');
-
-            return "El horario de atención es de {$minFmt} a {$maxFmt}hs.";
-        }
-
-        return null;
+        return app(AgendaChecks::class)->horarioAtencion($profesionalId, $fechaHora);
     }
 
     // ─────────────────────────────────────────────
@@ -959,27 +943,9 @@ class TurnoController extends Controller
     // la misma cuenta pueden tener turnos válidos en el mismo horario, cada
     // uno con su propia agenda independiente.
     // ─────────────────────────────────────────────
-    private function verificarChoque(
-        int $profesionalId,
-        string $fechaHora,
-        int $duracion,
-        ?int $excluirId = null,
-    ): ?Turno {
-        $inicio = Carbon::parse($fechaHora);
-        $fin = $inicio->copy()->addMinutes($duracion);
-        $fecha = $inicio->toDateString();
-
-        $query = Turno::where('profesional_id', $profesionalId)
-            ->confirmados()
-            ->delaFecha($fecha)
-            ->with(['cliente', 'servicios'])
-            ->solapaCon($inicio, $fin);
-
-        if ($excluirId) {
-            $query->where('id', '!=', $excluirId);
-        }
-
-        return $query->first();
+    private function verificarChoque(int $profesionalId, string $fechaHora, int $duracion, ?int $excluirId = null): ?Turno
+    {
+        return app(AgendaChecks::class)->choque($profesionalId, $fechaHora, $duracion, $excluirId);
     }
 
     // ─────────────────────────────────────────────
@@ -990,19 +956,7 @@ class TurnoController extends Controller
     // ─────────────────────────────────────────────
     private function hayHoldVivo(int $profesionalId, string $fechaHora, int $duracion): bool
     {
-        $inicio = Carbon::parse($fechaHora);
-        $fin = $inicio->copy()->addMinutes($duracion);
-
-        return ReservaWeb::where('profesional_id', $profesionalId)
-            ->vivos(Carbon::now()->timestamp)
-            ->whereDate('fecha', $inicio->toDateString())
-            ->get()
-            ->contains(function (ReservaWeb $r) use ($inicio, $fin) {
-                $desde = Carbon::parse(substr((string) $r->getRawOriginal('fecha'), 0, 10) . ' ' . $r->getRawOriginal('slot_hora'));
-                $hasta = $desde->copy()->addMinutes((int) $r->duracion_total_minutos);
-
-                return $desde->lt($fin) && $hasta->gt($inicio);
-            });
+        return app(AgendaChecks::class)->holdVivo($profesionalId, $fechaHora, $duracion);
     }
 
     private function respuestaHoldVivo(): JsonResponse
