@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Profesional;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -9,6 +10,73 @@ use Tests\TestCase;
 class IngresoCrudTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_crea_un_ingreso_con_profesional(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $profesional = Profesional::create(['user_id' => $user->id, 'nombre' => 'Natalia', 'activo' => true]);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson('/api/ingresos', [
+                'fecha' => '2026-08-01',
+                'monto' => 800,
+                'categoria' => 'venta_productos',
+                'profesional_id' => $profesional->id,
+            ])
+            ->assertCreated()
+            ->assertJsonFragment(['profesional_id' => $profesional->id]);
+
+        $this->assertDatabaseHas('ingresos', ['user_id' => $user->id, 'profesional_id' => $profesional->id]);
+    }
+
+    public function test_sin_profesional_el_ingreso_queda_a_nombre_del_negocio(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson('/api/ingresos', [
+                'fecha' => '2026-08-01',
+                'monto' => 800,
+                'categoria' => 'otros',
+            ])
+            ->assertCreated()
+            ->assertJsonFragment(['profesional_id' => null]);
+    }
+
+    public function test_rechaza_profesional_de_otro_usuario(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $ajeno = User::factory()->create(['is_exempt' => true]);
+        $profesionalAjena = Profesional::create(['user_id' => $ajeno->id, 'nombre' => 'Ajena', 'activo' => true]);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson('/api/ingresos', [
+                'fecha' => '2026-08-01',
+                'monto' => 800,
+                'categoria' => 'otros',
+                'profesional_id' => $profesionalAjena->id,
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['profesional_id']);
+
+        $this->assertDatabaseCount('ingresos', 0);
+    }
+
+    public function test_actualiza_y_limpia_la_profesional_de_un_ingreso(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $profesional = Profesional::create(['user_id' => $user->id, 'nombre' => 'Natalia', 'activo' => true]);
+        $ingreso = $user->ingresos()->create([
+            'fecha' => '2026-08-01', 'monto' => 800, 'categoria' => 'otros', 'profesional_id' => $profesional->id,
+        ]);
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson("/api/ingresos/{$ingreso->id}", ['profesional_id' => null])
+            ->assertOk()
+            ->assertJsonFragment(['profesional_id' => null]);
+
+        $this->assertDatabaseHas('ingresos', ['id' => $ingreso->id, 'profesional_id' => null]);
+    }
 
     public function test_crea_un_ingreso_con_todos_los_campos(): void
     {

@@ -370,29 +370,49 @@ class StatsDashboardTest extends TestCase
         $this->assertSame(1200, (int) $response->json('ganancia_neta'));
     }
 
-    public function test_ingresos_otros_van_a_cero_cuando_se_filtra_por_profesional(): void
+    public function test_ingresos_otros_filtrados_por_profesional_solo_cuentan_los_de_esa_profesional(): void
     {
         $user = User::factory()->create(['is_exempt' => true]);
         $empleada = Profesional::create(['user_id' => $user->id, 'nombre' => 'Empleada', 'activo' => true]);
+        $otra = Profesional::create(['user_id' => $user->id, 'nombre' => 'Otra', 'activo' => true]);
         $cliente = Cliente::create(['user_id' => $user->id, 'nombre' => 'Cliente Test', 'telefono' => '3765252395']);
         $servicio = Servicio::create(['user_id' => $user->id, 'nombre' => 'Manicura', 'duracion_minutos' => 30, 'activo' => true]);
 
         $turno = $this->crearTurno($user, $empleada, $cliente, [$servicio], '2026-07-10 10:00:00');
         $turno->servicios()->updateExistingPivot($servicio->id, ['precio' => 800]);
 
-        Ingreso::create(['user_id' => $user->id, 'fecha' => '2026-07-12', 'monto' => 500, 'categoria' => 'venta_productos']);
+        Ingreso::create(['user_id' => $user->id, 'profesional_id' => $empleada->id, 'fecha' => '2026-07-12', 'monto' => 500, 'categoria' => 'venta_productos']);
+        Ingreso::create(['user_id' => $user->id, 'profesional_id' => $otra->id, 'fecha' => '2026-07-13', 'monto' => 70, 'categoria' => 'venta_productos']);
+        Ingreso::create(['user_id' => $user->id, 'fecha' => '2026-07-14', 'monto' => 20, 'categoria' => 'otros']);
 
         $response = $this->actingAs($user, 'sanctum')
             ->getJson("/api/stats/dashboard?desde=2026-07-01&hasta=2026-07-31&profesional_id={$empleada->id}")
             ->assertOk();
 
-        // Los ingresos "otros" no tienen profesional -> 0 al filtrar.
-        $this->assertSame(0, (int) $response->json('ingresos_otros'));
+        $this->assertSame(500, (int) $response->json('ingresos_otros'));
         $porCategoria = collect($response->json('ingresos_otros_por_categoria'));
         $this->assertCount(3, $porCategoria);
-        $this->assertSame(0, (int) $porCategoria->sum(fn ($c) => (int) $c['monto']));
-        // La agenda sí se sigue filtrando por profesional.
+        $this->assertSame(500, (int) $porCategoria->firstWhere('categoria', 'venta_productos')['monto']);
         $this->assertSame(800, (int) $response->json('ingresos_agenda'));
-        $this->assertSame(800, (int) $response->json('ganancia_neta'));
+        $this->assertSame(1300, (int) $response->json('ganancia_neta'));
+    }
+
+    public function test_ingresos_sin_profesional_solo_aparecen_en_todo_el_equipo(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $empleada = Profesional::create(['user_id' => $user->id, 'nombre' => 'Empleada', 'activo' => true]);
+
+        Ingreso::create(['user_id' => $user->id, 'fecha' => '2026-07-14', 'monto' => 20, 'categoria' => 'otros']);
+        Ingreso::create(['user_id' => $user->id, 'profesional_id' => $empleada->id, 'fecha' => '2026-07-15', 'monto' => 30, 'categoria' => 'otros']);
+
+        $todo = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/stats/dashboard?desde=2026-07-01&hasta=2026-07-31')
+            ->assertOk();
+        $this->assertSame(50, (int) $todo->json('ingresos_otros'));
+
+        $filtrado = $this->actingAs($user, 'sanctum')
+            ->getJson("/api/stats/dashboard?desde=2026-07-01&hasta=2026-07-31&profesional_id={$empleada->id}")
+            ->assertOk();
+        $this->assertSame(30, (int) $filtrado->json('ingresos_otros'));
     }
 }
