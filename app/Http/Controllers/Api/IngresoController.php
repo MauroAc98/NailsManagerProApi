@@ -49,6 +49,7 @@ class IngresoController extends Controller
         // para que el JSON de respuesta del create ya lo refleje sin
         // necesitar un refresh — mismo criterio que GastoController.
         $data['descripcion'] = $data['descripcion'] ?? null;
+        $data['profesional_id'] = $data['profesional_id'] ?? null;
 
         $ingreso = $request->user()->ingresos()->create($data);
 
@@ -110,6 +111,15 @@ class IngresoController extends Controller
             // ingresos.categoria sigue siendo string libre.
             'categoria'   => [$required, Rule::in($request->user()->categorias_ingreso)],
             'descripcion' => 'nullable|string|max:255',
+            // Opcional, igual que en gastos: sin profesional el ingreso queda
+            // a nombre del negocio y solo suma en "Todo el equipo".
+            'profesional_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('profesionales', 'id')->where(
+                    fn($q) => $q->where('user_id', $request->user()->id)
+                ),
+            ],
         ];
     }
 }

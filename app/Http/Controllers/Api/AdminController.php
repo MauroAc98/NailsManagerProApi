@@ -7,6 +7,7 @@ use App\Mail\ProvisionalPasswordMail;
 use App\Models\Profesional;
 use App\Models\Setting;
 use App\Models\Subscription;
+use App\Models\Turno;
 use App\Models\User;
 use App\Models\WhatsappMensaje;
 use App\Services\AdminAudit;
@@ -50,7 +51,7 @@ class AdminController extends Controller
         }
 
         $subscription->update([
-            'ends_at' => now()->max($subscription->ends_at)->copy()->addDays(30),
+            'ends_at' => now()->max($subscription->ends_at)->copy()->addMonthsNoOverflow(),
             'status'  => 'ACTIVO',
             'renewed_at' => now(),
         ]);
@@ -470,6 +471,253 @@ class AdminController extends Controller
         return response()->json([
             'dias_prueba_default' => $data['dias_prueba_default'],
             'comision_mp_porcentaje' => $data['comision_mp_porcentaje'],
+        ]);
+    }
+
+    // Rango compartido por los 3 endpoints de uso/negocios de abajo — a
+    // diferencia de usoWhatsappPorSalon (que defaultea al mes calendario en
+    // curso, para cotejar costo mes a mes), acá el default es "últimos 30
+    // días" porque el propósito es supervisar actividad reciente, no un
+    // período de facturación.
+    private function resolverRangoUso(Request $request): array
+    {
+        $desde = $request->filled('desde')
+            ? Carbon::parse($request->query('desde'))->startOfDay()
+            : now()->subDays(29)->startOfDay();
+        $hasta = $request->filled('hasta')
+            ? Carbon::parse($request->query('hasta'))->endOfDay()
+            : now()->endOfDay();
+
+        return [$desde, $hasta];
+    }
+
+    /**
+     * GET /api/admin/uso/negocios?desde=&hasta=
+     * Resumen por negocio: turnos agendados (created_at del turno, no la
+     * fecha_hora del turno en sí — lo que nos interesa acá es CUÁNDO se usó
+     * la app, no para cuándo quedó el turno) y mensajes automáticos
+     * desglosados por tipo, más los fallidos. Un negocio sin actividad en el
+     * rango no aparece.
+     */
+    public function usoResumenPorNegocio(Request $request): JsonResponse
+    {
+        [$desde, $hasta] = $this->resolverRangoUso($request);
+
+        $turnosPorUsuario = Turno::whereBetween('created_at', [$desde, $hasta])
+            ->selectRaw('user_id, COUNT(*) as total')
+            ->groupBy('user_id')
+            ->pluck('total', 'user_id');
+
+        $mensajesPorUsuario = [];
+        WhatsappMensaje::whereBetween('created_at', [$desde, $hasta])
+            ->selectRaw('user_id, tipo, status, COUNT(*) as total')
+            ->groupBy('user_id', 'tipo', 'status')
+            ->get()
+            ->each(function ($fila) use (&$mensajesPorUsuario) {
+                $acc = $mensajesPorUsuario[$fila->user_id] ??= ['confirmaciones' => 0, 'recordatorios' => 0, 'fallos' => 0];
+                if ($fila->tipo === 'confirmacion') {
+                    $acc['confirmaciones'] += $fila->total;
+                }
+                if ($fila->tipo === 'recordatorio') {
+                    $acc['recordatorios'] += $fila->total;
+                }
+                if ($fila->status === 'failed') {
+                    $acc['fallos'] += $fila->total;
+                }
+                $mensajesPorUsuario[$fila->user_id] = $acc;
+            });
+
+        $userIds = collect($turnosPorUsuario->keys())
+            ->merge(array_keys($mensajesPorUsuario))
+            ->unique()
+            ->values();
+
+        $nombres = User::whereIn('id', $userIds)->pluck('name', 'id');
+
+        $negocios = $userIds->map(function ($userId) use ($turnosPorUsuario, $mensajesPorUsuario, $nombres) {
+            $m = $mensajesPorUsuario[$userId] ?? ['confirmaciones' => 0, 'recordatorios' => 0, 'fallos' => 0];
+
+            return [
+                'user_id' => (int) $userId,
+                'nombre' => $nombres[$userId] ?? null,
+                'turnos' => (int) ($turnosPorUsuario[$userId] ?? 0),
+                'confirmaciones' => (int) $m['confirmaciones'],
+                'recordatorios' => (int) $m['recordatorios'],
+                'fallos' => (int) $m['fallos'],
+            ];
+        })
+            ->sortByDesc(fn ($n) => $n['turnos'] + $n['confirmaciones'] + $n['recordatorios'])
+            ->values();
+
+        return response()->json([
+            'desde' => $desde->toDateString(),
+            'hasta' => $hasta->toDateString(),
+            'negocios' => $negocios,
+        ]);
+    }
+
+    /**
+     * GET /api/admin/uso/negocios/{user}?desde=&hasta=
+     * Detalle de un negocio: actividad día a día (todos los días del rango,
+     * incluidos los que no tuvieron nada, en cero — para que el gráfico no
+     * salte fechas) más los últimos mensajes fallidos con su motivo real y
+     * de qué lado vino el fallo.
+     */
+    public function usoDetalleNegocio(Request $request, User $user): JsonResponse
+    {
+        [$desde, $hasta] = $this->resolverRangoUso($request);
+
+        $turnosPorDia = Turno::where('user_id', $user->id)
+            ->whereBetween('created_at', [$desde, $hasta])
+            ->selectRaw('DATE(created_at) as fecha, COUNT(*) as total')
+            ->groupBy('fecha')
+            ->pluck('total', 'fecha');
+
+        $mensajesPorDia = [];
+        WhatsappMensaje::where('user_id', $user->id)
+            ->whereBetween('created_at', [$desde, $hasta])
+            ->selectRaw('DATE(created_at) as fecha, tipo, status, COUNT(*) as total')
+            ->groupBy('fecha', 'tipo', 'status')
+            ->get()
+            ->each(function ($fila) use (&$mensajesPorDia) {
+                $fecha = (string) $fila->fecha;
+                $acc = $mensajesPorDia[$fecha] ??= ['confirmaciones' => 0, 'recordatorios' => 0, 'fallos' => 0];
+                if ($fila->tipo === 'confirmacion') {
+                    $acc['confirmaciones'] += $fila->total;
+                }
+                if ($fila->tipo === 'recordatorio') {
+                    $acc['recordatorios'] += $fila->total;
+                }
+                if ($fila->status === 'failed') {
+                    $acc['fallos'] += $fila->total;
+                }
+                $mensajesPorDia[$fecha] = $acc;
+            });
+
+        $dias = [];
+        $totales = ['turnos' => 0, 'confirmaciones' => 0, 'recordatorios' => 0, 'fallos' => 0];
+        $cursor = $desde->copy()->startOfDay();
+        $fin = $hasta->copy()->startOfDay();
+
+        while ($cursor->lte($fin)) {
+            $fecha = $cursor->toDateString();
+            $m = $mensajesPorDia[$fecha] ?? ['confirmaciones' => 0, 'recordatorios' => 0, 'fallos' => 0];
+            $turnos = (int) ($turnosPorDia[$fecha] ?? 0);
+
+            $dias[] = [
+                'fecha' => $fecha,
+                'turnos' => $turnos,
+                'confirmaciones' => (int) $m['confirmaciones'],
+                'recordatorios' => (int) $m['recordatorios'],
+                'fallos' => (int) $m['fallos'],
+            ];
+
+            $totales['turnos'] += $turnos;
+            $totales['confirmaciones'] += (int) $m['confirmaciones'];
+            $totales['recordatorios'] += (int) $m['recordatorios'];
+            $totales['fallos'] += (int) $m['fallos'];
+
+            $cursor->addDay();
+        }
+
+        // message_id presente = Meta llegó a aceptar el envío y recién
+        // después reportó la falla por webhook (CloudApiWebhookController) —
+        // ahí el motivo real viene de Meta. message_id null = nunca se
+        // consiguió enviar desde nuestro propio lado (EnviarMensajeConfirmacion
+        // / EnviarRecordatorios guardan 'failed' directo cuando enviarPlantilla()
+        // no devuelve messageId) — el motivo es aproximado, no lo parseamos.
+        $fallosRecientes = WhatsappMensaje::where('user_id', $user->id)
+            ->where('status', 'failed')
+            ->whereBetween('created_at', [$desde, $hasta])
+            ->orderByDesc('created_at')
+            ->limit(10)
+            ->get(['created_at', 'tipo', 'message_id', 'error_code', 'error_titulo', 'status_code'])
+            ->map(function ($mensaje) {
+                $origen = $mensaje->message_id ? 'meta' : 'nuestro';
+
+                return [
+                    'fecha' => $mensaje->created_at->toDateString(),
+                    'tipo' => $mensaje->tipo,
+                    'origen' => $origen,
+                    'motivo' => $mensaje->error_titulo ?? ($origen === 'meta'
+                        ? 'Meta no informó un motivo'
+                        : 'No se pudo completar el envío desde nuestro servidor'),
+                    'codigo' => $mensaje->error_code ?? $mensaje->status_code,
+                ];
+            });
+
+        return response()->json([
+            'user_id' => $user->id,
+            'nombre' => $user->name,
+            'desde' => $desde->toDateString(),
+            'hasta' => $hasta->toDateString(),
+            'totales' => $totales,
+            'dias' => $dias,
+            'fallos_recientes' => $fallosRecientes,
+        ]);
+    }
+
+    /**
+     * GET /api/admin/uso/negocios/{user}/dia?fecha=YYYY-MM-DD
+     * Mismo desglose que usoDetalleNegocio pero hora a hora, para un único
+     * día — drill-down del gráfico de arriba.
+     */
+    public function usoDetalleNegocioPorDia(Request $request, User $user): JsonResponse
+    {
+        $request->validate(['fecha' => 'required|date_format:Y-m-d']);
+
+        $fecha = $request->query('fecha');
+        $inicio = Carbon::parse($fecha)->startOfDay();
+        $fin = Carbon::parse($fecha)->endOfDay();
+
+        // Agrupado en PHP (no EXTRACT(HOUR FROM ...)) a propósito: esa
+        // sintaxis es de Postgres y rompe en SQLite (motor de los tests,
+        // ver phpunit.xml). El conjunto es chico — un solo día para un solo
+        // negocio — así que no hay costo real en traer las filas crudas.
+        $turnosPorHora = [];
+        Turno::where('user_id', $user->id)
+            ->whereBetween('created_at', [$inicio, $fin])
+            ->get(['created_at'])
+            ->each(function ($turno) use (&$turnosPorHora) {
+                $hora = $turno->created_at->hour;
+                $turnosPorHora[$hora] = ($turnosPorHora[$hora] ?? 0) + 1;
+            });
+
+        $mensajesPorHora = [];
+        WhatsappMensaje::where('user_id', $user->id)
+            ->whereBetween('created_at', [$inicio, $fin])
+            ->get(['created_at', 'tipo', 'status'])
+            ->each(function ($mensaje) use (&$mensajesPorHora) {
+                $hora = $mensaje->created_at->hour;
+                $acc = $mensajesPorHora[$hora] ??= ['confirmaciones' => 0, 'recordatorios' => 0, 'fallos' => 0];
+                if ($mensaje->tipo === 'confirmacion') {
+                    $acc['confirmaciones']++;
+                }
+                if ($mensaje->tipo === 'recordatorio') {
+                    $acc['recordatorios']++;
+                }
+                if ($mensaje->status === 'failed') {
+                    $acc['fallos']++;
+                }
+                $mensajesPorHora[$hora] = $acc;
+            });
+
+        $horas = [];
+        for ($hora = 0; $hora < 24; $hora++) {
+            $m = $mensajesPorHora[$hora] ?? ['confirmaciones' => 0, 'recordatorios' => 0, 'fallos' => 0];
+            $horas[] = [
+                'hora' => $hora,
+                'turnos' => (int) ($turnosPorHora[$hora] ?? 0),
+                'confirmaciones' => (int) $m['confirmaciones'],
+                'recordatorios' => (int) $m['recordatorios'],
+                'fallos' => (int) $m['fallos'],
+            ];
+        }
+
+        return response()->json([
+            'user_id' => $user->id,
+            'fecha' => $fecha,
+            'horas' => $horas,
         ]);
     }
 }
