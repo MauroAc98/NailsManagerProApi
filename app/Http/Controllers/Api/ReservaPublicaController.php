@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\CrearHoldRequest;
 use App\Http\Requests\GuardarDatosReservaRequest;
 use App\Models\PagoSena;
+use App\Models\Profesional;
 use App\Models\ReservaWeb;
 use App\Models\User;
 use App\Services\Reservas\ChallengeVerifier;
@@ -130,6 +131,11 @@ class ReservaPublicaController extends Controller
             'deposito' => $this->monto($this->mercadoPago->montoACobrar((float) ($user->sena_monto ?? 0))),
             'nota' => $reserva->nota,
         ];
+        if ($reserva->tramos !== null) {
+            $payload['resumen'] += $this->extraTramos($reserva) + [
+                'profesionales' => $this->profesionalesDe($reserva),
+            ];
+        }
 
         return response()->json($payload);
     }
@@ -200,9 +206,15 @@ class ReservaPublicaController extends Controller
             return $base;
         }
 
+        return $base + $this->extraTramos($r);
+    }
+
+    /** `fin` y `tramos` de una reserva multi-tramo (horas de pared, sin casts de datetime). */
+    private function extraTramos(ReservaWeb $r): array
+    {
         $inicio = Carbon::parse($this->fecha($r) . ' ' . $this->hora($r));
 
-        return $base + [
+        return [
             'fin' => $inicio->copy()->addMinutes((int) $r->duracion_total_minutos)->format('H:i'),
             'tramos' => array_map(fn (array $t) => [
                 'profesional_id' => $t['profesional_id'],
@@ -211,6 +223,15 @@ class ReservaPublicaController extends Controller
                 'servicio_ids' => $t['servicio_ids'],
             ], $r->tramos),
         ];
+    }
+
+    /** Profesionales distintas del grupo, en orden de tramo (para "con Ana y Laura"). */
+    private function profesionalesDe(ReservaWeb $r): array
+    {
+        $ids = array_values(array_unique(array_column($r->tramos, 'profesional_id')));
+        $nombres = Profesional::whereIn('id', $ids)->pluck('nombre', 'id');
+
+        return array_map(fn (int $id) => ['id' => $id, 'nombre' => $nombres[$id] ?? ''], $ids);
     }
 
     private function fecha(ReservaWeb $r): string
