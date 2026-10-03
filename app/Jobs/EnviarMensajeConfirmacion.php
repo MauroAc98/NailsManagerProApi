@@ -67,7 +67,12 @@ class EnviarMensajeConfirmacion implements ShouldQueue
 
         // Evitar duplicar el mensaje si el job se reintenta (timeout de worker,
         // etc.) después de haber enviado y registrado exitosamente.
-        $yaEnviado = WhatsappMensaje::where('turno_id', $turno->id)
+        // Turno de un grupo: la confirmacion es UNA por grupo, sea cual sea el
+        // tramo por el que se dispare.
+        $idsDelGrupo = $turno->grupo_id === null
+            ? [$turno->id]
+            : Turno::where('grupo_id', $turno->grupo_id)->pluck('id')->all();
+        $yaEnviado = WhatsappMensaje::whereIn('turno_id', $idsDelGrupo)
             ->where('tipo', 'confirmacion')
             ->exists();
 

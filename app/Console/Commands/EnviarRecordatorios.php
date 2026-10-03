@@ -97,12 +97,25 @@ class EnviarRecordatorios extends Command
 
             $this->info("  → {$user->name}: {$turnos->count()} turno(s)");
 
+            // Un grupo (varias profesionales) recibe UN solo recordatorio: se
+            // saltea si algun tramo ya tiene uno gestionado, o ya se manejo en esta corrida.
+            $gruposAvisados = Turno::whereIn('grupo_id', $turnos->pluck('grupo_id')->filter()->unique())
+                ->whereHas('whatsappMensajes', fn ($q) => $q->where('tipo', 'recordatorio'))
+                ->pluck('grupo_id')->all();
+
             // Resuelto una vez por negocio, no por turno: cada negocio manda
             // TODOS sus recordatorios de esta corrida por su propio número
             // (o el compartido, si no tiene conexión) — nunca mezclado.
             $credenciales = $user->credencialesWhatsapp();
 
-            foreach ($turnos as $turno) {
+            foreach ($turnos->sortBy('id') as $turno) {
+                if ($turno->grupo_id !== null) {
+                    if (in_array($turno->grupo_id, $gruposAvisados, true)) {
+                        continue;
+                    }
+                    $gruposAvisados[] = $turno->grupo_id;
+                }
+
                 $cliente = $turno->cliente;
 
                 if (empty($cliente?->telefono)) {

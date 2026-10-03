@@ -91,20 +91,49 @@ final class WhatsappTemplate
     // antes del backfill de profesional_id (ver
     // 2026_07_17_100004_backfill_default_profesionales) podrían no tener
     // la relación cargada. Mismo criterio sin-fallback que los demás.
+    // Tramos vigentes (no cancelados) del grupo del turno, en orden de creacion;
+    // un turno sin grupo es su propio y unico tramo.
+    private static function tramosDelGrupo(Turno $turno): \Illuminate\Support\Collection
+    {
+        if ($turno->grupo_id === null) {
+            return collect([$turno]);
+        }
+        $tramos = Turno::with(['servicios', 'profesional'])
+            ->where('grupo_id', $turno->grupo_id)->where('estado', '!=', 'cancelado')->orderBy('id')->get();
+
+        return $tramos->isEmpty() ? collect([$turno]) : $tramos;
+    }
+
+    // "Ana", "Ana y Laura", "Ana, Laura y Sol".
+    private static function listaDeNombres(array $nombres): string
+    {
+        if (count($nombres) <= 1) {
+            return $nombres[0] ?? '';
+        }
+        $ultimo = array_pop($nombres);
+
+        return implode(', ', $nombres).' y '.$ultimo;
+    }
+
     public static function parametrosCloudApi(
         string $tipo,
         Cliente $cliente,
         Turno $turno,
         User $user,
     ): array {
-        $servicios = $turno->servicios->pluck('nombre')->join(' + ');
+        // Turno de un grupo (varias profesionales): UN solo mensaje con los
+        // servicios y las profesionales de todos los tramos vigentes.
+        $tramos = static::tramosDelGrupo($turno);
+        $servicios = $tramos->flatMap(fn (Turno $t) => $t->servicios->pluck('nombre'))->join(' + ');
         $fecha = $turno->fecha_hora->format('d/m');
         $hora = $turno->fecha_hora->format('H:i');
         $direccion = $user->direccion ?? '';
         // Primer nombre solamente (no "María José" completo) — el pedido
         // original era sonar cercano en el mensaje, un nombre compuesto
         // completo ahí se siente más formal/impersonal que cálido.
-        $profesional = trim(explode(' ', trim($turno->profesional->nombre ?? ''))[0]);
+        $profesional = static::listaDeNombres(
+            $tramos->map(fn (Turno $t) => trim(explode(' ', trim($t->profesional->nombre ?? ''))[0]))->filter()->unique()->values()->all()
+        );
         // Formateado ("376 500-0000"), no el crudo — mismo criterio que
         // phoneUtils.formatDisplay() en el frontend (usado también en la
         // "historia" de Instagram), para que el teléfono se vea igual en
