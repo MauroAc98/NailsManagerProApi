@@ -98,7 +98,7 @@ class ReprogramacionNotificacionTest extends AdminContractTestCase
 
     public function test_omite_el_aviso_si_la_cuenta_manda_los_mensajes_a_mano(): void
     {
-        $this->user->update(['whatsapp_requiere_envio_manual' => true]);
+        $this->user->update(['direccion' => '']); // sin direccion la cuenta pasa a envio manual
         $this->assertOmitida('envio_manual');
     }
 

@@ -449,7 +449,20 @@ class TurnoController extends Controller
         $ancla = $movidos->first();
         $this->adjuntarGrupos(collect([$ancla]));
 
-        return response()->json(['grupo' => $ancla->getAttribute('grupo'), 'movidos' => $movidos->pluck('id')->all()]);
+        // UN aviso por grupo, con el tramo que empieza primero, con las mismas
+        // guardas que una confirmacion. El servicio no despacha nada: el hook es este.
+        $primero = $movidos->sortBy(fn (Turno $t) => $t->getRawOriginal('fecha_hora'))->first()->load(['cliente', 'user']);
+        $motivo = EnviarMensajeConfirmacion::motivoOmision($primero);
+        if ($motivo === null) {
+            WhatsappMensaje::whereIn('turno_id', $movidos->pluck('id'))->where('tipo', 'reprogramacion')->delete();
+            EnviarMensajeConfirmacion::dispatch($primero->id, 'reprogramacion')->afterCommit();
+        }
+
+        return response()->json([
+            'grupo' => $ancla->getAttribute('grupo'),
+            'movidos' => $movidos->pluck('id')->all(),
+            'notificacion' => $motivo === null ? 'enviada' : 'omitida',
+        ] + ($motivo === null ? [] : ['motivo' => $motivo]));
     }
 
     public function update(Request $request, int $id): JsonResponse

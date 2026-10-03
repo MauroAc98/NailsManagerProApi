@@ -28,9 +28,34 @@ class EnviarMensajeConfirmacion implements ShouldQueue
     // mal cargados por otra vía.
     private const REGEX_TELEFONO = '/^\+[1-9]\d{7,14}$/';
 
+    // `tipo` = 'confirmacion' (default, alta de turno) o 'reprogramacion' (aviso
+    // de cambio de horario de un grupo, PR 6f): misma plantilla `confirmacion`,
+    // distinto registro en whatsapp_mensajes y sin la variante de seña.
     public function __construct(
         public int $turnoId,
+        public string $tipo = 'confirmacion',
     ) {}
+
+    /**
+     * Motivo por el que NO se mandaria el mensaje a este turno (null = se manda).
+     * Refleja las guardas de handle() para poder informarlas en el momento
+     * (p. ej. al reprogramar), sin esperar al job.
+     */
+    public static function motivoOmision(Turno $turno): ?string
+    {
+        $user = $turno->user;
+        $cliente = $turno->cliente;
+
+        return match (true) {
+            ! $user || ! $cliente || empty($cliente->telefono) => 'sin_telefono',
+            (bool) $cliente->whatsapp_opt_out => 'opt_out',
+            ! $user->confirmacion_automatica => 'confirmacion_automatica_apagada',
+            $user->suscripcionVencida() => 'suscripcion_vencida',
+            (bool) $user->whatsapp_requiere_envio_manual => 'envio_manual',
+            ! preg_match(self::REGEX_TELEFONO, $cliente->telefono) => 'telefono_invalido',
+            default => null,
+        };
+    }
 
     public function handle(CloudApiService $cloudApiService): void
     {
@@ -73,7 +98,7 @@ class EnviarMensajeConfirmacion implements ShouldQueue
             ? [$turno->id]
             : Turno::where('grupo_id', $turno->grupo_id)->pluck('id')->all();
         $yaEnviado = WhatsappMensaje::whereIn('turno_id', $idsDelGrupo)
-            ->where('tipo', 'confirmacion')
+            ->where('tipo', $this->tipo)
             ->exists();
 
         if ($yaEnviado) {
@@ -104,7 +129,7 @@ class EnviarMensajeConfirmacion implements ShouldQueue
         // registro (WhatsappMensaje.tipo) queda en 'confirmacion' en ambos
         // casos — es el tipo de evento para tracking/dedup, no el nombre de
         // la plantilla.
-        $templateTipo = $user->whatsapp_pide_sena ? 'reserva_sena' : 'confirmacion';
+        $templateTipo = $user->whatsapp_pide_sena && $this->tipo === 'confirmacion' ? 'reserva_sena' : 'confirmacion';
 
         // Backstop de datos: el guard de AuthController::updatePerfil ya
         // impide activar la seña sin monto/titular/medio-de-pago/dirección,
@@ -149,7 +174,7 @@ class EnviarMensajeConfirmacion implements ShouldQueue
                 'numero' => $numero,
                 'provider' => $credenciales['provider'],
                 'mensaje' => $mensaje,
-                'tipo' => 'confirmacion',
+                'tipo' => $this->tipo,
                 'message_id' => $messageId,
                 'status' => $messageId ? 'pending' : 'failed',
                 'respuesta_api' => $resultado->respuesta,
