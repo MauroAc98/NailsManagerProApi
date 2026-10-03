@@ -476,6 +476,18 @@ class TurnoController extends Controller
         $user = $request->user();
         $turno = Turno::delUsuario($user)->findOrFail($id);
 
+        // combo-multi-profesional (PR 5a): `alcance=grupo` cancela todos los
+        // tramos que no estan cancelados ni completados (aunque su hora ya
+        // haya pasado sin finalizar). Sin re-precio ni reembolso.
+        if ($request->input('alcance') === 'grupo' && $turno->grupo_id !== null) {
+            $data = $request->validate([
+                'motivo_cancelacion' => 'required|string|max:255',
+                'alcance' => 'in:tramo,grupo',
+            ]);
+
+            return $this->cancelarGrupo($user, $turno, $data['motivo_cancelacion']);
+        }
+
         // "Ya pasó" = ya TERMINÓ, no ya empezó: un turno en curso (empezó pero
         // no terminó) tiene que poder cancelarse — es el caso de la clienta
         // que nunca llegó y el turno se arrancó solo. Un turno finalizado
@@ -492,12 +504,6 @@ class TurnoController extends Controller
             'alcance' => 'sometimes|nullable|in:tramo,grupo',
         ]);
 
-        // combo-multi-profesional (PR 5a): `alcance=grupo` cancela todos los
-        // tramos vigentes del grupo, todo o nada. Sin re-precio ni reembolso.
-        if (($data['alcance'] ?? 'tramo') === 'grupo' && $turno->grupo_id !== null) {
-            return $this->cancelarGrupo($user, $turno, $data['motivo_cancelacion']);
-        }
-
         // Soft-cancel: se conserva el registro para historial/estadísticas.
         // index/marcas/disponibilidad/verificarChoque ya filtran por
         // confirmados(), así que un turno cancelado deja de aparecer
@@ -511,18 +517,16 @@ class TurnoController extends Controller
         return response()->json(['message' => 'Turno cancelado correctamente.']);
     }
 
-    /** Cancela los tramos no cancelados del grupo; si alguno ya se atendio o termino, no cancela ninguno. */
+    /** Cancela los tramos del grupo que no estan cancelados ni completados (un completado es historial/ingreso: nunca se toca). */
     private function cancelarGrupo(User $user, Turno $turno, string $motivo): JsonResponse
     {
         $tramos = Turno::delUsuario($user)->where('grupo_id', $turno->grupo_id)
-            ->where('estado', '!=', 'cancelado')->orderBy('id')->get();
+            ->whereNotIn('estado', ['cancelado', 'completado'])->orderBy('id')->get();
 
-        $cerrado = $tramos->contains(fn (Turno $t) => $t->estado === 'completado'
-            || Carbon::parse($t->fecha_hora)->addMinutes((int) $t->duracion_total_minutos)->isPast());
-        if ($cerrado) {
+        if ($tramos->isEmpty()) {
             return response()->json([
-                'message' => 'No se puede cancelar la promo completa: alguno de sus turnos ya pasó.',
-                'code' => 'grupo_en_curso',
+                'message' => 'No queda ningún turno de la promo para cancelar.',
+                'code' => 'grupo_sin_pendientes',
             ], 422);
         }
 
