@@ -154,13 +154,10 @@ class StatsController extends Controller
     }
 
     // Ingresos "otros" (no de agenda): venta de productos, alquiler de
-    // espacio, etc. A diferencia de los gastos, un ingreso NO tiene
-    // profesional asociado — no hay una columna profesional_id en la tabla.
-    // Por eso, cuando el dashboard se filtra por profesional_id, estos
-    // ingresos se reportan en 0: atribuir un ingreso del salón a una sola
-    // profesional inflaría su aporte, y repartirlo sería arbitrario. La
-    // agenda (ingresos_agenda / ganancias) sí sigue filtrada por profesional
-    // porque los turnos sí tienen profesional_id.
+    // espacio, etc. Igual que los gastos, un ingreso puede tener una
+    // profesional asociada (opcional). Al filtrar por profesional_id solo
+    // cuentan los de esa profesional; los que quedaron sin profesional (a
+    // nombre del negocio) solo suman en "Todo el equipo".
     //
     // El desglose por categoría siempre devuelve las 3 categorías del enum
     // (incluso en 0), igual que turnosPorEstadoPorDiaSemana con los 7 días:
@@ -168,16 +165,14 @@ class StatsController extends Controller
     // estable para dibujar el desglose sin rellenar huecos.
     private function ingresosOtrosDelRango($user, Request $request): array
     {
+        $query = Ingreso::delUsuario($user)
+            ->whereBetween('fecha', [$request->desde, $request->hasta]);
+
         if ($request->filled('profesional_id')) {
-            return [
-                'total' => 0.0,
-                'por_categoria' => $this->ingresosPorCategoria(collect()),
-            ];
+            $query->where('profesional_id', (int) $request->profesional_id);
         }
 
-        $ingresos = Ingreso::delUsuario($user)
-            ->whereBetween('fecha', [$request->desde, $request->hasta])
-            ->get(['categoria', 'monto']);
+        $ingresos = $query->get(['categoria', 'monto']);
 
         return [
             'total' => (float) $ingresos->sum('monto'),

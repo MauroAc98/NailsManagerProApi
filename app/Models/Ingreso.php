@@ -10,6 +10,7 @@ class Ingreso extends Model
 
     protected $fillable = [
         'user_id',
+        'profesional_id',
         'fecha',
         'monto',
         'categoria',
@@ -19,8 +20,9 @@ class Ingreso extends Model
     protected function casts(): array
     {
         return [
-            'fecha' => 'date:Y-m-d',
-            'monto' => 'decimal:2',
+            'fecha'          => 'date:Y-m-d',
+            'monto'          => 'decimal:2',
+            'profesional_id' => 'integer',
         ];
     }
 
@@ -34,5 +36,10 @@ class Ingreso extends Model
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function profesional()
+    {
+        return $this->belongsTo(Profesional::class);
     }
 }
