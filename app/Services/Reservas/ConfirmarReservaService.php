@@ -238,7 +238,7 @@ class ConfirmarReservaService
     }
 
     /** Reparte precio_sugerido (entero, ya prorrateado) entre los servicios de un tramo fusionado; null si el tramo no tiene precio sugerido. */
-    private function pivotServicios(array $servicioIds, ?int $precioSugerido): array
+    public static function pivotServicios(array $servicioIds, ?int $precioSugerido): array
     {
         $n = count($servicioIds);
         if ($precioSugerido === null || $n === 1) {

@@ -9,7 +9,13 @@ use App\Models\Servicio;
 use App\Models\SlotDisponible;
 use App\Models\ReservaWeb;
 use App\Models\Turno;
+use App\Models\Cliente;
 use App\Services\Reservas\AgendaChecks;
+use App\Services\Reservas\ConfirmarReservaService;
+use App\Services\Reservas\PromoInput;
+use App\Services\Reservas\SlotLock;
+use App\Services\Reservas\TramosResolver;
+use App\Services\Servicios\PromoComponentes;
 use App\Models\TurnoGrupo;
 use App\Models\User;
 use App\Models\WhatsappMensaje;
@@ -245,10 +251,20 @@ class TurnoController extends Controller
             'fecha_hora' => 'required|date|after_or_equal:today',
             'notas' => 'nullable|string',
             'profesional_id' => 'sometimes|nullable|integer|exists:profesionales,id',
+            'precio_promo' => 'sometimes|nullable|integer|min:0',
         ]);
 
         $user = $request->user();
         $cliente = $user->clientes()->findOrFail($data['cliente_id']);
+
+        // Una promo con componentes se agenda como grupo (un turno por tramo).
+        $promo = count($data['servicio_ids']) === 1
+            ? Servicio::where('user_id', $user->id)->where('es_promo', true)->whereHas('componentes')->find($data['servicio_ids'][0])
+            : null;
+        if ($promo) {
+            return $this->crearGrupoManual($user, $cliente, $promo, $data);
+        }
+
         $servicios = Servicio::whereIn('id', $data['servicio_ids'])->get();
         $fechaHora = Carbon::parse($data['fecha_hora']);
 
@@ -350,6 +366,72 @@ class TurnoController extends Controller
         EnviarMensajeConfirmacion::dispatch($turno->id);
 
         return response()->json($turno->load(['cliente', 'servicios']), 201);
+    }
+
+    /**
+     * combo-multi-profesional (PR 6b): alta manual de una promo con componentes.
+     * Flujo de la duena: el inicio NO tiene que ser un slot activo, pero cada
+     * tramo respeta rango de atencion, choques y holds de SU profesional (se
+     * lockean todas, en orden ascendente). Todo o nada; responde el turno lider.
+     */
+    private function crearGrupoManual(User $user, Cliente $cliente, Servicio $promo, array $data): JsonResponse
+    {
+        $promoComponentes = app(PromoComponentes::class);
+        $input = $promoComponentes->promoInput($promo);
+        if (isset($data['precio_promo'])) {
+            $input = new PromoInput($input->modo, $input->componentes, (int) $data['precio_promo']);
+        }
+        $plan = (new TramosResolver())->planes($input, [], $promoComponentes->paraleloHabilitado($user))[0];
+        $inicio = Carbon::parse($data['fecha_hora']);
+        $checks = app(AgendaChecks::class);
+        $profesionalIds = array_column($plan->tramos, 'profesional_id');
+        $nombres = Profesional::whereIn('id', $profesionalIds)->pluck('nombre', 'id');
+
+        $resultado = app(SlotLock::class)->conLocks($profesionalIds, function () use ($plan, $inicio, $checks, $nombres, $user, $cliente, $promo, $input, $data) {
+            foreach ($plan->tramos as $t) {
+                $desde = $inicio->copy()->addMinutes($t['offset_minutos']);
+                $nombre = $nombres[$t['profesional_id']] ?? '';
+                if ($error = $checks->horarioAtencion($t['profesional_id'], $desde)) {
+                    return response()->json(['message' => "{$nombre}: {$error}"], 422);
+                }
+                if ($checks->choque($t['profesional_id'], $desde->format('Y-m-d H:i:s'), $t['duracion_minutos'])) {
+                    return response()->json(['message' => "{$nombre} ya tiene un turno que se pisa con este horario. Elegí otro horario."], 422);
+                }
+                if ($checks->holdVivo($t['profesional_id'], $desde->format('Y-m-d H:i:s'), $t['duracion_minutos'])) {
+                    return $this->respuestaHoldVivo();
+                }
+            }
+
+            $grupo = TurnoGrupo::create(['promo_servicio_id' => $promo->id, 'modo' => $plan->modo, 'precio_promo' => $input->precioPromo]);
+            $lider = null;
+            foreach ($plan->tramos as $t) {
+                $turno = Turno::create([
+                    'user_id' => $user->id,
+                    'profesional_id' => $t['profesional_id'],
+                    'cliente_id' => $cliente->id,
+                    'grupo_id' => $grupo->id,
+                    'fecha_hora' => $inicio->copy()->addMinutes($t['offset_minutos'])->format('Y-m-d H:i:s'),
+                    'duracion_total_minutos' => $t['duracion_minutos'],
+                    'estado' => 'confirmado',
+                    'origen' => 'app',
+                    'notas' => $data['notas'] ?? null,
+                ]);
+                $turno->servicios()->attach(ConfirmarReservaService::pivotServicios($t['servicio_ids'], $t['precio_sugerido'] ?? null));
+                $lider ??= $turno;
+            }
+
+            return $lider;
+        });
+        if ($resultado instanceof JsonResponse) {
+            return $resultado;
+        }
+
+        // UNA confirmacion por grupo (el job deduplica por grupo_id).
+        EnviarMensajeConfirmacion::dispatch($resultado->id);
+        $resultado->load(['cliente', 'servicios']);
+        $this->adjuntarGrupos(collect([$resultado]));
+
+        return response()->json($resultado, 201);
     }
 
     public function update(Request $request, int $id): JsonResponse
