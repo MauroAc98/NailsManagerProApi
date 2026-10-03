@@ -9,6 +9,7 @@ use App\Models\Servicio;
 use App\Models\SlotDisponible;
 use App\Models\ReservaWeb;
 use App\Models\Turno;
+use App\Models\TurnoGrupo;
 use App\Models\User;
 use App\Models\WhatsappMensaje;
 use Illuminate\Http\JsonResponse;
@@ -79,6 +80,7 @@ class TurnoController extends Controller
 
             return $turno;
         });
+        $this->adjuntarGrupos($turnos);
 
         return response()->json($turnos);
     }
@@ -97,6 +99,7 @@ class TurnoController extends Controller
         $turno->estado_visual = $this->calcularEstadoVisual($turno);
         $turno->confirmacion_whatsapp_status = optional($turno->whatsappMensajes->first())->status;
         $turno->makeHidden('whatsappMensajes');
+        $this->adjuntarGrupos(collect([$turno]));
 
         return response()->json($turno);
     }
@@ -486,7 +489,14 @@ class TurnoController extends Controller
 
         $data = $request->validate([
             'motivo_cancelacion' => 'required|string|max:255',
+            'alcance' => 'sometimes|nullable|in:tramo,grupo',
         ]);
+
+        // combo-multi-profesional (PR 5a): `alcance=grupo` cancela todos los
+        // tramos vigentes del grupo, todo o nada. Sin re-precio ni reembolso.
+        if (($data['alcance'] ?? 'tramo') === 'grupo' && $turno->grupo_id !== null) {
+            return $this->cancelarGrupo($user, $turno, $data['motivo_cancelacion']);
+        }
 
         // Soft-cancel: se conserva el registro para historial/estadísticas.
         // index/marcas/disponibilidad/verificarChoque ya filtran por
@@ -499,6 +509,66 @@ class TurnoController extends Controller
         ]);
 
         return response()->json(['message' => 'Turno cancelado correctamente.']);
+    }
+
+    /** Cancela los tramos no cancelados del grupo; si alguno ya se atendio o termino, no cancela ninguno. */
+    private function cancelarGrupo(User $user, Turno $turno, string $motivo): JsonResponse
+    {
+        $tramos = Turno::delUsuario($user)->where('grupo_id', $turno->grupo_id)
+            ->where('estado', '!=', 'cancelado')->orderBy('id')->get();
+
+        $cerrado = $tramos->contains(fn (Turno $t) => $t->estado === 'completado'
+            || Carbon::parse($t->fecha_hora)->addMinutes((int) $t->duracion_total_minutos)->isPast());
+        if ($cerrado) {
+            return response()->json([
+                'message' => 'No se puede cancelar la promo completa: alguno de sus turnos ya pasó.',
+                'code' => 'grupo_en_curso',
+            ], 422);
+        }
+
+        DB::transaction(fn () => Turno::whereIn('id', $tramos->pluck('id'))->update([
+            'estado' => 'cancelado',
+            'motivo_cancelacion' => $motivo,
+            'cancelado_en' => now(),
+        ]));
+
+        return response()->json([
+            'message' => 'Turno cancelado correctamente.',
+            'cancelados' => $tramos->pluck('id')->all(),
+        ]);
+    }
+
+    /**
+     * combo-multi-profesional (PR 5a): suma `grupo` {id, modo, tramos[]} SOLO a
+     * los turnos agrupados (uno por tramo, en orden de creacion, cancelados
+     * incluidos con su estado). Los turnos legacy no ganan ninguna clave.
+     */
+    private function adjuntarGrupos($turnos): void
+    {
+        $ids = $turnos->pluck('grupo_id')->filter()->unique()->values();
+        if ($ids->isEmpty()) {
+            return;
+        }
+        $modos = TurnoGrupo::whereIn('id', $ids)->pluck('modo', 'id');
+        $tramos = Turno::whereIn('grupo_id', $ids)->with('profesional:id,nombre')->orderBy('id')->get()->groupBy('grupo_id');
+
+        foreach ($turnos as $turno) {
+            if ($turno->grupo_id === null) {
+                continue;
+            }
+            $turno->setAttribute('grupo', [
+                'id' => $turno->grupo_id,
+                'modo' => $modos[$turno->grupo_id] ?? null,
+                'tramos' => $tramos[$turno->grupo_id]->map(fn (Turno $t) => [
+                    'turno_id' => $t->id,
+                    'profesional_id' => $t->profesional_id,
+                    'profesional_nombre' => $t->profesional?->nombre,
+                    'fecha_hora' => $t->fecha_hora->format('Y-m-d\TH:i:s'),
+                    'duracion_total_minutos' => $t->duracion_total_minutos,
+                    'estado' => $t->estado,
+                ])->all(),
+            ]);
+        }
     }
 
     // ─────────────────────────────────────────────
