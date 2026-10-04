@@ -3,6 +3,7 @@
 namespace App\Services\Reservas;
 
 use App\Jobs\EnviarMensajeConfirmacion;
+use App\Jobs\EnviarPushReservaOnline;
 use App\Models\Cliente;
 use App\Models\Profesional;
 use App\Models\ReservaWeb;
@@ -78,6 +79,7 @@ class ConfirmarReservaService
             $r->update(['estado' => 'confirmed', 'confirmada_en' => $ahora->timestamp, 'motivo_cierre' => null]);
 
             DB::afterCommit(fn () => EnviarMensajeConfirmacion::dispatch($turno->id));
+            $this->notificarPush($turno);
 
             Log::info('reserva.confirmed', [
                 'user_id' => $r->user_id,
@@ -88,6 +90,22 @@ class ConfirmarReservaService
             ]);
 
             return new ConfirmacionResultado(ConfirmacionResultado::CONFIRMED, $turno);
+        });
+    }
+
+    /**
+     * Web Push to the salon's devices: one per confirmed online reservation (the
+     * grupo leader stands for the whole group). Best-effort: a failure to even
+     * enqueue it must never undo or fail the booking.
+     */
+    private function notificarPush(Turno $turno): void
+    {
+        DB::afterCommit(function () use ($turno) {
+            try {
+                EnviarPushReservaOnline::dispatch($turno->id);
+            } catch (\Throwable $e) {
+                Log::warning('reserva.push_dispatch_failed', ['turno_id' => $turno->id, 'error' => $e->getMessage()]);
+            }
         });
     }
 
@@ -152,6 +170,7 @@ class ConfirmarReservaService
             $r->update(['estado' => 'confirmed', 'confirmada_en' => $ahora->timestamp, 'motivo_cierre' => null]);
 
             DB::afterCommit(fn () => EnviarMensajeConfirmacion::dispatch($turno->id));
+            $this->notificarPush($turno);
 
             Log::info('reserva.confirmed', [
                 'user_id' => $r->user_id,
