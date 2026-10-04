@@ -51,6 +51,72 @@ class UpdatePerfilSenaRequeridaTest extends TestCase
         $this->assertSame('Kim1710', $fresh->whatsapp_sena_alias);
     }
 
+    public function test_guarda_y_devuelve_la_retencion_iibb_como_numero(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+
+        $this->assertEquals(0, $user->fresh()->retencion_iibb_porcentaje);
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson('/api/perfil', ['retencion_iibb_porcentaje' => 4.5])
+            ->assertOk()
+            ->assertJsonPath('retencion_iibb_porcentaje', 4.5);
+
+        $this->assertSame(4.5, $user->fresh()->retencion_iibb_porcentaje);
+    }
+
+    public function test_retencion_iibb_null_se_trata_como_cero(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true, 'retencion_iibb_porcentaje' => 4]);
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson('/api/perfil', ['retencion_iibb_porcentaje' => null])
+            ->assertOk();
+
+        $this->assertSame(0.0, $user->fresh()->retencion_iibb_porcentaje);
+    }
+
+    public function test_retencion_iibb_fuera_de_rango_es_rechazada(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+
+        foreach ([-1, 50.01] as $valor) {
+            $this->actingAs($user, 'sanctum')
+                ->putJson('/api/perfil', ['retencion_iibb_porcentaje' => $valor])
+                ->assertStatus(422)
+                ->assertJsonValidationErrors('retencion_iibb_porcentaje');
+        }
+    }
+
+    public function test_guarda_la_comision_mp_propia_y_vacia_vuelve_a_null(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $this->assertNull($user->fresh()->comision_mp_porcentaje);
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson('/api/perfil', ['comision_mp_porcentaje' => 5.5])
+            ->assertOk()
+            ->assertJsonPath('comision_mp_porcentaje', 5.5);
+        $this->assertSame(5.5, $user->fresh()->comision_mp_porcentaje);
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson('/api/perfil', ['comision_mp_porcentaje' => null])
+            ->assertOk();
+        $this->assertNull($user->fresh()->comision_mp_porcentaje);
+    }
+
+    public function test_comision_mp_fuera_de_rango_es_rechazada(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+
+        foreach ([-1, 50.01] as $valor) {
+            $this->actingAs($user, 'sanctum')
+                ->putJson('/api/perfil', ['comision_mp_porcentaje' => $valor])
+                ->assertStatus(422)
+                ->assertJsonValidationErrors('comision_mp_porcentaje');
+        }
+    }
+
     public function test_activar_sena_sin_monto_es_rechazado(): void
     {
         $user = User::factory()->create(['is_exempt' => true, 'whatsapp_pide_sena' => false, 'sena_monto' => null]);

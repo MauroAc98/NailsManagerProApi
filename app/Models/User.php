@@ -33,6 +33,8 @@ class User extends Authenticatable
         'confirmacion_automatica',
         'hora_recordatorio',
         'sena_monto',
+        'retencion_iibb_porcentaje',
+        'comision_mp_porcentaje',
         'whatsapp_pide_sena',
         'whatsapp_sena_titular',
         'whatsapp_sena_entidad',
@@ -79,6 +81,10 @@ class User extends Authenticatable
             'recordatorio_automatico' => 'boolean',
             'confirmacion_automatica' => 'boolean',
             'sena_monto'              => 'decimal:2',
+            // float: la columna es decimal(5,2) y asi el JSON sale numerico.
+            'retencion_iibb_porcentaje' => 'float',
+            // float nullable: null = usar la comision global (Setting).
+            'comision_mp_porcentaje'  => 'float',
             // float (no decimal:N, a diferencia de sena_monto): decimal:N
             // serializa a string en el JSON, y el picker del frontend
             // necesita consumir user.latitud/longitud como number directo.
