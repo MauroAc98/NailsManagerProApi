@@ -609,7 +609,8 @@ class DisponibilidadService
             return false;
         }
 
-        return ! $this->solapaAlguno($this->ocupacionDelDia($profesionalId, $fecha, $ahora, $ignorarReservaId), $inicio, $fin);
+        return ! $this->cruzaMedianoche($inicio, $fin)
+            && ! $this->solapaAlguno($this->ocupacionDelDia($profesionalId, $fecha, $ahora, $ignorarReservaId), $inicio, $fin);
     }
 
     /**
@@ -631,9 +632,19 @@ class DisponibilidadService
         array $ocupacion,
         array $bloqueosParciales,
     ): bool {
-        return ! $this->solapaAlguno($holds[$profesionalId] ?? [], $inicio, $fin)
+        return ! $this->cruzaMedianoche($inicio, $fin)
+            && ! $this->solapaAlguno($holds[$profesionalId] ?? [], $inicio, $fin)
             && ! $this->solapaAlguno($ocupacion[$profesionalId] ?? [], $inicio, $fin)
             && ! $this->solapaAlguno($bloqueosParciales, $inicio, $fin);
+    }
+
+    /**
+     * Un turno no puede seguir despues de las 24:00 del dia en que empieza (la
+     * agenda y los avisos son por dia): terminar justo a medianoche entra.
+     */
+    private function cruzaMedianoche(Carbon $inicio, Carbon $fin): bool
+    {
+        return $fin->gt($inicio->copy()->addDay()->startOfDay());
     }
 
     /** Solapamiento semi-abierto: los intervalos adyacentes no se pisan. */
