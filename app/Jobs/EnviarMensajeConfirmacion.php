@@ -224,7 +224,11 @@ class EnviarMensajeConfirmacion implements ShouldQueue
     // pago (alias o CBU) y la dirección ({{6}}) para que Meta acepte el envío.
     private function senaConfigCompleta(User $user): bool
     {
-        return is_numeric($user->sena_monto)
+        // El mensaje de seña por WhatsApp (plantilla Meta) solo sabe de un
+        // monto fijo: en modo porcentaje se manda la confirmacion simple hasta
+        // que una slice posterior lo soporte.
+        return ! $user->senaEsPorcentaje()
+            && is_numeric($user->sena_monto)
             && (float) $user->sena_monto > 0
             && filled($user->whatsapp_sena_titular)
             && (filled($user->whatsapp_sena_alias) || filled($user->whatsapp_sena_cbu))

@@ -60,14 +60,14 @@ class MercadoPagoService
         }
 
         $credencial = $user->mpCredentials;
-        $senaMonto = round((float) ($user->sena_monto ?? 0), 2);
-        if ($credencial === null || $senaMonto <= 0) {
+        if ($credencial === null || ! $user->senaConfigCompleta()) {
             throw ReservaPublicaException::mpNoConectado();
         }
 
         // Se cobra de mas para que, despues de la comision de MP, el negocio
-        // reciba el monto de seña completo — ver montoACobrar().
-        $monto = $this->montoACobrar($senaMonto, $user);
+        // reciba el monto de seña completo — ver montoACobrar(). En modo
+        // porcentaje, sin total (o con neto 0) NO se cobra: sena_sin_total.
+        $monto = $this->montoACobrar($this->senaNeta($user, $reserva), $user);
 
         // reservas.base_url, NUNCA services.frontend_url (ese apunta a
         // app.turnetto.com, el dashboard) — ver comentario en config/reservas.php.
@@ -142,6 +142,55 @@ class MercadoPagoService
             'monto' => $monto,
             'estado' => 'pendiente',
         ]);
+    }
+
+    /**
+     * Neto que el negocio quiere recibir como seña de esta reserva (antes del
+     * gross-up de montoACobrar). Fijo: sena_monto, tal cual. Porcentaje:
+     * round(total * pct / 100) en pesos enteros, sin piso ni tope.
+     *
+     * @throws ReservaPublicaException sena_sin_total (porcentaje y total o neto en 0)
+     */
+    public function senaNeta(User $user, ReservaWeb $reserva): float
+    {
+        if (! $user->senaEsPorcentaje()) {
+            return round((float) ($user->sena_monto ?? 0), 2);
+        }
+
+        $neto = $this->netoPorcentual($user, $reserva);
+        if ($neto <= 0) {
+            throw ReservaPublicaException::senaSinTotal();
+        }
+
+        return $neto;
+    }
+
+    /**
+     * Seña que se le muestra al cliente para una reserva concreta: el monto
+     * ya cobrado (PagoSena, congelado en el primer /pago) si existe; si no, el
+     * calculo con la config actual. null = porcentaje sin total determinable.
+     */
+    public function depositoParaReserva(User $user, ReservaWeb $reserva): ?float
+    {
+        $pago = PagoSena::where('reserva_web_id', $reserva->id)->latest('id')->first();
+        if ($pago !== null) {
+            return (float) $pago->monto;
+        }
+
+        if (! $user->senaEsPorcentaje()) {
+            return $this->montoACobrar((float) ($user->sena_monto ?? 0), $user);
+        }
+
+        $neto = $user->senaConfigCompleta() ? $this->netoPorcentual($user, $reserva) : 0.0;
+
+        return $neto > 0 ? $this->montoACobrar($neto, $user) : null;
+    }
+
+    private function netoPorcentual(User $user, ReservaWeb $reserva): float
+    {
+        $total = (new TotalReserva())->de($reserva);
+
+        return (float) round($total * (float) $user->sena_porcentaje / 100);
     }
 
     // Comision de Mercado Pago por cobro "al instante" (Setting global,

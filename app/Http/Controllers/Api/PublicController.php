@@ -65,7 +65,7 @@ class PublicController extends Controller
             // Fase 1 de Mercado Pago: sin esto conectado, el negocio no puede
             // cobrar la sena y la reserva online no tiene sentido de arrancar
             // (el frontend bloquea el flujo entero con este campo en falso).
-            'pago_habilitado' => $user->sena_monto > 0 && $user->mpCredentials !== null,
+            'pago_habilitado' => $user->senaConfigCompleta() && $user->mpCredentials !== null,
         ]);
     }
 
@@ -82,11 +82,21 @@ class PublicController extends Controller
     {
         $user = $this->getProfesional($slug);
 
+        // Modo porcentaje: no hay total antes de elegir los servicios, asi que
+        // no hay deposito para mostrar aca (null) — el frontend lee sena_tipo /
+        // sena_porcentaje y lo resuelve con la reserva en mano (resumen.deposito).
+        $porcentaje = $user->senaEsPorcentaje()
+            ? ['sena_tipo' => 'porcentaje', 'sena_porcentaje' => $user->sena_porcentaje]
+            : [];
+
         return response()->json([
             // Lo que se le cobra a la clienta, no el neto que pidió el
             // negocio — tiene que coincidir con lo que ve en el checkout de
             // MP (ver MercadoPagoService::montoACobrar).
-            'deposito' => $mercadoPago->montoACobrar((float) ($user->sena_monto ?? 0), $user),
+            'deposito' => $user->senaEsPorcentaje()
+                ? null
+                : $mercadoPago->montoACobrar((float) ($user->sena_monto ?? 0), $user),
+            ...$porcentaje,
             'ventana_pago_minutos' => (int) config('reservas.pago_minutos'),
             'anticipacion_minutos' => (int) config('reservas.anticipacion_minutos'),
             'ventana_cancelacion_horas' => (int) config('reservas.cancelacion_horas'),

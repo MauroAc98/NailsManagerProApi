@@ -33,6 +33,8 @@ class User extends Authenticatable
         'confirmacion_automatica',
         'hora_recordatorio',
         'sena_monto',
+        'sena_tipo',
+        'sena_porcentaje',
         'retencion_iibb_porcentaje',
         'comision_mp_porcentaje',
         'whatsapp_pide_sena',
@@ -81,6 +83,8 @@ class User extends Authenticatable
             'recordatorio_automatico' => 'boolean',
             'confirmacion_automatica' => 'boolean',
             'sena_monto'              => 'decimal:2',
+            // float: el JSON sale numerico (el frontend lo edita como number).
+            'sena_porcentaje'         => 'float',
             // float: la columna es decimal(5,2) y asi el JSON sale numerico.
             'retencion_iibb_porcentaje' => 'float',
             // float nullable: null = usar la comision global (Setting).
@@ -96,6 +100,23 @@ class User extends Authenticatable
             'atiende_en_paralelo'     => 'boolean',
             'notificaciones_vistas_at' => 'datetime',
         ];
+    }
+
+    // ── Seña de la reserva online ────────────────────────────────
+    public function senaEsPorcentaje(): bool
+    {
+        return $this->sena_tipo === 'porcentaje';
+    }
+
+    /**
+     * Config de seña completa segun el modo: fijo = sena_monto > 0;
+     * porcentaje = sena_porcentaje > 0. El campo del otro modo se ignora.
+     */
+    public function senaConfigCompleta(): bool
+    {
+        $valor = $this->senaEsPorcentaje() ? $this->sena_porcentaje : $this->sena_monto;
+
+        return is_numeric($valor) && (float) $valor > 0;
     }
 
     // ── Slug automático ──────────────────────────────────────────

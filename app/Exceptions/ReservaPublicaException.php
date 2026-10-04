@@ -80,6 +80,12 @@ class ReservaPublicaException extends RuntimeException
         return new self('mp_no_conectado', 503, 'Este negocio todavía no tiene Mercado Pago conectado.');
     }
 
+    /** Seña porcentual sin un total sobre el cual calcularla (servicios sin precio / precio 0). */
+    public static function senaSinTotal(): self
+    {
+        return new self('sena_sin_total', 422, 'No podemos calcular la seña de esta reserva porque los servicios no tienen precio. Contactá al negocio para reservar.');
+    }
+
     public static function mpError(): self
     {
         return new self('mp_error', 502, 'No pudimos generar el link de pago. Probá de nuevo en un momento.');
