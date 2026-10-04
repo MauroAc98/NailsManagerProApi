@@ -92,15 +92,28 @@ class PublicServiciosPromoTest extends TestCase
         $this->assertArrayNotHasKey($this->promo->id, $this->listado());
     }
 
-    public function test_la_promo_trae_modo_y_componentes_ordenados_con_nombres_sin_ids(): void
+    public function test_la_promo_trae_modo_y_componentes_ordenados_con_nombres_duracion_y_avatar_sin_ids(): void
     {
         $item = $this->listado()[$this->promo->id];
 
         $this->assertSame('secuencia', $item['modo_promo']);
         $this->assertSame([
-            ['servicio_nombre' => 'Softgel', 'profesional_nombre' => 'Ana', 'orden' => 1],
-            ['servicio_nombre' => 'Semis pies', 'profesional_nombre' => 'Laura', 'orden' => 2],
+            ['servicio_nombre' => 'Softgel', 'duracion_minutos' => 60, 'profesional_nombre' => 'Ana', 'profesional_avatar_url' => null, 'orden' => 1],
+            ['servicio_nombre' => 'Semis pies', 'duracion_minutos' => 45, 'profesional_nombre' => 'Laura', 'profesional_avatar_url' => null, 'orden' => 2],
         ], $item['componentes']);
+    }
+
+    public function test_el_componente_trae_la_url_del_avatar_de_su_profesional_si_tiene(): void
+    {
+        $this->ana->update(['avatar_path' => 'avatars/ana.jpg']);
+
+        $componentes = $this->listado()[$this->promo->id]['componentes'];
+
+        $this->assertSame($this->ana->fresh()->avatar_url, $componentes[0]['profesional_avatar_url']);
+        $this->assertNotNull($componentes[0]['profesional_avatar_url']);
+        $this->assertNull($componentes[1]['profesional_avatar_url']);
+        // nunca la ruta cruda del disco
+        $this->assertArrayNotHasKey('avatar_path', $componentes[0]);
     }
 
     public function test_los_componentes_salen_ordenados_por_orden_aunque_se_hayan_creado_al_reves(): void

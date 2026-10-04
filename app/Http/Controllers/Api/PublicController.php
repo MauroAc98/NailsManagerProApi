@@ -146,7 +146,7 @@ class PublicController extends Controller
         $conProfesional = DB::table('profesional_servicio')->whereIn('profesional_id', $activas)->pluck('servicio_id')->flip();
 
         $servicios = $query
-            ->with(['fotos', 'componentes.componenteServicio:id,nombre', 'componentes.profesional:id,nombre'])
+            ->with(['fotos', 'componentes.componenteServicio:id,nombre,duracion_minutos', 'componentes.profesional:id,nombre,avatar_path'])
             ->get(['id', 'nombre', 'duracion_minutos', 'precio', 'categoria_id', 'orden', 'es_promo', 'modo_promo'])
             ->filter(fn ($s) => $s->es_promo && $s->componentes->isNotEmpty()
                 ? $s->componentes->every(
@@ -181,12 +181,14 @@ class PublicController extends Controller
                     // la 'path' relativa del disco (ver ServicioFoto::url).
                     'fotos' => $s->fotos->pluck('url')->values(),
                 ] + ($componentizada ? [
-                    // Detalle para mostrar en la tarjeta: solo nombres (sin ids) y
+                    // Detalle para mostrar en la tarjeta: nombres, duracion y avatar (sin ids) y
                     // en orden de ejecucion. Sin modo guardado rige la secuencia.
                     'modo_promo' => $s->modo_promo,
                     'componentes' => $s->componentes->map(fn ($c) => [
                         'servicio_nombre' => $c->componenteServicio->nombre,
+                        'duracion_minutos' => (int) $c->componenteServicio->duracion_minutos,
                         'profesional_nombre' => $c->profesional->nombre,
+                        'profesional_avatar_url' => $c->profesional->avatar_url,
                         'orden' => $c->orden,
                     ])->values(),
                 ] : []);
