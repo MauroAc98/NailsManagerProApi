@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Exceptions\ReservaPublicaException;
 use App\Models\PagoSena;
 use App\Models\ReservaWeb;
+use App\Models\Setting;
 use App\Models\User;
 use App\Models\UserMpCredential;
 use App\Services\Reservas\MercadoPagoService;
@@ -122,22 +123,99 @@ class MercadoPagoServiceTest extends TestCase
         });
     }
 
+    // La orden usa la retencion del negocio (no una global).
+    public function test_la_orden_usa_la_retencion_iibb_del_negocio(): void
+    {
+        $user = $this->negocio();
+        $user->update(['retencion_iibb_porcentaje' => 4]);
+        $this->conCredenciales($user, 'APP_USR-token');
+        $reserva = $this->reserva($user);
+        $this->fakeMp();
+
+        $pago = app(MercadoPagoService::class)->crearOReusarPreferencia($user->fresh(), $reserva);
+
+        $this->assertSame(5700.0, (float) $pago->monto);
+    }
+
     // Verificacion directa e independiente de la formula (no depende de la
-    // llamada real a MP): con 6,29% (default), cobrar $5.335,58 deja al
-    // negocio con $5.000 netos.
-    public function test_monto_a_cobrar_suma_la_comision_de_mp_para_que_el_negocio_reciba_el_neto(): void
+    // llamada real a MP). Con 6,29% (default) y sin retencion: crudo 5411,89
+    // (cobrando eso, el negocio netea 5000 despues de comision + IVA) y el
+    // monto final siempre se redondea HACIA ARRIBA al proximo multiplo de 100.
+    public function test_monto_a_cobrar_suma_la_comision_de_mp_y_redondea_hacia_arriba_a_100(): void
     {
         $montoACobrar = app(MercadoPagoService::class)->montoACobrar(5000);
 
-        // Verificacion independiente de la propiedad de negocio (no de la
-        // formula en si, para no probar la implementacion contra si misma):
-        // cobrando esto y descontando la comision CON IVA (21%, aplicado solo
-        // — el admin carga el % tal cual lo ve en su cuenta de MP, sin IVA),
-        // el negocio recibe 5000. Confirmado contra un cobro real: comision
-        // nominal 6,29% -> cargo efectivo 7,59% (6,29 * 1,21).
-        $this->assertGreaterThan(5000, $montoACobrar);
+        $this->assertSame(5500.0, $montoACobrar);
         $comisionConIva = MercadoPagoService::COMISION_MP_DEFAULT * 1.21;
-        $this->assertEqualsWithDelta(5000, $montoACobrar * (1 - $comisionConIva / 100), 0.01);
+        // El negocio recibe al menos los 5000 netos (el redondeo siempre favorece).
+        $this->assertGreaterThanOrEqual(5000, $montoACobrar * (1 - $comisionConIva / 100));
+        $this->assertSame(100, MercadoPagoService::REDONDEO_SENA_MULTIPLO);
+    }
+
+    public function test_monto_a_cobrar_con_retencion_iibb_la_suma_antes_de_redondear(): void
+    {
+        // 5000 / (1 - (6,29*1,21 + 4)/100) = ~5650,x -> 5700
+        $this->assertSame(5700.0, app(MercadoPagoService::class)->montoACobrar(5000, User::factory()->make(['retencion_iibb_porcentaje' => 4])));
+    }
+
+    public function test_monto_a_cobrar_un_multiplo_exacto_de_100_se_mantiene(): void
+    {
+        Setting::create(['key' => 'comision_mp_porcentaje', 'value' => '0']);
+
+        $this->assertSame(5600.0, app(MercadoPagoService::class)->montoACobrar(5600));
+    }
+
+    // Float artefacts: 5600.00000001 no debe saltar a 5700 (se redondea a
+    // centavos antes del ceil).
+    public function test_monto_a_cobrar_no_salta_de_multiplo_por_ruido_de_float(): void
+    {
+        Setting::create(['key' => 'comision_mp_porcentaje', 'value' => '0']);
+
+        $this->assertSame(5600.0, app(MercadoPagoService::class)->montoACobrar(5600.000000001));
+        $this->assertSame(5700.0, app(MercadoPagoService::class)->montoACobrar(5600.01));
+    }
+
+    public function test_la_comision_propia_del_negocio_pisa_a_la_global_y_a_la_constante(): void
+    {
+        $svc = app(MercadoPagoService::class);
+        $conPropia = User::factory()->make(['comision_mp_porcentaje' => 10]);
+        $sinPropia = User::factory()->make(['comision_mp_porcentaje' => null]);
+
+        // Sin Setting global: cae a la constante (6,29 -> 5500).
+        $this->assertSame(5500.0, $svc->montoACobrar(5000, $sinPropia));
+        // Propia 10% (+IVA = 12,1%): 5000/0,879 = 5688,29 -> 5700.
+        $this->assertSame(5700.0, $svc->montoACobrar(5000, $conPropia));
+
+        // Con Setting global distinto, el negocio sin propia lo usa y el otro no.
+        Setting::create(['key' => 'comision_mp_porcentaje', 'value' => '15']);
+        // 15 * 1,21 = 18,15% -> 5000/0,8185 = 6108,73 -> 6200.
+        $this->assertSame(6200.0, $svc->montoACobrar(5000, $sinPropia));
+        $this->assertSame(5700.0, $svc->montoACobrar(5000, $conPropia));
+        $this->assertSame(6200.0, $svc->montoACobrar(5000));
+    }
+
+    public function test_comision_propia_en_cero_es_valida_y_no_cae_a_la_global(): void
+    {
+        $this->assertSame(5000.0, app(MercadoPagoService::class)->montoACobrar(5000, User::factory()->make(['comision_mp_porcentaje' => 0])));
+    }
+
+    // Intencional: un monto de prueba chico se infla al minimo de 100.
+    public function test_monto_a_cobrar_de_un_monto_chico_se_infla_a_100(): void
+    {
+        $this->assertSame(100.0, app(MercadoPagoService::class)->montoACobrar(10));
+    }
+
+    // Guardia: si las tasas suman 100% o mas no se puede dividir; se limita
+    // la tasa total a un tope en vez de devolver un monto negativo o infinito.
+    public function test_monto_a_cobrar_con_tasas_que_suman_100_o_mas_no_divide_por_cero(): void
+    {
+        Setting::create(['key' => 'comision_mp_porcentaje', 'value' => '50']);
+
+        $monto = app(MercadoPagoService::class)->montoACobrar(5000, User::factory()->make(['retencion_iibb_porcentaje' => 50, 'comision_mp_porcentaje' => 50]));
+
+        $this->assertGreaterThan(5000, $monto);
+        $this->assertTrue(is_finite($monto));
+        $this->assertSame(0.0, fmod($monto, 100.0));
     }
 
     public function test_monto_a_cobrar_con_sena_cero_devuelve_cero(): void

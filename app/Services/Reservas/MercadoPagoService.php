@@ -67,7 +67,7 @@ class MercadoPagoService
 
         // Se cobra de mas para que, despues de la comision de MP, el negocio
         // reciba el monto de seña completo — ver montoACobrar().
-        $monto = $this->montoACobrar($senaMonto);
+        $monto = $this->montoACobrar($senaMonto, $user);
 
         // reservas.base_url, NUNCA services.frontend_url (ese apunta a
         // app.turnetto.com, el dashboard) — ver comentario en config/reservas.php.
@@ -161,23 +161,47 @@ class MercadoPagoService
     // admin que lo sume a mano al cargar el %.
     private const IVA_PORCENTAJE = 21;
 
+    // Multiplo al que se redondea SIEMPRE hacia arriba el monto cobrado
+    // (nunca al mas cercano ni hacia abajo). Un monto de prueba chico (ej.
+    // $10) se infla a $100: es intencional.
+    public const REDONDEO_SENA_MULTIPLO = 100;
+
+    // Tope de la tasa total (comision con IVA + retencion). Las tasas por
+    // separado estan acotadas (comision <= 50, retencion <= 50), pero juntas
+    // podrian llegar a >= 100% y dividir por cero o por un negativo.
+    private const TASA_TOTAL_MAXIMA = 95;
+
     /**
-     * Monto a cobrarle a la clienta para que, descontada la comision de MP
-     * (con IVA incluido), el negocio reciba exactamente `$senaMonto` neto —
-     * sin esto, el negocio terminaba recibiendo la seña menos la comision sin
-     * haberlo decidido. Formula: cobro = neto / (1 - comision_con_iva). 0 se
-     * mantiene en 0 (sin seña configurada, no hay nada que cobrar de mas).
+     * Monto a cobrarle al cliente para que, descontada la comision de MP (con
+     * IVA incluido; la del negocio o, si no cargo una, la global) y la
+     * retencion de Ingresos Brutos del negocio (0 si no tiene), el negocio reciba al menos `$senaMonto` neto. Formula:
+     * bruto = neto / (1 - (comision * 1,21 + retencion) / 100), y el resultado
+     * se redondea hacia arriba al proximo multiplo de REDONDEO_SENA_MULTIPLO.
+     * 0 se mantiene en 0 (sin seña configurada, no hay nada que cobrar).
      */
-    public function montoACobrar(float $senaMonto): float
+    public function montoACobrar(float $senaMonto, ?User $salon = null): float
     {
         if ($senaMonto <= 0) {
             return 0.0;
         }
 
-        $comisionNominal = (float) (Setting::get('comision_mp_porcentaje') ?? self::COMISION_MP_DEFAULT);
-        $comisionConIva = $comisionNominal * (1 + self::IVA_PORCENTAJE / 100);
+        // Comision: la del negocio si la cargo; si no, la global (Setting);
+        // si no, la constante.
+        $comisionNominal = (float) ($salon?->comision_mp_porcentaje
+            ?? Setting::get('comision_mp_porcentaje')
+            ?? self::COMISION_MP_DEFAULT);
+        $retencionIibb = (float) ($salon?->retencion_iibb_porcentaje ?? 0);
+        $tasaTotal = $comisionNominal * (1 + self::IVA_PORCENTAJE / 100) + max(0.0, $retencionIibb);
+        $tasaTotal = min($tasaTotal, self::TASA_TOTAL_MAXIMA);
 
-        return round($senaMonto / (1 - $comisionConIva / 100), 2);
+        $bruto = $senaMonto / (1 - $tasaTotal / 100);
+
+        // Centavos enteros: primero a centavos (absorbe ruido de float como
+        // 5600.00000001) y recien despues el ceil al multiplo.
+        $centavos = (int) round($bruto * 100);
+        $multiplo = self::REDONDEO_SENA_MULTIPLO * 100;
+
+        return (float) ((int) ceil($centavos / $multiplo) * self::REDONDEO_SENA_MULTIPLO);
     }
 
     /**

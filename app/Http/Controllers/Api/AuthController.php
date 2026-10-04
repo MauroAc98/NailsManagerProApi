@@ -156,6 +156,11 @@ class AuthController extends Controller
             'confirmacion_automatica' => 'sometimes|boolean',
             'hora_recordatorio' => 'sometimes|string|in:18:00,19:00,20:00,21:00,22:00',
             'sena_monto' => 'sometimes|nullable|numeric|min:0',
+            // Retencion de Ingresos Brutos que MP le aplica al negocio; la
+            // decide cada negocio (ver MercadoPagoService::montoACobrar).
+            'retencion_iibb_porcentaje' => 'sometimes|nullable|numeric|min:0|max:50',
+            // Comision de MP propia del negocio; null = usa la global.
+            'comision_mp_porcentaje' => 'sometimes|nullable|numeric|min:0|max:50',
             'whatsapp_pide_sena' => 'sometimes|boolean',
             // not_regex: los datos bancarios viajan como parámetros de la
             // plantilla Meta reserva_turno_sena — un salto de línea o tab
@@ -339,6 +344,11 @@ class AuthController extends Controller
                     'promos' => $promosParalelas->map(fn ($promo) => ['id' => $promo->id, 'nombre' => $promo->nombre])->all(),
                 ], 422);
             }
+        }
+
+        // La columna es NOT NULL default 0: null significa "sin retencion".
+        if (array_key_exists('retencion_iibb_porcentaje', $data) && $data['retencion_iibb_porcentaje'] === null) {
+            $data['retencion_iibb_porcentaje'] = 0;
         }
 
         $user->update($data);

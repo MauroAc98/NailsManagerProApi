@@ -24,7 +24,8 @@ class PublicTerminosTest extends TestCase
     {
         config(['reservas.pago_minutos' => 15, 'reservas.anticipacion_minutos' => 120, 'reservas.cancelacion_horas' => 24]);
         $user = $this->crearSalon(['sena_monto' => 5000]);
-        $depositoEsperado = round(5000 / (1 - MercadoPagoService::COMISION_MP_DEFAULT / 100), 2);
+        // Con comision 6,29% + IVA el crudo es 5411,89 -> redondeado hacia arriba a 5500.
+        $depositoEsperado = 5500.0;
 
         $this->getJson("/api/public/{$user->slug}/terminos")
             ->assertOk()
@@ -34,6 +35,25 @@ class PublicTerminosTest extends TestCase
                 'anticipacion_minutos' => 120,
                 'ventana_cancelacion_horas' => 24,
             ]);
+    }
+
+    // La retencion de IIBB es por negocio: se suma al deposito que ve el cliente.
+    public function test_el_deposito_incluye_la_retencion_iibb_del_negocio(): void
+    {
+        $user = $this->crearSalon(['sena_monto' => 5000, 'retencion_iibb_porcentaje' => 4]);
+
+        $this->getJson("/api/public/{$user->slug}/terminos")
+            ->assertOk()
+            ->assertJsonPath('deposito', 5700);
+    }
+
+    public function test_la_comision_propia_del_negocio_cambia_el_deposito(): void
+    {
+        $user = $this->crearSalon(['sena_monto' => 5000, 'comision_mp_porcentaje' => 10]);
+
+        $this->getJson("/api/public/{$user->slug}/terminos")
+            ->assertOk()
+            ->assertJsonPath('deposito', 5700);
     }
 
     public function test_sin_sena_configurada_el_deposito_es_cero(): void
