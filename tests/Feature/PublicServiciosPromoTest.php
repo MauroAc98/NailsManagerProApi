@@ -57,6 +57,7 @@ class PublicServiciosPromoTest extends TestCase
             'user_id' => $this->user->id, 'nombre' => 'Promo vieja', 'duracion_minutos' => 60,
             'precio' => 9000, 'activo' => true, 'es_promo' => true,
         ]);
+        $this->ana->servicios()->attach($legacy->id);
 
         $this->assertFalse($this->listado()[$legacy->id]['es_promo_componentizada']);
     }
@@ -121,6 +122,7 @@ class PublicServiciosPromoTest extends TestCase
             'user_id' => $this->user->id, 'nombre' => 'Promo vieja', 'duracion_minutos' => 60,
             'precio' => 9000, 'activo' => true, 'es_promo' => true,
         ]);
+        $this->ana->servicios()->attach($legacy->id);
         $lista = $this->listado();
 
         foreach ([$this->softgel->id, $legacy->id] as $id) {

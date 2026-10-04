@@ -137,15 +137,20 @@ class PublicController extends Controller
         $ofrecidos = DB::table('profesional_servicio')->get(['profesional_id', 'servicio_id'])
             ->map(fn ($r) => "{$r->profesional_id}:{$r->servicio_id}")->flip();
         $serviciosActivos = Servicio::where('user_id', $user->id)->where('activo', true)->pluck('id')->flip();
+        // Servicios que al menos una profesional activa ofrece: sin eso, elegirlo
+        // no tiene como concretarse (nadie lo atiende).
+        $conProfesional = DB::table('profesional_servicio')->whereIn('profesional_id', $activas)->pluck('servicio_id')->flip();
 
         $servicios = $query
             ->with(['fotos', 'componentes.componenteServicio:id,nombre', 'componentes.profesional:id,nombre'])
             ->get(['id', 'nombre', 'duracion_minutos', 'precio', 'categoria_id', 'orden', 'es_promo', 'modo_promo'])
-            ->filter(fn ($s) => ! $s->es_promo || $s->componentes->every(
-                fn ($c) => in_array($c->profesional_id, $activas, true)
-                    && isset($ofrecidos["{$c->profesional_id}:{$c->componente_servicio_id}"])
-                    && isset($serviciosActivos[$c->componente_servicio_id]),
-            ))
+            ->filter(fn ($s) => $s->es_promo && $s->componentes->isNotEmpty()
+                ? $s->componentes->every(
+                    fn ($c) => in_array($c->profesional_id, $activas, true)
+                        && isset($ofrecidos["{$c->profesional_id}:{$c->componente_servicio_id}"])
+                        && isset($serviciosActivos[$c->componente_servicio_id]),
+                )
+                : isset($conProfesional[$s->id]))
             // Mismo orden que la lista del salon: categoria alfabetica, luego
             // orden/id; sin categoria al final.
             ->sortBy([

@@ -13,11 +13,59 @@ class PublicServiciosTest extends TestCase
 {
     use RefreshDatabase, CreaSalonPublico;
 
+    // Un servicio solo se lista si alguna profesional activa lo ofrece: estos tests
+    // no hablan de profesionales, asi que los ofrece una del propio salon.
+    private function servicioOfrecido(\App\Models\User $user, string $nombre, int $duracion = 45, bool $activo = true, ?\App\Models\Profesional $profesional = null): \App\Models\Servicio
+    {
+        $profesional ??= \App\Models\Profesional::where('user_id', $user->id)->where('activo', true)->first()
+            ?? $this->crearProfesional($user, 'Ana');
+
+        return $this->crearServicio($user, $nombre, $duracion, $activo, $profesional);
+    }
+
+    public function test_no_lista_un_servicio_que_ninguna_profesional_ofrece(): void
+    {
+        $user = $this->crearSalon();
+        $this->crearProfesional($user, 'Ana');
+        $huerfano = $this->crearServicio($user, 'Nadie lo hace', 30);
+        $ofrecido = $this->servicioOfrecido($user, 'Lo hace Ana', 30);
+
+        $ids = collect($this->getJson("/api/public/{$user->slug}/servicios")->assertOk()->json())->pluck('id');
+
+        $this->assertTrue($ids->contains($ofrecido->id));
+        $this->assertFalse($ids->contains($huerfano->id));
+    }
+
+    public function test_no_lista_un_servicio_que_solo_ofrece_una_profesional_inactiva(): void
+    {
+        $user = $this->crearSalon();
+        $inactiva = $this->crearProfesional($user, 'Vieja', false);
+        $servicio = $this->crearServicio($user, 'Solo la inactiva', 30, true, $inactiva);
+
+        $ids = collect($this->getJson("/api/public/{$user->slug}/servicios")->assertOk()->json())->pluck('id');
+
+        $this->assertFalse($ids->contains($servicio->id));
+    }
+
+    public function test_no_lista_una_promo_legacy_sin_componentes_que_nadie_ofrece(): void
+    {
+        $user = $this->crearSalon();
+        $this->crearProfesional($user, 'Ana');
+        $promo = \App\Models\Servicio::create([
+            'user_id' => $user->id, 'nombre' => 'Promo vieja', 'duracion_minutos' => 60,
+            'precio' => 9000, 'activo' => true, 'es_promo' => true,
+        ]);
+
+        $ids = collect($this->getJson("/api/public/{$user->slug}/servicios")->assertOk()->json())->pluck('id');
+
+        $this->assertFalse($ids->contains($promo->id));
+    }
+
     public function test_lista_solo_servicios_activos_con_el_shape_publico(): void
     {
         $user = $this->crearSalon();
-        $activo = $this->crearServicio($user, 'Esmaltado', 45);
-        $this->crearServicio($user, 'Oculto', 30, false);
+        $activo = $this->servicioOfrecido($user, 'Esmaltado', 45);
+        $this->servicioOfrecido($user, 'Oculto', 30, false);
 
         $this->getJson("/api/public/{$user->slug}/servicios")
             ->assertOk()
@@ -31,7 +79,7 @@ class PublicServiciosTest extends TestCase
         Storage::fake('public');
 
         $user = $this->crearSalon();
-        $servicio = $this->crearServicio($user, 'Esmaltado', 45);
+        $servicio = $this->servicioOfrecido($user, 'Esmaltado', 45);
         $servicio->fotos()->create(['path' => 'servicio_fotos/b.jpg', 'orden' => 1]);
         $servicio->fotos()->create(['path' => 'servicio_fotos/a.jpg', 'orden' => 0]);
 
@@ -52,7 +100,7 @@ class PublicServiciosTest extends TestCase
         $user = $this->crearSalon();
         $otro = $this->crearSalon();
         $this->crearServicio($otro, 'Ajeno');
-        $propio = $this->crearServicio($user, 'Propio');
+        $propio = $this->servicioOfrecido($user, 'Propio');
 
         $this->getJson("/api/public/{$user->slug}/servicios")
             ->assertOk()
@@ -64,9 +112,9 @@ class PublicServiciosTest extends TestCase
     {
         $user = $this->crearSalon();
         $cat = CategoriaServicio::create(['user_id' => $user->id, 'nombre' => 'Manicura']);
-        $con = $this->crearServicio($user, 'Con');
+        $con = $this->servicioOfrecido($user, 'Con');
         $con->update(['categoria_id' => $cat->id]);
-        $sin = $this->crearServicio($user, 'Sin');
+        $sin = $this->servicioOfrecido($user, 'Sin');
 
         $res = $this->getJson("/api/public/{$user->slug}/servicios")->assertOk();
         $res->assertJsonPath('0.id', $con->id)
@@ -80,7 +128,7 @@ class PublicServiciosTest extends TestCase
         $user = $this->crearSalon();
         $otro = $this->crearSalon();
         $ajena = CategoriaServicio::create(['user_id' => $otro->id, 'nombre' => 'Ajena']);
-        $s = $this->crearServicio($user, 'Propio');
+        $s = $this->servicioOfrecido($user, 'Propio');
         // Dato corrupto: servicio apuntando a categoria de otro salon.
         Servicio::where('id', $s->id)->update(['categoria_id' => $ajena->id]);
 
@@ -94,10 +142,10 @@ class PublicServiciosTest extends TestCase
         $user = $this->crearSalon();
         $pedi = CategoriaServicio::create(['user_id' => $user->id, 'nombre' => 'Pedicura']);
         $mani = CategoriaServicio::create(['user_id' => $user->id, 'nombre' => 'Manicura']);
-        $sin  = $this->crearServicio($user, 'Zeta');
-        $p    = $this->crearServicio($user, 'P');
-        $m2   = $this->crearServicio($user, 'M2');
-        $m1   = $this->crearServicio($user, 'M1');
+        $sin  = $this->servicioOfrecido($user, 'Zeta');
+        $p    = $this->servicioOfrecido($user, 'P');
+        $m2   = $this->servicioOfrecido($user, 'M2');
+        $m1   = $this->servicioOfrecido($user, 'M1');
         $p->update(['categoria_id' => $pedi->id, 'orden' => 0]);
         $m2->update(['categoria_id' => $mani->id, 'orden' => 1]);
         $m1->update(['categoria_id' => $mani->id, 'orden' => 0]);
@@ -112,8 +160,8 @@ class PublicServiciosTest extends TestCase
         $user = $this->crearSalon();
         $ana = $this->crearProfesional($user, 'Ana');
         $bea = $this->crearProfesional($user, 'Bea');
-        $x = $this->crearServicio($user, 'X', 30, true, $ana);
-        $y = $this->crearServicio($user, 'Y', 30, true, $bea);
+        $x = $this->servicioOfrecido($user, 'X', 30, true, $ana);
+        $y = $this->servicioOfrecido($user, 'Y', 30, true, $bea);
 
         $this->getJson("/api/public/{$user->slug}/servicios?profesional_id={$ana->id}")
             ->assertOk()
