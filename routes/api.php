@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\MercadoPagoAdminController;
 use App\Http\Controllers\Api\MercadoPagoWebhookController;
 use App\Http\Controllers\Api\ProfesionalController;
 use App\Http\Controllers\Api\PublicController;
+use App\Http\Controllers\Api\PushSubscriptionController;
 use App\Http\Controllers\Api\ReservaPublicaController;
 use App\Http\Controllers\Api\ReservaWebController;
 use App\Http\Controllers\Api\ServicioController;
@@ -112,6 +113,13 @@ Route::prefix('admin')->group(function () {
 // Rutas privadas — requieren Bearer Token
 // ─────────────────────────────────────────────
 Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
+
+    // Web Push (notificación de reservas online a los dispositivos del salón)
+    Route::prefix('push')->group(function () {
+        Route::get('public-key', [PushSubscriptionController::class, 'publicKey']);
+        Route::post('subscriptions', [PushSubscriptionController::class, 'store']);
+        Route::delete('subscriptions', [PushSubscriptionController::class, 'destroy']);
+    });
 
     // Perfil
     Route::put('perfil', [AuthController::class, 'updatePerfil']);
