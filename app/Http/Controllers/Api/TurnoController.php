@@ -567,7 +567,9 @@ class TurnoController extends Controller
             'profesional_id' => $profesional->id,
             'fecha_hora' => $data['fecha_hora'],
             'duracion_total_minutos' => $duracionTotal,
-            'notas' => $data['notas'] ?? null,
+            // Solo se toca si viene en el body: la pantalla de editar no la manda y
+            // borraria la idea que el cliente escribio al reservar online.
+            'notas' => array_key_exists('notas', $data) ? $data['notas'] : $turno->notas,
         ]);
 
         $turno->servicios()->sync($data['servicio_ids']);
