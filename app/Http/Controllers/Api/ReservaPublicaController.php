@@ -128,7 +128,7 @@ class ReservaPublicaController extends Controller
             // Lo cobrado, no el neto que pidio el negocio (ver
             // MercadoPagoService::montoACobrar) — tiene que coincidir con lo
             // que ya vio en Resumen/terminos antes de pagar.
-            'deposito' => $this->monto($this->mercadoPago->montoACobrar((float) ($user->sena_monto ?? 0))),
+            'deposito' => $this->monto($this->mercadoPago->montoACobrar((float) ($user->sena_monto ?? 0), $user)),
             'nota' => $reserva->nota,
         ];
         if ($reserva->tramos !== null) {

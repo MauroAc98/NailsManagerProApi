@@ -86,7 +86,7 @@ class PublicController extends Controller
             // Lo que se le cobra a la clienta, no el neto que pidió el
             // negocio — tiene que coincidir con lo que ve en el checkout de
             // MP (ver MercadoPagoService::montoACobrar).
-            'deposito' => $mercadoPago->montoACobrar((float) ($user->sena_monto ?? 0)),
+            'deposito' => $mercadoPago->montoACobrar((float) ($user->sena_monto ?? 0), $user),
             'ventana_pago_minutos' => (int) config('reservas.pago_minutos'),
             'anticipacion_minutos' => (int) config('reservas.anticipacion_minutos'),
             'ventana_cancelacion_horas' => (int) config('reservas.cancelacion_horas'),
