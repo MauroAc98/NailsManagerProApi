@@ -152,4 +152,14 @@ class ReprogramacionNotificacionTest extends AdminContractTestCase
         $this->assertSame(1, WhatsappMensaje::where('tipo', 'recordatorio')->count());
         Http::assertSentCount(1);
     }
+
+    public function test_un_job_encolado_antes_del_deploy_sin_tipo_sigue_siendo_una_confirmacion(): void
+    {
+        // unserialize() crea el objeto sin pasar por el constructor: una propiedad
+        // tipada sin valor por defecto de clase queda sin inicializar y leerla tira
+        // Error. Un job serializado antes de que existiera `tipo` no puede romperse.
+        $job = (new \ReflectionClass(EnviarMensajeConfirmacion::class))->newInstanceWithoutConstructor();
+
+        $this->assertSame('confirmacion', $job->tipo);
+    }
 }
