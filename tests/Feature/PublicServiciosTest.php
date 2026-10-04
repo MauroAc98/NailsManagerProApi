@@ -20,7 +20,38 @@ class PublicServiciosTest extends TestCase
         $profesional ??= \App\Models\Profesional::where('user_id', $user->id)->where('activo', true)->first()
             ?? $this->crearProfesional($user, 'Ana');
 
+        // ...y que tenga horarios cargados: sin slots nunca tendria un turno libre.
+        if (! \App\Models\SlotDisponible::where('profesional_id', $profesional->id)->exists()) {
+            $this->crearSlot($user, $profesional, '10:00');
+        }
+
         return $this->crearServicio($user, $nombre, $duracion, $activo, $profesional);
+    }
+
+    public function test_no_lista_un_servicio_que_solo_ofrece_una_profesional_sin_horarios(): void
+    {
+        $user = $this->crearSalon();
+        $sinHorarios = $this->crearProfesional($user, 'Sin horarios');
+        $servicio = $this->crearServicio($user, 'Sin turnos posibles', 30, true, $sinHorarios);
+
+        $ids = collect($this->getJson("/api/public/{$user->slug}/servicios")->assertOk()->json())->pluck('id');
+
+        $this->assertFalse($ids->contains($servicio->id));
+    }
+
+    public function test_los_slots_legacy_sin_profesional_cuentan_para_la_activa_mas_antigua(): void
+    {
+        $user = $this->crearSalon();
+        $primera = $this->crearProfesional($user, 'Primera');
+        $segunda = $this->crearProfesional($user, 'Segunda');
+        $this->crearSlot($user, null, '10:00');
+        $deLaPrimera = $this->crearServicio($user, 'De la primera', 30, true, $primera);
+        $deLaSegunda = $this->crearServicio($user, 'De la segunda', 30, true, $segunda);
+
+        $ids = collect($this->getJson("/api/public/{$user->slug}/servicios")->assertOk()->json())->pluck('id');
+
+        $this->assertTrue($ids->contains($deLaPrimera->id));
+        $this->assertFalse($ids->contains($deLaSegunda->id));
     }
 
     public function test_no_lista_un_servicio_que_ninguna_profesional_ofrece(): void

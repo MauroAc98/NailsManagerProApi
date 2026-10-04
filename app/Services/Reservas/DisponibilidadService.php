@@ -344,6 +344,28 @@ class DisponibilidadService
     }
 
     /**
+     * Ids de las profesionales activas con al menos un slot activo: sin slots
+     * nunca tienen un turno libre, asi que ofrecerlas en la reserva online no se
+     * puede concretar. Los slots legacy (sin profesional) cuentan para la activa
+     * mas antigua, igual que en slotsPorProfesional().
+     *
+     * @return array<int, int>
+     */
+    public function idsConHorarios(User $user): array
+    {
+        $activas = Profesional::where('user_id', $user->id)->where('activo', true)->orderBy('id')->pluck('id')->all();
+        if ($activas === []) {
+            return [];
+        }
+        $porDefecto = $activas[0];
+
+        $conSlot = SlotDisponible::where('user_id', $user->id)->activos()->distinct()->pluck('profesional_id')
+            ->map(fn ($id) => $id ?? $porDefecto)->all();
+
+        return array_values(array_intersect($activas, $conSlot));
+    }
+
+    /**
      * Horas 'HH:MM' de los slots activos de UNA profesional (mismas reglas que
      * la disponibilidad: los slots legacy sin profesional van a la por defecto).
      *

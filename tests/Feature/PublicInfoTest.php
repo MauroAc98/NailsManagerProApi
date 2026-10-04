@@ -16,6 +16,7 @@ class PublicInfoTest extends TestCase
         $user = $this->crearSalon(['is_exempt' => false, 'name' => 'Studio Ana', 'direccion' => 'Av. X 123', 'telefono' => '3765000000']);
         $this->crearSuscripcion($user);
         $ana = $this->crearProfesional($user, 'Ana');
+        $this->crearSlot($user, $ana, '10:00');
         $this->crearProfesional($user, 'Inactiva', false);
 
         $res = $this->getJson("/api/public/{$user->slug}/info")->assertOk();
@@ -27,6 +28,45 @@ class PublicInfoTest extends TestCase
             'profesionales' => [['id' => $ana->id, 'nombre' => 'Ana', 'avatar_url' => null]],
             'pago_habilitado' => false,
         ]);
+    }
+
+    // Una profesional sin horarios cargados nunca tiene un turno libre: ofrecerla
+    // en la reserva online es ofrecer algo que no se puede concretar.
+    public function test_info_no_lista_a_una_profesional_activa_sin_horarios(): void
+    {
+        $user = $this->crearSalon();
+        $ana = $this->crearProfesional($user, 'Ana');
+        $this->crearProfesional($user, 'Sin horarios');
+        $this->crearSlot($user, $ana, '10:00');
+
+        $this->getJson("/api/public/{$user->slug}/info")
+            ->assertOk()
+            ->assertJsonCount(1, 'profesionales')
+            ->assertJsonPath('profesionales.0.id', $ana->id);
+    }
+
+    public function test_info_cuenta_los_slots_legacy_sin_profesional_para_la_activa_mas_antigua(): void
+    {
+        $user = $this->crearSalon();
+        $primera = $this->crearProfesional($user, 'Primera');
+        $this->crearProfesional($user, 'Segunda');
+        $this->crearSlot($user, null, '10:00');
+
+        $this->getJson("/api/public/{$user->slug}/info")
+            ->assertOk()
+            ->assertJsonCount(1, 'profesionales')
+            ->assertJsonPath('profesionales.0.id', $primera->id);
+    }
+
+    public function test_info_no_cuenta_slots_inactivos(): void
+    {
+        $user = $this->crearSalon();
+        $ana = $this->crearProfesional($user, 'Ana');
+        $this->crearSlot($user, $ana, '10:00', false);
+
+        $this->getJson("/api/public/{$user->slug}/info")
+            ->assertOk()
+            ->assertJsonCount(0, 'profesionales');
     }
 
     public function test_pago_habilitado_es_false_sin_credenciales_de_mp_aunque_tenga_sena_configurada(): void
@@ -62,6 +102,7 @@ class PublicInfoTest extends TestCase
     {
         $user = $this->crearSalon();
         $ana = $this->crearProfesional($user, 'Ana');
+        $this->crearSlot($user, $ana, '10:00');
         $ana->update(['avatar_path' => 'avatars/ana.jpg']);
 
         $res = $this->getJson("/api/public/{$user->slug}/info")->assertOk();

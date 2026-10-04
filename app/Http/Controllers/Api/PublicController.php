@@ -43,12 +43,15 @@ class PublicController extends Controller
     // GET /api/public/{slug}/info
     // Datos públicos del estudio
     // ─────────────────────────────────────────────
-    public function info(string $slug): JsonResponse
+    public function info(string $slug, DisponibilidadService $disponibilidad): JsonResponse
     {
         $user = $this->getProfesional($slug);
 
+        // Solo las que tienen horarios cargados: sin slots nunca tienen un turno
+        // libre, y mostrarlas ofrece algo que no se puede concretar.
         $profesionales = $user->profesionales()
             ->where('activo', true)
+            ->whereIn('id', $disponibilidad->idsConHorarios($user))
             ->orderBy('id')
             ->get(['id', 'nombre', 'avatar_path'])
             ->map(fn ($p) => ['id' => $p->id, 'nombre' => $p->nombre, 'avatar_url' => $p->avatar_url])
@@ -114,7 +117,7 @@ class PublicController extends Controller
     // GET /api/public/{slug}/servicios
     // Lista de servicios activos del estudio
     // ─────────────────────────────────────────────
-    public function servicios(Request $request, string $slug): JsonResponse
+    public function servicios(Request $request, string $slug, DisponibilidadService $disponibilidad): JsonResponse
     {
         $user = $this->getProfesional($slug);
 
@@ -133,11 +136,12 @@ class PublicController extends Controller
         // Una promo componentizada fija a la profesional de cada componente: si
         // alguna esta inactiva, ya no ofrece ese servicio o el servicio esta
         // inactivo, la promo no se puede reservar y no se lista.
-        $activas = Profesional::where('user_id', $user->id)->where('activo', true)->pluck('id')->all();
+        // Solo cuentan las que tienen horarios: sin slots no hay turno posible.
+        $activas = $disponibilidad->idsConHorarios($user);
         $ofrecidos = DB::table('profesional_servicio')->get(['profesional_id', 'servicio_id'])
             ->map(fn ($r) => "{$r->profesional_id}:{$r->servicio_id}")->flip();
         $serviciosActivos = Servicio::where('user_id', $user->id)->where('activo', true)->pluck('id')->flip();
-        // Servicios que al menos una profesional activa ofrece: sin eso, elegirlo
+        // Servicios que al menos una profesional con horarios ofrece: sin eso, elegirlo
         // no tiene como concretarse (nadie lo atiende).
         $conProfesional = DB::table('profesional_servicio')->whereIn('profesional_id', $activas)->pluck('servicio_id')->flip();
 

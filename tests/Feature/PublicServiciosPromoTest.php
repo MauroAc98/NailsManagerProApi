@@ -28,6 +28,8 @@ class PublicServiciosPromoTest extends TestCase
         $this->user = $this->crearSalon();
         $this->ana = $this->crearProfesional($this->user, 'Ana');
         $this->laura = $this->crearProfesional($this->user, 'Laura');
+        $this->crearSlot($this->user, $this->ana, '10:00');
+        $this->crearSlot($this->user, $this->laura, '10:00');
         $this->softgel = $this->crearServicio($this->user, 'Softgel', 60, true, $this->ana);
         $this->semis = $this->crearServicio($this->user, 'Semis pies', 45, true, $this->laura);
         $this->promo = Servicio::create([
@@ -65,6 +67,13 @@ class PublicServiciosPromoTest extends TestCase
     public function test_la_promo_no_se_lista_si_una_profesional_componente_esta_inactiva(): void
     {
         $this->laura->update(['activo' => false]);
+
+        $this->assertArrayNotHasKey($this->promo->id, $this->listado());
+    }
+
+    public function test_la_promo_no_se_lista_si_una_profesional_componente_no_tiene_horarios(): void
+    {
+        \App\Models\SlotDisponible::where('profesional_id', $this->laura->id)->delete();
 
         $this->assertArrayNotHasKey($this->promo->id, $this->listado());
     }
