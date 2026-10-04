@@ -139,8 +139,8 @@ class PublicController extends Controller
         $serviciosActivos = Servicio::where('user_id', $user->id)->where('activo', true)->pluck('id')->flip();
 
         $servicios = $query
-            ->with(['fotos', 'componentes'])
-            ->get(['id', 'nombre', 'duracion_minutos', 'precio', 'categoria_id', 'orden', 'es_promo'])
+            ->with(['fotos', 'componentes.componenteServicio:id,nombre', 'componentes.profesional:id,nombre'])
+            ->get(['id', 'nombre', 'duracion_minutos', 'precio', 'categoria_id', 'orden', 'es_promo', 'modo_promo'])
             ->filter(fn ($s) => ! $s->es_promo || $s->componentes->every(
                 fn ($c) => in_array($c->profesional_id, $activas, true)
                     && isset($ofrecidos["{$c->profesional_id}:{$c->componente_servicio_id}"])
@@ -154,21 +154,34 @@ class PublicController extends Controller
                 fn ($a, $b) => $a->orden <=> $b->orden,
                 fn ($a, $b) => $a->id <=> $b->id,
             ])
-            ->map(fn ($s) => [
-                'id' => $s->id,
-                'nombre' => $s->nombre,
-                'duracion_minutos' => (int) $s->duracion_minutos,
-                'precio' => $s->precio + 0,
-                // Promo con componentes: las profesionales las fija la promo, la
-                // clienta no elige (y se reserva sola, no combinada con otros).
-                'es_promo_componentizada' => $s->es_promo && $s->componentes->isNotEmpty(),
-                'categoria' => isset($categorias[$s->categoria_id])
-                    ? ['id' => $s->categoria_id, 'nombre' => $categorias[$s->categoria_id]]
-                    : null,
-                // Solo URLs planas, ordenadas — nunca el 'id' de la fila ni
-                // la 'path' relativa del disco (ver ServicioFoto::url).
-                'fotos' => $s->fotos->pluck('url')->values(),
-            ])
+            ->map(function ($s) use ($categorias) {
+                $componentizada = $s->es_promo && $s->componentes->isNotEmpty();
+
+                return [
+                    'id' => $s->id,
+                    'nombre' => $s->nombre,
+                    'duracion_minutos' => (int) $s->duracion_minutos,
+                    'precio' => $s->precio + 0,
+                    // Promo con componentes: las profesionales las fija la promo, la
+                    // clienta no elige (y se reserva sola, no combinada con otros).
+                    'es_promo_componentizada' => $componentizada,
+                    'categoria' => isset($categorias[$s->categoria_id])
+                        ? ['id' => $s->categoria_id, 'nombre' => $categorias[$s->categoria_id]]
+                        : null,
+                    // Solo URLs planas, ordenadas — nunca el 'id' de la fila ni
+                    // la 'path' relativa del disco (ver ServicioFoto::url).
+                    'fotos' => $s->fotos->pluck('url')->values(),
+                ] + ($componentizada ? [
+                    // Detalle para mostrar en la tarjeta: solo nombres (sin ids) y
+                    // en orden de ejecucion. Sin modo guardado rige la secuencia.
+                    'modo_promo' => $s->modo_promo,
+                    'componentes' => $s->componentes->map(fn ($c) => [
+                        'servicio_nombre' => $c->componenteServicio->nombre,
+                        'profesional_nombre' => $c->profesional->nombre,
+                        'orden' => $c->orden,
+                    ])->values(),
+                ] : []);
+            })
             ->values();
 
         return response()->json($servicios);

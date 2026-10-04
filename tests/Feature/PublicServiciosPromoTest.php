@@ -81,4 +81,69 @@ class PublicServiciosPromoTest extends TestCase
 
         $this->assertArrayNotHasKey($this->promo->id, $this->listado());
     }
+
+    public function test_la_promo_trae_modo_y_componentes_ordenados_con_nombres_sin_ids(): void
+    {
+        $item = $this->listado()[$this->promo->id];
+
+        $this->assertSame('secuencia', $item['modo_promo']);
+        $this->assertSame([
+            ['servicio_nombre' => 'Softgel', 'profesional_nombre' => 'Ana', 'orden' => 1],
+            ['servicio_nombre' => 'Semis pies', 'profesional_nombre' => 'Laura', 'orden' => 2],
+        ], $item['componentes']);
+    }
+
+    public function test_los_componentes_salen_ordenados_por_orden_aunque_se_hayan_creado_al_reves(): void
+    {
+        $promo = Servicio::create([
+            'user_id' => $this->user->id, 'nombre' => 'Promo al reves', 'duracion_minutos' => 60,
+            'precio' => 10000, 'activo' => true, 'es_promo' => true, 'modo_promo' => 'paralelo',
+        ]);
+        $promo->componentes()->create(['componente_servicio_id' => $this->semis->id, 'profesional_id' => $this->laura->id, 'orden' => 2]);
+        $promo->componentes()->create(['componente_servicio_id' => $this->softgel->id, 'profesional_id' => $this->ana->id, 'orden' => 1]);
+
+        $item = $this->listado()[$promo->id];
+
+        $this->assertSame('paralelo', $item['modo_promo']);
+        $this->assertSame(['Softgel', 'Semis pies'], array_column($item['componentes'], 'servicio_nombre'));
+    }
+
+    public function test_modo_promo_nulo_se_informa_como_null(): void
+    {
+        $this->promo->update(['modo_promo' => null]);
+
+        $this->assertNull($this->listado()[$this->promo->id]['modo_promo']);
+    }
+
+    public function test_un_servicio_comun_y_una_promo_legacy_conservan_su_forma_sin_detalle_de_promo(): void
+    {
+        $legacy = Servicio::create([
+            'user_id' => $this->user->id, 'nombre' => 'Promo vieja', 'duracion_minutos' => 60,
+            'precio' => 9000, 'activo' => true, 'es_promo' => true,
+        ]);
+        $lista = $this->listado();
+
+        foreach ([$this->softgel->id, $legacy->id] as $id) {
+            $this->assertArrayNotHasKey('componentes', $lista[$id]);
+            $this->assertArrayNotHasKey('modo_promo', $lista[$id]);
+        }
+    }
+
+    public function test_el_listado_no_hace_consultas_por_componente(): void
+    {
+        \DB::enableQueryLog();
+        $this->listado();
+        $antes = count(\DB::getQueryLog());
+
+        $extra = Servicio::create([
+            'user_id' => $this->user->id, 'nombre' => 'Otra promo', 'duracion_minutos' => 60,
+            'precio' => 10000, 'activo' => true, 'es_promo' => true, 'modo_promo' => 'secuencia',
+        ]);
+        $extra->componentes()->create(['componente_servicio_id' => $this->softgel->id, 'profesional_id' => $this->ana->id, 'orden' => 1]);
+        $extra->componentes()->create(['componente_servicio_id' => $this->semis->id, 'profesional_id' => $this->laura->id, 'orden' => 2]);
+
+        \DB::flushQueryLog();
+        $this->listado();
+        $this->assertSame($antes, count(\DB::getQueryLog()));
+    }
 }
