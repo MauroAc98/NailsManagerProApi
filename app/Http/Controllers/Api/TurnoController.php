@@ -90,6 +90,7 @@ class TurnoController extends Controller
             return $turno;
         });
         $this->adjuntarGrupos($turnos);
+        Turno::adjuntarSena($turnos);
 
         return response()->json($turnos);
     }
@@ -109,6 +110,7 @@ class TurnoController extends Controller
         $turno->confirmacion_whatsapp_status = optional($turno->whatsappMensajes->first())->status;
         $turno->makeHidden('whatsappMensajes');
         $this->adjuntarGrupos(collect([$turno]));
+        Turno::adjuntarSena([$turno]);
 
         return response()->json($turno);
     }
@@ -367,7 +369,7 @@ class TurnoController extends Controller
         // Disparar mensaje de confirmación por WhatsApp (en cola, no bloqueante)
         EnviarMensajeConfirmacion::dispatch($turno->id);
 
-        return response()->json($turno->load(['cliente', 'servicios']), 201);
+        return response()->json($this->conSena($turno->load(['cliente', 'servicios'])), 201);
     }
 
     /**
@@ -426,6 +428,7 @@ class TurnoController extends Controller
         EnviarMensajeConfirmacion::dispatch($resultado->id);
         $resultado->load(['cliente', 'servicios']);
         $this->adjuntarGrupos(collect([$resultado]));
+        Turno::adjuntarSena([$resultado]);
 
         return response()->json($resultado, 201);
     }
@@ -584,7 +587,7 @@ class TurnoController extends Controller
                 ->delete();
         }
 
-        return response()->json($turno->load(['cliente', 'servicios']));
+        return response()->json($this->conSena($turno->load(['cliente', 'servicios'])));
     }
 
     public function destroy(Request $request, int $id): JsonResponse
@@ -663,6 +666,14 @@ class TurnoController extends Controller
      * los turnos agrupados (uno por tramo, en orden de creacion, cancelados
      * incluidos con su estado). Los turnos legacy no ganan ninguna clave.
      */
+    /** Single-turno variant of Turno::adjuntarSena() for write responses. */
+    private function conSena(Turno $turno): Turno
+    {
+        Turno::adjuntarSena([$turno]);
+
+        return $turno;
+    }
+
     private function adjuntarGrupos($turnos): void
     {
         $ids = $turnos->pluck('grupo_id')->filter()->unique()->values();
@@ -756,7 +767,7 @@ class TurnoController extends Controller
             }
         });
 
-        return response()->json($turno->load(['cliente', 'servicios']));
+        return response()->json($this->conSena($turno->load(['cliente', 'servicios'])));
     }
 
     // ── Mismo criterio que la "Regla -0.5" de store()/update(): un
@@ -837,7 +848,7 @@ class TurnoController extends Controller
             );
         });
 
-        return response()->json($turno->load(['cliente', 'servicios']));
+        return response()->json($this->conSena($turno->load(['cliente', 'servicios'])));
     }
 
     // Ventana de "pendientes de cobro" — sin esto la query trae TODOS los
@@ -866,6 +877,7 @@ class TurnoController extends Controller
             ->get()
             ->filter(fn (Turno $t) => $t->servicios->contains(fn ($s) => is_null($s->pivot->precio)))
             ->values();
+        Turno::adjuntarSena($turnos);
 
         return response()->json($turnos);
     }
@@ -891,6 +903,7 @@ class TurnoController extends Controller
             ->get()
             ->filter(fn (Turno $t) => ! empty($t->cliente?->telefono))
             ->values();
+        Turno::adjuntarSena($turnos);
 
         return response()->json($turnos);
     }
@@ -925,6 +938,7 @@ class TurnoController extends Controller
 
                 return $t;
             });
+        Turno::adjuntarSena($turnos);
 
         return response()->json($turnos);
     }

@@ -93,6 +93,52 @@ class Turno extends Model
         return $this->origen === 'web';
     }
 
+    /**
+     * Adds the additive `sena` key to the serialised turnos (agenda "Cobros").
+     *
+     * `sena` is null when the turno has no reserva web or that reserva has no
+     * PagoSena; otherwise { monto, estado, reserva_web_id }. `monto` is what
+     * the client was CHARGED (stored PagoSena.monto, including the Mercado
+     * Pago commission/retention gross-up and rounding), NOT the net seña the
+     * salon configured. `estado` is the raw value; only 'aprobado' means paid
+     * ('pendiente', 'rechazado', 'expirado' are exposed as-is for the UI to
+     * decide). No paid-at key: pagos_sena has no dedicated timestamp.
+     *
+     * The seña is RESERVATION-level: every turno of a combo/grupo shares one
+     * reserva_web and therefore one PagoSena, so each of them carries the same
+     * object (same reserva_web_id). Consumers summing across turnos must
+     * de-duplicate by reserva_web_id.
+     *
+     * Explicit (not an $appends accessor) so serialising a Turno elsewhere
+     * (jobs, reports) never lazy-loads. Eager-loads reservaWeb.pagoSena once
+     * for the whole collection (constant queries) and keeps the payload
+     * otherwise unchanged: pago_sena is hidden from a nested reserva_web, and
+     * reserva_web is hidden if the caller had not loaded it.
+     *
+     * @param  iterable<Turno>  $turnos
+     */
+    public static function adjuntarSena(iterable $turnos): void
+    {
+        $coleccion = \Illuminate\Database\Eloquent\Collection::make($turnos);
+        $yaCargado = $coleccion->mapWithKeys(fn (Turno $t) => [$t->id => $t->relationLoaded('reservaWeb')]);
+
+        $coleccion->loadMissing('reservaWeb.pagoSena');
+
+        foreach ($coleccion as $turno) {
+            $pago = $turno->reservaWeb?->pagoSena;
+            $turno->setAttribute('sena', $pago === null ? null : [
+                'monto' => (float) $pago->monto,
+                'estado' => $pago->estado,
+                'reserva_web_id' => $pago->reserva_web_id,
+            ]);
+
+            $turno->reservaWeb?->makeHidden('pagoSena');
+            if (! $yaCargado[$turno->id]) {
+                $turno->makeHidden('reservaWeb');
+            }
+        }
+    }
+
     // ── Relaciones ───────────────────────────────────────────────
     public function user()
     {
