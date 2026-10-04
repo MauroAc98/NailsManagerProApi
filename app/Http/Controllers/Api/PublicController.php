@@ -16,6 +16,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 class PublicController extends Controller
 {
@@ -129,9 +130,22 @@ class PublicController extends Controller
         // Solo categorias del propio salon (nunca se filtra la de otro tenant).
         $categorias = CategoriaServicio::where('user_id', $user->id)->pluck('nombre', 'id');
 
+        // Una promo componentizada fija a la profesional de cada componente: si
+        // alguna esta inactiva, ya no ofrece ese servicio o el servicio esta
+        // inactivo, la promo no se puede reservar y no se lista.
+        $activas = Profesional::where('user_id', $user->id)->where('activo', true)->pluck('id')->all();
+        $ofrecidos = DB::table('profesional_servicio')->get(['profesional_id', 'servicio_id'])
+            ->map(fn ($r) => "{$r->profesional_id}:{$r->servicio_id}")->flip();
+        $serviciosActivos = Servicio::where('user_id', $user->id)->where('activo', true)->pluck('id')->flip();
+
         $servicios = $query
-            ->with('fotos')
-            ->get(['id', 'nombre', 'duracion_minutos', 'precio', 'categoria_id', 'orden'])
+            ->with(['fotos', 'componentes'])
+            ->get(['id', 'nombre', 'duracion_minutos', 'precio', 'categoria_id', 'orden', 'es_promo'])
+            ->filter(fn ($s) => ! $s->es_promo || $s->componentes->every(
+                fn ($c) => in_array($c->profesional_id, $activas, true)
+                    && isset($ofrecidos["{$c->profesional_id}:{$c->componente_servicio_id}"])
+                    && isset($serviciosActivos[$c->componente_servicio_id]),
+            ))
             // Mismo orden que la lista del salon: categoria alfabetica, luego
             // orden/id; sin categoria al final.
             ->sortBy([
@@ -145,6 +159,9 @@ class PublicController extends Controller
                 'nombre' => $s->nombre,
                 'duracion_minutos' => (int) $s->duracion_minutos,
                 'precio' => $s->precio + 0,
+                // Promo con componentes: las profesionales las fija la promo, la
+                // clienta no elige (y se reserva sola, no combinada con otros).
+                'es_promo_componentizada' => $s->es_promo && $s->componentes->isNotEmpty(),
                 'categoria' => isset($categorias[$s->categoria_id])
                     ? ['id' => $s->categoria_id, 'nombre' => $categorias[$s->categoria_id]]
                     : null,

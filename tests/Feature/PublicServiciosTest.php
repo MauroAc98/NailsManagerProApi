@@ -22,7 +22,7 @@ class PublicServiciosTest extends TestCase
         $this->getJson("/api/public/{$user->slug}/servicios")
             ->assertOk()
             ->assertExactJson([
-                ['id' => $activo->id, 'nombre' => 'Esmaltado', 'duracion_minutos' => 45, 'precio' => 12000, 'categoria' => null, 'fotos' => []],
+                ['id' => $activo->id, 'nombre' => 'Esmaltado', 'duracion_minutos' => 45, 'precio' => 12000, 'es_promo_componentizada' => false, 'categoria' => null, 'fotos' => []],
             ]);
     }
 
