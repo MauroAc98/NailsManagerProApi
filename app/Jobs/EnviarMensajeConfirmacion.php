@@ -31,10 +31,17 @@ class EnviarMensajeConfirmacion implements ShouldQueue
     // `tipo` = 'confirmacion' (default, alta de turno) o 'reprogramacion' (aviso
     // de cambio de horario de un grupo, PR 6f): misma plantilla `confirmacion`,
     // distinto registro en whatsapp_mensajes y sin la variante de seña.
+    // Declarada con valor por defecto de clase (no promovida): un job serializado
+    // antes de que existiera `tipo` se deserializa sin pasar por el constructor y
+    // tiene que quedar como 'confirmacion' en vez de una propiedad sin inicializar.
+    public string $tipo = 'confirmacion';
+
     public function __construct(
         public int $turnoId,
-        public string $tipo = 'confirmacion',
-    ) {}
+        string $tipo = 'confirmacion',
+    ) {
+        $this->tipo = $tipo;
+    }
 
     /**
      * Motivo por el que NO se mandaria el mensaje a este turno (null = se manda).
