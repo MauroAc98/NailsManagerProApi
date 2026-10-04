@@ -141,6 +141,27 @@ class DisponibilidadServiceTest extends TestCase
         $this->assertSame(['09:00'], $this->horas($this->calcular([$a, $b], $ana)));
     }
 
+    public function test_no_ofrece_inicios_cuyo_turno_termina_despues_de_medianoche(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $s = $this->crearServicio($this->user, 'Largo', 450, true, $ana); // 7 h 30 min
+        foreach (['09:00', '16:30', '17:00', '19:00'] as $h) {
+            $this->crearSlot($this->user, $ana, $h);
+        }
+
+        // 16:30 termina justo a las 24:00 (entra); 17:00 y 19:00 terminan de madrugada del dia siguiente.
+        $this->assertSame(['09:00', '16:30'], $this->horas($this->calcular([$s], $ana)));
+    }
+
+    public function test_estaLibre_rechaza_un_turno_que_cruza_la_medianoche(): void
+    {
+        $ana = $this->crearProfesional($this->user, 'Ana');
+        $servicio = new DisponibilidadService();
+
+        $this->assertTrue($servicio->estaLibre($ana->id, self::FECHA, '16:30', 450, $this->ahora()));
+        $this->assertFalse($servicio->estaLibre($ana->id, self::FECHA, '19:00', 450, $this->ahora()));
+    }
+
     public function test_turnos_cancelados_no_bloquean(): void
     {
         $ana = $this->crearProfesional($this->user, 'Ana');
