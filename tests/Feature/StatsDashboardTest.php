@@ -349,6 +349,38 @@ class StatsDashboardTest extends TestCase
         $this->assertSame(250, (int) $porCategoria->firstWhere('categoria', 'otros')['monto']);
     }
 
+    public function test_desglose_de_ingresos_otros_usa_las_categorias_propias_y_suma_el_total(): void
+    {
+        $user = User::factory()->create([
+            'is_exempt' => true,
+            'categorias_ingreso' => ['Venta de esmaltes', 'Cursos', 'Otros'],
+        ]);
+
+        Ingreso::create(['user_id' => $user->id, 'fecha' => '2026-07-10', 'monto' => 400, 'categoria' => 'Venta de esmaltes']);
+        Ingreso::create(['user_id' => $user->id, 'fecha' => '2026-07-11', 'monto' => 100, 'categoria' => 'Venta de esmaltes']);
+        // Categoría que el salón ya renombró o borró: sus ingresos viejos siguen existiendo.
+        Ingreso::create(['user_id' => $user->id, 'fecha' => '2026-07-12', 'monto' => 70, 'categoria' => 'venta_productos']);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/stats/dashboard?desde=2026-07-01&hasta=2026-07-31')
+            ->assertOk();
+
+        $porCategoria = collect($response->json('ingresos_otros_por_categoria'));
+
+        $this->assertSame(
+            ['Venta de esmaltes', 'Cursos', 'Otros', 'venta_productos'],
+            $porCategoria->pluck('categoria')->all()
+        );
+        $this->assertSame(500, (int) $porCategoria->firstWhere('categoria', 'Venta de esmaltes')['monto']);
+        $this->assertSame(0, (int) $porCategoria->firstWhere('categoria', 'Cursos')['monto']);
+        $this->assertSame(70, (int) $porCategoria->firstWhere('categoria', 'venta_productos')['monto']);
+        // El desglose siempre tiene que sumar el total.
+        $this->assertSame(
+            (int) $response->json('ingresos_otros'),
+            (int) $porCategoria->sum('monto')
+        );
+    }
+
     public function test_ganancia_neta_recalculada_con_ingresos_agenda_mas_otros_menos_gastos(): void
     {
         $user = User::factory()->create(['is_exempt' => true]);
