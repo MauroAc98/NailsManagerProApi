@@ -176,13 +176,19 @@ class StatsController extends Controller
 
         return [
             'total' => (float) $ingresos->sum('monto'),
-            'por_categoria' => $this->ingresosPorCategoria($ingresos),
+            'por_categoria' => $this->ingresosPorCategoria($ingresos, $user->categorias_ingreso),
         ];
     }
 
-    private function ingresosPorCategoria($ingresos): array
+    // Las categorías de ingreso las edita cada salón (User::categorias_ingreso,
+    // que cae al set de fábrica si nunca las tocó). Además se agregan las que
+    // aparecen en los ingresos del rango pero ya no están en esa lista (el
+    // salón las renombró o borró): sin ellas el desglose no sumaría el total.
+    private function ingresosPorCategoria($ingresos, array $categoriasDelSalon): array
     {
-        return collect(Ingreso::CATEGORIAS)
+        return collect($categoriasDelSalon)
+            ->merge($ingresos->pluck('categoria'))
+            ->unique()
             ->map(fn (string $categoria) => [
                 'categoria' => $categoria,
                 'monto' => (float) $ingresos->where('categoria', $categoria)->sum('monto'),
