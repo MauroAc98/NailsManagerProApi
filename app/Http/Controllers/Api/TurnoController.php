@@ -329,42 +329,46 @@ class TurnoController extends Controller
         }
 
         // ── Regla 3: choque de horario ───────────────────────────
+        // El chequeo y el insert van bajo el mismo lock por profesional que usa
+        // la confirmación online: sin él, dos dispositivos (o la dueña y una
+        // reserva online pagada) pasaban el chequeo a la vez y se pisaban.
         $duracionTotal = $servicios->sum('duracion_minutos');
-        $turnoChocado = $this->verificarChoque($profesional->id, $data['fecha_hora'], $duracionTotal);
 
-        if ($turnoChocado) {
-            $nombreCliente = $turnoChocado->cliente
-                ? trim("{$turnoChocado->cliente->nombre} {$turnoChocado->cliente->apellido}")
-                : 'otro cliente';
-            $serviciosChoque = $turnoChocado->servicios->pluck('nombre')->join(' + ');
-            $horaChoque = Carbon::parse($turnoChocado->fecha_hora)->format('H:i');
-            $finChoque = Carbon::parse($turnoChocado->fecha_hora)
-                ->addMinutes($turnoChocado->duracion_total_minutos)
-                ->format('H:i');
+        $resultado = app(SlotLock::class)->conLock($profesional->id, function () use ($profesional, $data, $duracionTotal, $fechaHora, $user, $cliente) {
+            $turnoChocado = $this->verificarChoque($profesional->id, $data['fecha_hora'], $duracionTotal);
 
-            return response()->json([
-                'message' => "Las {$fechaHora->format('H:i')} cae dentro del turno de {$nombreCliente} ({$serviciosChoque}, {$horaChoque} - {$finChoque}). Elegí otro horario.",
-            ], 422);
+            if ($turnoChocado) {
+                return response()->json([
+                    'message' => $this->mensajeChoque($turnoChocado, $fechaHora),
+                ], 422);
+            }
+
+            if ($this->hayHoldVivo($profesional->id, $data['fecha_hora'], $duracionTotal)) {
+                return $this->respuestaHoldVivo();
+            }
+
+            // ── Crear turno ──────────────────────────────────────
+            $turno = Turno::create([
+                'user_id' => $user->id,
+                'profesional_id' => $profesional->id,
+                'cliente_id' => $cliente->id,
+                'reserva_web_id' => null,
+                'fecha_hora' => $data['fecha_hora'],
+                'duracion_total_minutos' => $duracionTotal,
+                'estado' => 'confirmado',
+                'origen' => 'app',
+                'notas' => $data['notas'] ?? null,
+            ]);
+
+            $turno->servicios()->attach($data['servicio_ids']);
+
+            return $turno;
+        });
+
+        if ($resultado instanceof JsonResponse) {
+            return $resultado;
         }
-
-        if ($this->hayHoldVivo($profesional->id, $data['fecha_hora'], $duracionTotal)) {
-            return $this->respuestaHoldVivo();
-        }
-
-        // ── Crear turno ──────────────────────────────────────────
-        $turno = Turno::create([
-            'user_id' => $user->id,
-            'profesional_id' => $profesional->id,
-            'cliente_id' => $cliente->id,
-            'reserva_web_id' => null,
-            'fecha_hora' => $data['fecha_hora'],
-            'duracion_total_minutos' => $duracionTotal,
-            'estado' => 'confirmado',
-            'origen' => 'app',
-            'notas' => $data['notas'] ?? null,
-        ]);
-
-        $turno->servicios()->attach($data['servicio_ids']);
+        $turno = $resultado;
 
         // Disparar mensaje de confirmación por WhatsApp (en cola, no bloqueante)
         EnviarMensajeConfirmacion::dispatch($turno->id);
@@ -492,7 +496,10 @@ class TurnoController extends Controller
         // puede seguir apuntando a la profesional original si se desactivó
         // después de crearlo; bloquear la edición ahí sería peor que dejarla
         // pasar (no se puede completar/cancelar un turno legítimo).
-        $profesional = $this->resolverProfesional($user, $data['profesional_id'] ?? null, false);
+        // Sin profesional_id en el body (clientes viejos que no lo mandan) se
+        // conserva la del turno: antes caía a la profesional más antigua y
+        // movía el turno de agenda sin avisar.
+        $profesional = $this->resolverProfesional($user, $data['profesional_id'] ?? $turno->profesional_id, false);
 
         if (! $profesional) {
             return response()->json([
@@ -541,41 +548,41 @@ class TurnoController extends Controller
         }
 
         // ── Choque de horario ────────────────────────────────────
+        // Mismo lock por profesional que store() y la confirmación online.
         $duracionTotal = $servicios->sum('duracion_minutos');
-        $turnoChocado = $this->verificarChoque($profesional->id, $data['fecha_hora'], $duracionTotal, $id);
-
-        if ($turnoChocado) {
-            $nombreCliente = $turnoChocado->cliente
-                ? trim("{$turnoChocado->cliente->nombre} {$turnoChocado->cliente->apellido}")
-                : 'otro cliente';
-            $serviciosChoque = $turnoChocado->servicios->pluck('nombre')->join(' + ');
-            $horaChoque = Carbon::parse($turnoChocado->fecha_hora)->format('H:i');
-            $finChoque = Carbon::parse($turnoChocado->fecha_hora)
-                ->addMinutes($turnoChocado->duracion_total_minutos)
-                ->format('H:i');
-
-            return response()->json([
-                'message' => "Las {$fechaHora->format('H:i')} cae dentro del turno de {$nombreCliente} ({$serviciosChoque}, {$horaChoque} - {$finChoque}). Elegí otro horario.",
-            ], 422);
-        }
-
-        if ($this->hayHoldVivo($profesional->id, $data['fecha_hora'], $duracionTotal)) {
-            return $this->respuestaHoldVivo();
-        }
-
         $cambioDeFecha = Carbon::parse($turno->fecha_hora)->toDateString() !== $fechaHora->toDateString();
 
-        $turno->update([
-            'cliente_id' => $data['cliente_id'],
-            'profesional_id' => $profesional->id,
-            'fecha_hora' => $data['fecha_hora'],
-            'duracion_total_minutos' => $duracionTotal,
-            // Solo se toca si viene en el body: la pantalla de editar no la manda y
-            // borraria la idea que el cliente escribio al reservar online.
-            'notas' => array_key_exists('notas', $data) ? $data['notas'] : $turno->notas,
-        ]);
+        $bloqueo = app(SlotLock::class)->conLock($profesional->id, function () use ($profesional, $data, $duracionTotal, $fechaHora, $id, $turno) {
+            $turnoChocado = $this->verificarChoque($profesional->id, $data['fecha_hora'], $duracionTotal, $id);
 
-        $turno->servicios()->sync($data['servicio_ids']);
+            if ($turnoChocado) {
+                return response()->json([
+                    'message' => $this->mensajeChoque($turnoChocado, $fechaHora),
+                ], 422);
+            }
+
+            if ($this->hayHoldVivo($profesional->id, $data['fecha_hora'], $duracionTotal)) {
+                return $this->respuestaHoldVivo();
+            }
+
+            $turno->update([
+                'cliente_id' => $data['cliente_id'],
+                'profesional_id' => $profesional->id,
+                'fecha_hora' => $data['fecha_hora'],
+                'duracion_total_minutos' => $duracionTotal,
+                // Solo se toca si viene en el body: la pantalla de editar no la manda y
+                // borraria la idea que el cliente escribio al reservar online.
+                'notas' => array_key_exists('notas', $data) ? $data['notas'] : $turno->notas,
+            ]);
+
+            $turno->servicios()->sync($data['servicio_ids']);
+
+            return null;
+        });
+
+        if ($bloqueo instanceof JsonResponse) {
+            return $bloqueo;
+        }
 
         // Si el turno cambió de fecha, borrar el recordatorio ya enviado (si
         // existe) para que EnviarRecordatorios pueda volver a mandar uno para
@@ -1130,6 +1137,20 @@ class TurnoController extends Controller
     // profesional default de la cuenta (el más antiguo) — este es el
     // mecanismo de backward-compat: la app RN nunca manda profesional_id.
     // ─────────────────────────────────────────────
+    private function mensajeChoque(Turno $turnoChocado, Carbon $fechaHora): string
+    {
+        $nombreCliente = $turnoChocado->cliente
+            ? trim("{$turnoChocado->cliente->nombre} {$turnoChocado->cliente->apellido}")
+            : 'otro cliente';
+        $serviciosChoque = $turnoChocado->servicios->pluck('nombre')->join(' + ');
+        $horaChoque = Carbon::parse($turnoChocado->fecha_hora)->format('H:i');
+        $finChoque = Carbon::parse($turnoChocado->fecha_hora)
+            ->addMinutes($turnoChocado->duracion_total_minutos)
+            ->format('H:i');
+
+        return "Las {$fechaHora->format('H:i')} cae dentro del turno de {$nombreCliente} ({$serviciosChoque}, {$horaChoque} - {$finChoque}). Elegí otro horario.";
+    }
+
     private function resolverProfesional(User $user, ?int $profesionalIdSolicitado, bool $soloActivas = true): ?Profesional
     {
         return Profesional::resolverParaUsuario($user, $profesionalIdSolicitado, $soloActivas);
