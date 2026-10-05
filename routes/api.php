@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\BloqueoAgendaController;
 use App\Http\Controllers\Api\CategoriaServicioController;
 use App\Http\Controllers\Api\ClienteController;
 use App\Http\Controllers\Api\CloudApiWebhookController;
+use App\Http\Controllers\Api\CobrosController;
 use App\Http\Controllers\Api\GastoController;
 use App\Http\Controllers\Api\IngresoController;
 use App\Http\Controllers\Api\MercadoPagoAdminController;
@@ -176,6 +177,9 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
     Route::get('stats/dashboard', [StatsController::class, 'dashboard']);
     Route::get('stats/ganancias-por-periodo', [StatsController::class, 'gananciasPorPeriodo']);
     Route::get('stats/ocupacion', [StatsController::class, 'ocupacion']);
+
+    // Cobros (lista paginada con estado de pago, conteos y totales)
+    Route::get('cobros', [CobrosController::class, 'index']);
 
     // Turnos
     Route::prefix('turnos')->group(function () {
