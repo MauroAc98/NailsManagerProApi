@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Api\Concerns\DecoraListadoDeTurnos;
 use App\Http\Controllers\Controller;
 use App\Jobs\EnviarMensajeConfirmacion;
 use App\Models\BloqueoAgenda;
@@ -30,6 +31,8 @@ use Illuminate\Validation\Rule;
 
 class TurnoController extends Controller
 {
+    use DecoraListadoDeTurnos;
+
     private const MAX_TURNOS_POR_CLIENTE = 2;
 
     public function index(Request $request): JsonResponse
@@ -37,12 +40,7 @@ class TurnoController extends Controller
         $user = $request->user();
         $query = Turno::delUsuario($user)
             ->where('estado', '!=', 'cancelado') // ocultos por defecto — no aparecen en la agenda
-            ->with([
-                'cliente',
-                'servicios',
-                'reservaWeb',
-                'whatsappMensajes' => fn ($q) => $q->where('tipo', 'confirmacion')->latest()->limit(1)->select(['id', 'turno_id', 'status']),
-            ]);
+            ->with($this->relacionesDeListado());
 
         if ($request->filled('fecha')) {
             $query->delaFecha($request->fecha);
@@ -81,17 +79,7 @@ class TurnoController extends Controller
             $query->where('profesional_id', $request->integer('profesional_id'));
         }
 
-        $turnos = $query->orderBy('fecha_hora')->get()->map(function ($turno) {
-            $turno->estado_visual = $this->calcularEstadoVisual($turno);
-            // whatsapp_mensajes trae respuesta_api/message_id/numero — datos internos
-            // que no deben llegar al frontend, así que solo exponemos el status derivado.
-            $turno->confirmacion_whatsapp_status = optional($turno->whatsappMensajes->first())->status;
-            $turno->makeHidden('whatsappMensajes');
-
-            return $turno;
-        });
-        $this->adjuntarGrupos($turnos);
-        Turno::adjuntarSena($turnos);
+        $turnos = $this->decorarListado($query->orderBy('fecha_hora')->get());
 
         return response()->json($turnos);
     }
@@ -717,55 +705,8 @@ class TurnoController extends Controller
         return $turno;
     }
 
-    private function adjuntarGrupos($turnos): void
-    {
-        $ids = $turnos->pluck('grupo_id')->filter()->unique()->values();
-        if ($ids->isEmpty()) {
-            return;
-        }
-        $modos = TurnoGrupo::whereIn('id', $ids)->pluck('modo', 'id');
-        $tramos = Turno::whereIn('grupo_id', $ids)->with('profesional:id,nombre')->orderBy('id')->get()->groupBy('grupo_id');
-
-        foreach ($turnos as $turno) {
-            if ($turno->grupo_id === null) {
-                continue;
-            }
-            $turno->setAttribute('grupo', [
-                'id' => $turno->grupo_id,
-                'modo' => $modos[$turno->grupo_id] ?? null,
-                'tramos' => $tramos[$turno->grupo_id]->map(fn (Turno $t) => [
-                    'turno_id' => $t->id,
-                    'profesional_id' => $t->profesional_id,
-                    'profesional_nombre' => $t->profesional?->nombre,
-                    'fecha_hora' => $t->fecha_hora->format('Y-m-d\TH:i:s'),
-                    'duracion_total_minutos' => $t->duracion_total_minutos,
-                    'estado' => $t->estado,
-                ])->all(),
-            ]);
-        }
-    }
-
-    // ─────────────────────────────────────────────
-    // Helper — agrega "en_curso" como excepción liviana sobre
-    // el estado real. "completado" se persiste (cron o manual),
-    // nunca se calcula al vuelo.
-    // ─────────────────────────────────────────────
-    private function calcularEstadoVisual(Turno $turno): string
-    {
-        if ($turno->estado !== 'confirmado') {
-            return $turno->estado; // completado, cancelado, etc. — ya persistido
-        }
-
-        $ahora = Carbon::now();
-        $inicio = Carbon::parse($turno->fecha_hora);
-        $fin = $inicio->copy()->addMinutes($turno->duracion_total_minutos);
-
-        if ($inicio->lt($ahora) && $fin->gt($ahora)) {
-            return 'en_curso';
-        }
-
-        return 'confirmado';
-    }
+    // adjuntarGrupos() y calcularEstadoVisual() viven en DecoraListadoDeTurnos
+    // (compartidos con GET /cobros).
 
     // ─────────────────────────────────────────────
     // PATCH /api/turnos/{id}/completar
