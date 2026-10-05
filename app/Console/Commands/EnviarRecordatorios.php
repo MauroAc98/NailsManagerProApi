@@ -48,160 +48,181 @@ class EnviarRecordatorios extends Command
 
         $this->info("Profesionales a notificar: {$usuarios->count()}");
 
-        $totalEnviados = 0;
-        $totalFallidos = 0;
+        $this->totalEnviados = 0;
+        $this->totalFallidos = 0;
 
         foreach ($usuarios as $user) {
-            // No seguir mandando mensajes pagos (Cloud API cobra por envío)
-            // a cuentas con la suscripción vencida y sin pagar.
-            if ($user->suscripcionVencida()) {
-                $this->info("  → {$user->name}: suscripción vencida, recordatorios automáticos omitidos");
-
-                continue;
-            }
-
-            if ($user->whatsapp_requiere_envio_manual) {
-                $this->info("  → {$user->name}: requiere envío manual, recordatorios automáticos omitidos");
-
-                $turnosManana = Turno::delUsuario($user)
-                    ->confirmados()
-                    ->delaFecha($manana)
-                    ->whereDoesntHave('whatsappMensajes', fn ($q) => $q->where('tipo', 'recordatorio'))
-                    ->with('cliente')
-                    ->get()
-                    ->filter(fn ($turno) => ! empty($turno->cliente?->telefono));
-
-                if ($turnosManana->isNotEmpty()) {
-                    Mail::to($user->email)->send(new RecordatoriosPendientesMail(
-                        $user->name,
-                        $turnosManana->count(),
-                        rtrim(config('services.frontend_url'), '/').'/agenda/recordatorios',
-                    ));
-                }
-
-                continue;
-            }
-
-            $turnos = Turno::delUsuario($user)
-                ->with(['cliente', 'servicios', 'profesional'])
-                ->confirmados()
-                ->delaFecha($manana)
-                ->whereDoesntHave('whatsappMensajes', fn ($q) => $q->where('tipo', 'recordatorio'))
-                ->get();
-
-            if ($turnos->isEmpty()) {
-                $this->info("  → {$user->name}: sin turnos mañana, omitido");
-
-                continue;
-            }
-
-            $this->info("  → {$user->name}: {$turnos->count()} turno(s)");
-
-            // Un grupo (varias profesionales) recibe UN solo recordatorio: se
-            // saltea si algun tramo ya tiene uno gestionado, o ya se manejo en esta corrida.
-            $gruposAvisados = Turno::whereIn('grupo_id', $turnos->pluck('grupo_id')->filter()->unique())
-                ->whereHas('whatsappMensajes', fn ($q) => $q->where('tipo', 'recordatorio'))
-                ->pluck('grupo_id')->all();
-
-            // Resuelto una vez por negocio, no por turno: cada negocio manda
-            // TODOS sus recordatorios de esta corrida por su propio número
-            // (o el compartido, si no tiene conexión) — nunca mezclado.
-            $credenciales = $user->credencialesWhatsapp();
-
-            foreach ($turnos->sortBy('id') as $turno) {
-                if ($turno->grupo_id !== null) {
-                    if (in_array($turno->grupo_id, $gruposAvisados, true)) {
-                        continue;
-                    }
-                    $gruposAvisados[] = $turno->grupo_id;
-                }
-
-                $cliente = $turno->cliente;
-
-                if (empty($cliente?->telefono)) {
-                    $this->warn("    ⚠ Turno #{$turno->id}: cliente sin teléfono, omitido");
-
-                    continue;
-                }
-
-                if ($cliente->whatsapp_opt_out) {
-                    $this->info("    → {$cliente->nombre} {$cliente->apellido}: dio de baja los recordatorios, omitido");
-
-                    continue;
-                }
-
-                if (! preg_match(self::REGEX_TELEFONO, $cliente->telefono)) {
-                    $this->warn("    ⚠ Turno #{$turno->id}: teléfono de cliente con formato inválido, omitido");
-
-                    Log::warning('EnviarRecordatorios: teléfono de cliente con formato inválido, omitido', [
-                        'turno_id' => $turno->id,
-                        'user_id' => $user->id,
-                    ]);
-
-                    continue;
-                }
-
-                $mensaje = WhatsappTemplate::mensajeLegible('recordatorio', $cliente, $turno, $user);
-                $numero = $this->cloudApiService->normalizarNumero($cliente->telefono);
-
-                // Misma derivación que EnviarMensajeConfirmacion: nombre de
-                // plantilla y header salen del mismo flag, nunca desacoplados.
-                $conUbicacion = WhatsappTemplate::tieneUbicacion($user);
+            // Un salón que falla (SMTP caído, credenciales rotas, etc.) no puede
+            // cortar la corrida: los salones que siguen perderían sus recordatorios.
+            try {
+                $this->procesarSalon($user, $manana);
+            } catch (\Throwable $e) {
+                $this->totalFallidos++;
+                $this->error("  ✗ {$user->name}: {$e->getMessage()}");
 
                 try {
-                    $resultado = $this->cloudApiService->enviarPlantilla(
-                        $numero,
-                        WhatsappTemplate::nombrePlantillaMeta('recordatorio', $conUbicacion),
-                        'es_AR',
-                        WhatsappTemplate::parametrosCloudApi('recordatorio', $cliente, $turno, $user),
-                        token: $credenciales['token'],
-                        phoneNumberId: $credenciales['phone_number_id'],
-                        ubicacion: WhatsappTemplate::headerUbicacionCloudApi($user),
-                    );
-                    $messageId = $resultado->messageId;
-
-                    // ── Guardar registro para tracking ──
-                    WhatsappMensaje::create([
+                    Log::error('EnviarRecordatorios: falla al procesar el salón', [
                         'user_id' => $user->id,
-                        'turno_id' => $turno->id,
-                        'numero' => $numero,
-                        'provider' => $credenciales['provider'],
-                        'mensaje' => $mensaje,
-                        'tipo' => 'recordatorio',
-                        'message_id' => $messageId,
-                        'status' => $messageId ? 'pending' : 'failed',
-                        'respuesta_api' => $resultado->respuesta,
-                        'status_code' => $resultado->statusCode,
+                        'error' => $e->getMessage(),
                     ]);
-
-                    if ($messageId) {
-                        $this->info("    ✓ {$cliente->nombre} {$cliente->apellido}");
-                        $totalEnviados++;
-                    } else {
-                        $this->error("    ✗ Fallo: {$cliente->nombre} {$cliente->apellido}");
-                        $totalFallidos++;
-                    }
-                } catch (\Exception $e) {
-                    $this->error("    ✗ Error: {$e->getMessage()}");
-                    $totalFallidos++;
-
-                    try {
-                        Log::error('EnviarRecordatorios: excepción', [
-                            'turno_id' => $turno->id,
-                            'user_id' => $user->id,
-                            'error' => $e->getMessage(),
-                        ]);
-                    } catch (\Throwable $logError) {
-                        // no-op: no dejar que un fallo de logging tumbe el resto de la corrida
-                    }
+                } catch (\Throwable $logError) {
+                    // no-op: no dejar que un fallo de logging tumbe el resto de la corrida
                 }
             }
         }
 
         $this->info('─────────────────────────────────');
-        $this->info("✓ Enviados: {$totalEnviados}");
-        if ($totalFallidos > 0) {
-            $this->error("✗ Fallidos: {$totalFallidos}");
+        $this->info("✓ Enviados: {$this->totalEnviados}");
+        if ($this->totalFallidos > 0) {
+            $this->error("✗ Fallidos: {$this->totalFallidos}");
+        }
+    }
+
+    private function procesarSalon(User $user, string $manana): void
+    {
+        // No seguir mandando mensajes pagos (Cloud API cobra por envío)
+        // a cuentas con la suscripción vencida y sin pagar.
+        if ($user->suscripcionVencida()) {
+            $this->info("  → {$user->name}: suscripción vencida, recordatorios automáticos omitidos");
+
+            return;
+        }
+
+        if ($user->whatsapp_requiere_envio_manual) {
+            $this->info("  → {$user->name}: requiere envío manual, recordatorios automáticos omitidos");
+
+            $turnosManana = Turno::delUsuario($user)
+                ->confirmados()
+                ->delaFecha($manana)
+                ->whereDoesntHave('whatsappMensajes', fn ($q) => $q->where('tipo', 'recordatorio'))
+                ->with('cliente')
+                ->get()
+                ->filter(fn ($turno) => ! empty($turno->cliente?->telefono));
+
+            if ($turnosManana->isNotEmpty()) {
+                Mail::to($user->email)->send(new RecordatoriosPendientesMail(
+                    $user->name,
+                    $turnosManana->count(),
+                    rtrim(config('services.frontend_url'), '/').'/agenda/recordatorios',
+                ));
+            }
+
+            return;
+        }
+
+        $turnos = Turno::delUsuario($user)
+            ->with(['cliente', 'servicios', 'profesional'])
+            ->confirmados()
+            ->delaFecha($manana)
+            ->whereDoesntHave('whatsappMensajes', fn ($q) => $q->where('tipo', 'recordatorio'))
+            ->get();
+
+        if ($turnos->isEmpty()) {
+            $this->info("  → {$user->name}: sin turnos mañana, omitido");
+
+            return;
+        }
+
+        $this->info("  → {$user->name}: {$turnos->count()} turno(s)");
+
+        // Un grupo (varias profesionales) recibe UN solo recordatorio: se
+        // saltea si algun tramo ya tiene uno gestionado, o ya se manejo en esta corrida.
+        $gruposAvisados = Turno::whereIn('grupo_id', $turnos->pluck('grupo_id')->filter()->unique())
+            ->whereHas('whatsappMensajes', fn ($q) => $q->where('tipo', 'recordatorio'))
+            ->pluck('grupo_id')->all();
+
+        // Resuelto una vez por negocio, no por turno: cada negocio manda
+        // TODOS sus recordatorios de esta corrida por su propio número
+        // (o el compartido, si no tiene conexión) — nunca mezclado.
+        $credenciales = $user->credencialesWhatsapp();
+
+        foreach ($turnos->sortBy('id') as $turno) {
+            if ($turno->grupo_id !== null) {
+                if (in_array($turno->grupo_id, $gruposAvisados, true)) {
+                    continue;
+                }
+                $gruposAvisados[] = $turno->grupo_id;
+            }
+
+            $cliente = $turno->cliente;
+
+            if (empty($cliente?->telefono)) {
+                $this->warn("    ⚠ Turno #{$turno->id}: cliente sin teléfono, omitido");
+
+                continue;
+            }
+
+            if ($cliente->whatsapp_opt_out) {
+                $this->info("    → {$cliente->nombre} {$cliente->apellido}: dio de baja los recordatorios, omitido");
+
+                continue;
+            }
+
+            if (! preg_match(self::REGEX_TELEFONO, $cliente->telefono)) {
+                $this->warn("    ⚠ Turno #{$turno->id}: teléfono de cliente con formato inválido, omitido");
+
+                Log::warning('EnviarRecordatorios: teléfono de cliente con formato inválido, omitido', [
+                    'turno_id' => $turno->id,
+                    'user_id' => $user->id,
+                ]);
+
+                continue;
+            }
+
+            $mensaje = WhatsappTemplate::mensajeLegible('recordatorio', $cliente, $turno, $user);
+            $numero = $this->cloudApiService->normalizarNumero($cliente->telefono);
+
+            // Misma derivación que EnviarMensajeConfirmacion: nombre de
+            // plantilla y header salen del mismo flag, nunca desacoplados.
+            $conUbicacion = WhatsappTemplate::tieneUbicacion($user);
+
+            try {
+                $resultado = $this->cloudApiService->enviarPlantilla(
+                    $numero,
+                    WhatsappTemplate::nombrePlantillaMeta('recordatorio', $conUbicacion),
+                    'es_AR',
+                    WhatsappTemplate::parametrosCloudApi('recordatorio', $cliente, $turno, $user),
+                    token: $credenciales['token'],
+                    phoneNumberId: $credenciales['phone_number_id'],
+                    ubicacion: WhatsappTemplate::headerUbicacionCloudApi($user),
+                );
+                $messageId = $resultado->messageId;
+
+                // ── Guardar registro para tracking ──
+                WhatsappMensaje::create([
+                    'user_id' => $user->id,
+                    'turno_id' => $turno->id,
+                    'numero' => $numero,
+                    'provider' => $credenciales['provider'],
+                    'mensaje' => $mensaje,
+                    'tipo' => 'recordatorio',
+                    'message_id' => $messageId,
+                    'status' => $messageId ? 'pending' : 'failed',
+                    'respuesta_api' => $resultado->respuesta,
+                    'status_code' => $resultado->statusCode,
+                ]);
+
+                if ($messageId) {
+                    $this->info("    ✓ {$cliente->nombre} {$cliente->apellido}");
+                    $this->totalEnviados++;
+                } else {
+                    $this->error("    ✗ Fallo: {$cliente->nombre} {$cliente->apellido}");
+                    $this->totalFallidos++;
+                }
+            } catch (\Exception $e) {
+                $this->error("    ✗ Error: {$e->getMessage()}");
+                $this->totalFallidos++;
+
+                try {
+                    Log::error('EnviarRecordatorios: excepción', [
+                        'turno_id' => $turno->id,
+                        'user_id' => $user->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                } catch (\Throwable $logError) {
+                    // no-op: no dejar que un fallo de logging tumbe el resto de la corrida
+                }
+            }
         }
     }
 }
