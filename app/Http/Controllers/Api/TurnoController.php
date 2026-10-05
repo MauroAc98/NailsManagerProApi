@@ -993,7 +993,34 @@ class TurnoController extends Controller
             'turnos_manana' => $turnosManana,
             'no_vistos' => $noVistos,
             'mensajes' => $mensajes,
+            'reembolsos_pendientes' => $this->reembolsosPendientes($user),
         ]);
+    }
+
+    // Reservas online cuya seña se cobró pero no pudo convertirse en turno
+    // (requiere_reembolso): la duena debe devolverla desde Mercado Pago. Ultimos
+    // 30 dias; todavia no hay un estado "reembolsado" con el que sacarlas de la
+    // lista antes. Sin telefono: solo lo que ya muestra el push de reserva online.
+    private function reembolsosPendientes(User $user): array
+    {
+        return ReservaWeb::delUsuario($user)
+            ->where('requiere_reembolso', true)
+            ->where('updated_at', '>=', now()->subDays(30))
+            ->with(['pagoSena' => fn ($q) => $q->where('estado', 'aprobado')])
+            ->orderByDesc('updated_at')
+            ->limit(50)
+            ->get()
+            ->map(fn (ReservaWeb $r) => [
+                'reserva_id' => $r->id,
+                'cliente_nombre' => $r->nombre,
+                'cliente_apellido' => $r->apellido,
+                'fecha' => substr((string) $r->getRawOriginal('fecha'), 0, 10),
+                'hora' => substr((string) $r->getRawOriginal('slot_hora'), 0, 5),
+                'monto' => $r->pagoSena?->monto,
+                'mp_payment_id' => $r->pagoSena?->mp_payment_id,
+            ])
+            ->values()
+            ->all();
     }
 
     // ─────────────────────────────────────────────

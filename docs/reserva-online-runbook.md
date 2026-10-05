@@ -62,5 +62,10 @@ Lanza 8 procesos (`tests/Support/hold_worker.php`) que intentan retener el mismo
 ## Notas operativas
 
 - Todo writer nuevo de holds/turnos online debe pasar por `SlotLock` (el advisory lock solo protege a quien lo usa). La duena agenda sin lock: el conflicto se re-verifica al confirmar (`needs_refund`).
-- `requiere_reembolso = true` es el handoff hacia el flujo de reembolso (slice de Mercado Pago): todavia no hay ejecutor.
+- `requiere_reembolso = true` marca una reserva cuya sena se COBRO pero no pudo convertirse en turno (`needs_refund`: horario ocupado, vencido y tomado, datos incompletos, sin profesional). El reembolso sigue siendo MANUAL (no hay ejecutor automatico), pero la duena ya se entera:
+  - Web Push "Sena cobrada sin turno" (job `EnviarPushReembolsoReserva`, best-effort, solo si tiene dispositivos suscriptos).
+  - `GET /api/turnos/notificaciones` devuelve `reembolsos_pendientes` (ultimos 30 dias: `reserva_id`, cliente, `fecha`, `hora`, `monto`, `mp_payment_id`). Todavia no existe un estado "reembolsado": la fila sale de la lista a los 30 dias.
+  - Pasos manuales: abrir Mercado Pago de la cuenta del negocio > Actividad, buscar el pago por `mp_payment_id` (o por la referencia externa = `public_token` de la reserva) > "Devolver dinero". Avisar a la clienta por WhatsApp. Si hace falta cerrar la marca: `UPDATE reservas_web SET requiere_reembolso = false WHERE id = <reserva_id>` (cuidando de verificar el entorno antes).
+  - Una order de MP no vence a los 10-15 min del hold: la clienta puede pagar tarde y por eso cae en `slot_taken_after_expiry` (ver logs `reserva.needs_refund`). El campo `expiration_time` de Orders API no se usa todavia (documentacion ambigua sobre rango minimo y ubicacion).
+- Pagos aprobados: `sincronizarPago` marca el pago `aprobado` y confirma la reserva en UNA transaccion; si la confirmacion lanza, el pago vuelve a `pendiente` y el webhook (5xx) o `pagos:reconciliar` lo reintentan. El reconciliador aisla cada fila (un error se loguea como `mercadopago.reconciliar.fila_fallo` y sigue con la siguiente).
 - Logs sin PII: eventos `reserva.hold.*`, `reserva.confirmed`, `reserva.needs_refund`, `reserva.abuse.*` con `user_id`, `profesional_id`, `reserva_id`, `device_prefix`, `motivo`.

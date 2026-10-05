@@ -327,24 +327,29 @@ class MercadoPagoService
             }
         }
 
-        $pagoSena->update([
-            'mp_payment_id' => $paymentId,
-            'estado' => $estado,
-            // Diagnostico de reclamos ("pagué y no me confirmó"): sin esto,
-            // averiguar por que un pago se rechazo requeria ir a buscarlo a
-            // mano al dashboard de MP con el payment_id.
-            'status_detail' => $datosPago['status_detail'] ?? null,
-            'payment_method_id' => $datosPago['payment_method_id'] ?? null,
-            'payment_type_id' => $datosPago['payment_type_id'] ?? null,
-        ]);
+        // Atomico: marcar el pago 'aprobado' y confirmar la reserva van juntos.
+        // Si confirmar() lanza (lock timeout, deadlock, findOrFail), el rollback
+        // deja el pago como estaba ('pendiente') y la excepcion sube: el webhook
+        // responde 5xx (MP reintenta) y el reconciliador lo vuelve a tomar. Sin
+        // esto quedaba 'aprobado' + reserva sin confirmar y nada lo reintentaba.
+        // NEEDS_REFUND no lanza: commitea requiere_reembolso junto al pago. Los
+        // jobs de confirmar() usan DB::afterCommit, asi que salen recien al commit.
+        $resultado = DB::transaction(function () use ($pagoSena, $reserva, $estado, $paymentId, $datosPago) {
+            $pagoSena->update([
+                'mp_payment_id' => $paymentId,
+                'estado' => $estado,
+                // Diagnostico de reclamos ("pagué y no me confirmó"): sin esto,
+                // averiguar por que un pago se rechazo requeria ir a buscarlo a
+                // mano al dashboard de MP con el payment_id.
+                'status_detail' => $datosPago['status_detail'] ?? null,
+                'payment_method_id' => $datosPago['payment_method_id'] ?? null,
+                'payment_type_id' => $datosPago['payment_type_id'] ?? null,
+            ]);
 
-        if ($estado !== 'aprobado') {
-            return;
-        }
+            return $estado === 'aprobado' ? $this->confirmar->confirmar($reserva, now()) : null;
+        });
 
-        $resultado = $this->confirmar->confirmar($reserva, now());
-
-        if ($resultado->resultado === ConfirmacionResultado::NEEDS_REFUND) {
+        if ($resultado?->resultado === ConfirmacionResultado::NEEDS_REFUND) {
             Log::error('mercadopago.sincronizar.pago_aprobado_requiere_reembolso', [
                 'reserva_id' => $reserva->id,
                 'payment_id' => $paymentId,

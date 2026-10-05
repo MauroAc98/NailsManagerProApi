@@ -130,6 +130,41 @@ class ReconciliarPagosServiceTest extends TestCase
         $this->assertSame('PAY-9', $pago->fresh()->mp_payment_id);
     }
 
+    public function test_una_fila_envenenada_no_frena_el_resto_del_lote(): void
+    {
+        $malo = $this->pagoPendiente(['mp_payment_id' => 'PAY-MALO']);
+        $bueno = $this->pagoPendiente();
+        // El pago malo ya "existe" con otro id: simula una violacion de unicidad
+        // en pagos_sena.mp_payment_id al aprobar la segunda fila.
+        Http::fake([
+            'api.mercadopago.com/v1/payments/PAY-MALO*' => fn () => throw new \RuntimeException('boom'),
+            'api.mercadopago.com/v1/payments/search*' => Http::response(['results' => [[
+                'id' => 'PAY-OK',
+                'status' => 'approved',
+                'transaction_amount' => 5000,
+                'external_reference' => $this->reserva->public_token,
+            ]]], 200),
+        ]);
+
+        $n = app(ReconciliarPagosService::class)->reconciliarPendientes();
+
+        $this->assertSame(1, $n);
+        $this->assertSame('pendiente', $malo->fresh()->estado);
+        $this->assertSame('aprobado', $bueno->fresh()->estado);
+    }
+
+    public function test_los_comandos_de_dinero_no_retienen_el_lock_de_overlap_24h(): void
+    {
+        $eventos = collect(app(Schedule::class)->events())
+            ->filter(fn ($e) => str_contains($e->command, 'pagos:reconciliar') || str_contains($e->command, 'reservas:expirar-holds'));
+
+        $this->assertCount(2, $eventos);
+        foreach ($eventos as $e) {
+            $this->assertTrue($e->withoutOverlapping);
+            $this->assertLessThanOrEqual(15, $e->expiresAt);
+        }
+    }
+
     public function test_si_mp_no_tiene_registro_del_pago_sigue_pendiente_sin_romper(): void
     {
         $pago = $this->pagoPendiente();

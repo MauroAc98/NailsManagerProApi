@@ -33,8 +33,20 @@ class ReconciliarPagosService
 
         $procesados = 0;
         foreach ($pendientes as $pago) {
-            if ($this->reconciliarUno($pago)) {
-                $procesados++;
+            try {
+                if ($this->reconciliarUno($pago)) {
+                    $procesados++;
+                }
+            } catch (\Throwable $e) {
+                // Una fila envenenada (p.ej. unique de mp_payment_id, lock timeout)
+                // no debe dejar sin reconciliar al resto del lote: se loguea con
+                // contexto y se sigue; la proxima corrida la reintenta.
+                Log::error('mercadopago.reconciliar.fila_fallo', [
+                    'pago_sena_id' => $pago->id,
+                    'reserva_web_id' => $pago->reserva_web_id,
+                    'error' => $e->getMessage(),
+                    'exception' => $e::class,
+                ]);
             }
         }
 

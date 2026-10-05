@@ -155,7 +155,10 @@ class ConfirmarReservaServiceTest extends TestCase
         $r->refresh();
         $this->assertTrue($r->requiere_reembolso);
         $this->assertSame('expired', $r->estado);
-        Queue::assertNothingPushed();
+        Queue::assertNotPushed(EnviarMensajeConfirmacion::class);
+        Queue::assertNotPushed(\App\Jobs\EnviarPushReservaOnline::class);
+        // Solo sale el aviso de reembolso a la duena.
+        Queue::assertPushed(\App\Jobs\EnviarPushReembolsoReserva::class, 1);
     }
 
     public function test_g12_pago_tardio_con_el_horario_libre_confirma(): void
@@ -223,7 +226,10 @@ class ConfirmarReservaServiceTest extends TestCase
         $this->assertSame('datos_incompletos', $res->motivo);
         $this->assertTrue($r->fresh()->requiere_reembolso);
         $this->assertSame(0, Turno::count());
-        Queue::assertNothingPushed();
+        Queue::assertNotPushed(EnviarMensajeConfirmacion::class);
+        Queue::assertNotPushed(\App\Jobs\EnviarPushReservaOnline::class);
+        // Solo sale el aviso de reembolso a la duena.
+        Queue::assertPushed(\App\Jobs\EnviarPushReembolsoReserva::class, 1);
     }
 
     public function test_needs_refund_repetido_no_duplica_ni_cambia_el_resultado(): void

@@ -3,6 +3,7 @@
 namespace App\Services\Reservas;
 
 use App\Jobs\EnviarMensajeConfirmacion;
+use App\Jobs\EnviarPushReembolsoReserva;
 use App\Jobs\EnviarPushReservaOnline;
 use App\Models\Cliente;
 use App\Models\Profesional;
@@ -105,6 +106,22 @@ class ConfirmarReservaService
                 EnviarPushReservaOnline::dispatch($turno->id);
             } catch (\Throwable $e) {
                 Log::warning('reserva.push_dispatch_failed', ['turno_id' => $turno->id, 'error' => $e->getMessage()]);
+            }
+        });
+    }
+
+    /**
+     * Web Push to the owner: the client PAID but got no turno, so they must refund
+     * from Mercado Pago. Best-effort: never breaks the confirmation flow.
+     */
+    private function notificarReembolso(ReservaWeb $r): void
+    {
+        $reservaId = $r->id;
+        DB::afterCommit(function () use ($reservaId) {
+            try {
+                EnviarPushReembolsoReserva::dispatch($reservaId);
+            } catch (\Throwable $e) {
+                Log::warning('reserva.refund_push_dispatch_failed', ['reserva_id' => $reservaId, 'error' => $e->getMessage()]);
             }
         });
     }
@@ -281,6 +298,8 @@ class ConfirmarReservaService
             $cambios += ['estado' => 'expired', 'motivo_cierre' => 'reembolso'];
         }
         $r->update($cambios);
+
+        $this->notificarReembolso($r);
 
         Log::info('reserva.needs_refund', [
             'user_id' => $r->user_id,
