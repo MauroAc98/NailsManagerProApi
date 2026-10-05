@@ -11,6 +11,7 @@ use App\Models\SlotDisponible;
 use App\Models\Turno;
 use App\Models\User;
 use App\Models\UserMpCredential;
+use App\Services\Reservas\ConfirmarReservaService;
 use App\Services\Reservas\MercadoPagoService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
@@ -102,6 +103,47 @@ class MercadoPagoSincronizarPagoTest extends TestCase
         $svc->sincronizarPago($this->pago->fresh(), $this->reserva->fresh(), $this->datosPago('approved'));
 
         $this->assertSame(1, Turno::count());
+    }
+
+    // Atomicidad: si confirmar() revienta (lock timeout, deadlock, etc.) el pago
+    // NO puede quedar 'aprobado' con la reserva sin confirmar: nada lo reintentaria
+    // (sincronizarPago sale temprano con estaAprobado y el reconciliador solo mira
+    // 'pendiente'). La transaccion lo devuelve a 'pendiente' para el proximo intento.
+    public function test_si_confirmar_lanza_el_pago_no_queda_aprobado_y_se_reintenta_bien(): void
+    {
+        $falla = \Mockery::mock(ConfirmarReservaService::class);
+        $falla->shouldReceive('confirmar')->once()->andThrow(new \RuntimeException('lock timeout'));
+        $servicioRoto = new MercadoPagoService($falla);
+
+        try {
+            $servicioRoto->sincronizarPago($this->pago, $this->reserva, $this->datosPago('approved'));
+            $this->fail('Debia propagar la excepcion para que el webhook responda 5xx y MP reintente.');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('lock timeout', $e->getMessage());
+        }
+
+        $this->assertSame('pendiente', $this->pago->fresh()->estado);
+        $this->assertNull($this->pago->fresh()->mp_payment_id);
+        $this->assertSame(0, Turno::count());
+
+        // Siguiente sync (reintento del webhook / reconciliador) con confirmar sano.
+        app(MercadoPagoService::class)->sincronizarPago($this->pago->fresh(), $this->reserva->fresh(), $this->datosPago('approved'));
+
+        $this->assertSame('aprobado', $this->pago->fresh()->estado);
+        $this->assertSame('confirmed', $this->reserva->fresh()->estado);
+        $this->assertSame(1, Turno::count());
+    }
+
+    // NEEDS_REFUND no lanza: el pago queda aprobado y requiere_reembolso persiste.
+    public function test_needs_refund_persiste_pago_aprobado_y_flag_de_reembolso(): void
+    {
+        $this->reserva->update(['nombre' => null]);
+
+        app(MercadoPagoService::class)->sincronizarPago($this->pago, $this->reserva->fresh(), $this->datosPago('approved'));
+
+        $this->assertSame('aprobado', $this->pago->fresh()->estado);
+        $this->assertTrue((bool) $this->reserva->fresh()->requiere_reembolso);
+        $this->assertSame(0, Turno::count());
     }
 
     // QA: defensa contra un monto que no coincide con lo que se le pidio a
