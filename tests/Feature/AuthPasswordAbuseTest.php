@@ -88,6 +88,34 @@ class AuthPasswordAbuseTest extends TestCase
         $this->assertTrue(Hash::check('NuevaClave123', $user->fresh()->password));
     }
 
+    public function test_reset_password_rechaza_un_codigo_de_mas_de_30_minutos(): void
+    {
+        $user = User::factory()->create();
+        DB::table('password_reset_tokens')->insert([
+            'email' => strtolower($user->email),
+            'token' => Hash::make('123456'),
+            'created_at' => now()->subMinutes(31),
+        ]);
+
+        $this->postJson('/api/auth/reset-password', $this->cuerpoReset($user, '123456'))
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['code' => 'El código expiró. Solicitá uno nuevo.']);
+
+        $this->assertFalse(Hash::check('NuevaClave123', $user->fresh()->password));
+    }
+
+    public function test_reset_password_acepta_un_codigo_de_29_minutos(): void
+    {
+        $user = User::factory()->create();
+        DB::table('password_reset_tokens')->insert([
+            'email' => strtolower($user->email),
+            'token' => Hash::make('123456'),
+            'created_at' => now()->subMinutes(29),
+        ]);
+
+        $this->postJson('/api/auth/reset-password', $this->cuerpoReset($user, '123456'))->assertOk();
+    }
+
     public function test_reset_password_no_revela_si_el_email_existe(): void
     {
         $this->postJson('/api/auth/reset-password', [

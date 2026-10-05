@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Support\BloqueoLogin;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -476,7 +477,9 @@ class AuthController extends Controller
             ]);
         }
 
-        if (now()->diffInMinutes($record->created_at) > 30) {
+        // Comparar instantes (no diffInMinutes): en Carbon 3 el diff tiene signo y un
+        // created_at pasado daba negativo, asi que el codigo nunca expiraba.
+        if (Carbon::parse($record->created_at)->lt(now()->subMinutes(30))) {
             throw ValidationException::withMessages([
                 'code' => ['El código expiró. Solicitá uno nuevo.'],
             ]);
