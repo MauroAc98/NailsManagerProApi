@@ -188,7 +188,10 @@ class ConfirmarGrupoTest extends TestCase
         $this->assertSame(0, TurnoGrupo::count());
         $r->refresh();
         $this->assertTrue($r->requiere_reembolso);
-        Queue::assertNothingPushed();
+        Queue::assertNotPushed(EnviarMensajeConfirmacion::class);
+        Queue::assertNotPushed(\App\Jobs\EnviarPushReservaOnline::class);
+        // Solo sale el aviso de reembolso a la duena.
+        Queue::assertPushed(\App\Jobs\EnviarPushReembolsoReserva::class, 1);
     }
 
     public function test_tramo_ocupado_por_otro_turno_antes_de_confirmar_es_needs_refund_slot_desalineado(): void
@@ -221,6 +224,9 @@ class ConfirmarGrupoTest extends TestCase
         $this->assertSame(ConfirmacionResultado::NEEDS_REFUND, $res->resultado);
         $this->assertSame('datos_incompletos', $res->motivo);
         $this->assertSame(0, Turno::count());
-        Queue::assertNothingPushed();
+        Queue::assertNotPushed(EnviarMensajeConfirmacion::class);
+        Queue::assertNotPushed(\App\Jobs\EnviarPushReservaOnline::class);
+        // Solo sale el aviso de reembolso a la duena.
+        Queue::assertPushed(\App\Jobs\EnviarPushReembolsoReserva::class, 1);
     }
 }
