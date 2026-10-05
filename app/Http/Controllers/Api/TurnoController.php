@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\EnviarMensajeConfirmacion;
+use App\Models\BloqueoAgenda;
 use App\Models\Profesional;
 use App\Models\Servicio;
 use App\Models\SlotDisponible;
@@ -167,6 +168,16 @@ class TurnoController extends Controller
 
         $reservas = collect();
 
+        // Bloqueos de la profesional y de todo el salon (profesional_id null).
+        // La imagen es lo que ve la clienta: un dia que no se atiende o un
+        // horario bloqueado no puede figurar como libre. (La agenda propia sigue
+        // permitiendo cargar turnos ahi: ese override es del dueno.)
+        $bloqueos = BloqueoAgenda::delUsuario($user)
+            ->whereDate('fecha', '>=', $request->desde)
+            ->whereDate('fecha', '<=', $request->hasta)
+            ->where(fn ($q) => $q->whereNull('profesional_id')->orWhere('profesional_id', $profesional->id))
+            ->get();
+
         $manana = Carbon::today()->toDateString();
         $inicio = max($request->desde, $manana);
 
@@ -206,7 +217,11 @@ class TurnoController extends Controller
             $turnosDia = $turnos->filter(fn ($t) => Carbon::parse($t->fecha_hora)->toDateString() === $fecha);
             $reservasDia = $reservas->filter(fn ($r) => $r->fecha->toDateString() === $fecha);
 
-            $slotsDelDia = $slots->map(function ($slot) use ($turnosDia, $reservasDia, $esHoy, $horaActualMinutos) {
+            $diaCerrado = ! $profesional->atiendeEl(Carbon::parse($fecha))
+                || $bloqueos->contains(fn ($b) => $b->fecha->format('Y-m-d') === $fecha && ($b->hora_desde === null || $b->hora_hasta === null));
+            $bloqueosParcialesDia = $bloqueos->filter(fn ($b) => $b->fecha->format('Y-m-d') === $fecha && $b->hora_desde !== null && $b->hora_hasta !== null);
+
+            $slotsDelDia = $slots->map(function ($slot) use ($turnosDia, $reservasDia, $esHoy, $horaActualMinutos, $diaCerrado, $bloqueosParcialesDia) {
                 $slotMinutos = (int) Carbon::parse($slot->hora)->format('H') * 60
                     + (int) Carbon::parse($slot->hora)->format('i');
 
@@ -219,6 +234,18 @@ class TurnoController extends Controller
                 // de disponibilidad.
                 if ($esHoy && $slotMinutos <= $horaActualMinutos) {
                     return ['hora' => $horaFormateada, 'libre' => false];
+                }
+
+                if ($diaCerrado) {
+                    return ['hora' => $horaFormateada, 'libre' => false];
+                }
+
+                foreach ($bloqueosParcialesDia as $bloqueo) {
+                    $desde = Carbon::parse($bloqueo->hora_desde);
+                    $hasta = Carbon::parse($bloqueo->hora_hasta);
+                    if ($slotMinutos >= $desde->hour * 60 + $desde->minute && $slotMinutos < $hasta->hour * 60 + $hasta->minute) {
+                        return ['hora' => $horaFormateada, 'libre' => false];
+                    }
                 }
 
                 foreach ($turnosDia as $turno) {
@@ -511,6 +538,15 @@ class TurnoController extends Controller
         if (Carbon::parse($turno->fecha_hora)->isPast()) {
             return response()->json([
                 'message' => 'No se pueden modificar turnos que ya pasaron.',
+            ], 422);
+        }
+
+        // ── Regla -1.5: solo se editan turnos confirmados ────────
+        // Un cancelado es historial y un completado es ingreso: sus servicios
+        // son la base del monto, reescribirlos descuadraria los reportes.
+        if ($turno->estado !== 'confirmado') {
+            return response()->json([
+                'message' => 'Solo se pueden modificar turnos confirmados.',
             ], 422);
         }
 

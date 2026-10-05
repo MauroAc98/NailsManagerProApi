@@ -44,11 +44,11 @@ class StatsController extends Controller
         $ingresosOtros = $this->ingresosOtrosDelRango($user, $request);
 
         return response()->json([
-            'total_turnos' => $turnosValidos->count(),
+            'total_turnos' => $this->contarVisitas($turnosValidos),
             'turnos_por_estado' => [
-                'completados' => $turnosCompletados->count(),
-                'confirmados' => $todos->where('estado', 'confirmado')->count(),
-                'cancelados' => $todos->where('estado', 'cancelado')->count(),
+                'completados' => $this->contarVisitas($turnosCompletados),
+                'confirmados' => $this->contarVisitas($todos->where('estado', 'confirmado')),
+                'cancelados' => $this->contarVisitas($todos->where('estado', 'cancelado')),
             ],
             'servicios_mas_pedidos' => $this->serviciosMasPedidos($turnosValidos),
             'clientes' => $this->clientesNuevasVsRecurrentes($user, $turnosValidos, $request->desde, $request->hasta),
@@ -117,6 +117,18 @@ class StatsController extends Controller
         return response()->json($resultado);
     }
 
+    // Un combo se guarda como un turno por tramo (mismo grupo_id), pero para el
+    // salon es UNA visita: se cuenta una vez por grupo. Los turnos sin grupo
+    // cuentan de a uno, como siempre. (ocupacion() NO usa esto: ahi cada tramo
+    // ocupa de verdad su propia hora.)
+    private function contarVisitas($turnos): int
+    {
+        $sinGrupo = $turnos->whereNull('grupo_id')->count();
+        $grupos = $turnos->whereNotNull('grupo_id')->pluck('grupo_id')->unique()->count();
+
+        return $sinGrupo + $grupos;
+    }
+
     // dia_semana en formato ISO (1 = lunes ... 7 = domingo). Siempre devuelve
     // las 7 entradas (incluso en 0) — a diferencia de ocupacion() de arriba,
     // acá conviene que el frontend no tenga que rellenar huecos para dibujar
@@ -130,9 +142,9 @@ class StatsController extends Controller
             $grupo = $porDia->get($dia, collect());
             $resultado[] = [
                 'dia_semana' => $dia,
-                'completados' => $grupo->where('estado', 'completado')->count(),
-                'confirmados' => $grupo->where('estado', 'confirmado')->count(),
-                'cancelados' => $grupo->where('estado', 'cancelado')->count(),
+                'completados' => $this->contarVisitas($grupo->where('estado', 'completado')),
+                'confirmados' => $this->contarVisitas($grupo->where('estado', 'confirmado')),
+                'cancelados' => $this->contarVisitas($grupo->where('estado', 'cancelado')),
             ];
         }
 
