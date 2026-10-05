@@ -515,7 +515,7 @@ class HoldService
         }
 
         try {
-            return ReservaWeb::create([
+            return ReservaWeb::create($this->conPrecioTotal([
                 'user_id' => $user->id,
                 'profesional_id' => $profesional->id,
                 'public_token' => ReservaWeb::generarToken(),
@@ -528,7 +528,7 @@ class HoldService
                 'alta_ocupacion' => $alta,
                 'device_hash' => $deviceHash,
                 'idempotency_key' => $idempotencyKey,
-            ]);
+            ]));
         } catch (QueryException $e) {
             if ($this->esViolacionDeUnicoDeSlot($e)) {
                 throw new SlotNoDisponible();
@@ -574,7 +574,7 @@ class HoldService
         $this->expirarVencidasEnElInicio($ancla, $fecha, $hora, $ahora);
 
         try {
-            return ReservaWeb::create([
+            return ReservaWeb::create($this->conPrecioTotal([
                 'user_id' => $user->id,
                 'profesional_id' => $ancla,
                 'public_token' => ReservaWeb::generarToken(),
@@ -591,13 +591,28 @@ class HoldService
                 'idempotency_key' => $idempotencyKey,
                 'tramos' => $plan->tramos,
                 'tramos_modo' => $plan->modo,
-            ]);
+            ]));
         } catch (QueryException $e) {
             if ($this->esViolacionDeUnicoDeSlot($e)) {
                 throw new SlotNoDisponible();
             }
             throw $e;
         }
+    }
+
+    /**
+     * Snapshot del precio total (TotalReserva, pesos enteros) al crear el hold:
+     * la seña de la reserva se calcula sobre este valor. null = desconocido.
+     *
+     * @param  array<string, mixed>  $atributos
+     * @return array<string, mixed>
+     */
+    private function conPrecioTotal(array $atributos): array
+    {
+        $total = (int) round((new TotalReserva())->de(new ReservaWeb($atributos)));
+        $atributos['precio_total'] = $total > 0 ? $total : null;
+
+        return $atributos;
     }
 
     /** Libera el hold bloqueante previo de ESTE dispositivo (si lo hay); se revierte si el intento falla. */

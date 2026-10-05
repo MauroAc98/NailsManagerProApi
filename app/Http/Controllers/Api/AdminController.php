@@ -434,9 +434,8 @@ class AdminController extends Controller
     {
         return response()->json([
             'dias_prueba_default' => (int) (Setting::get('dias_prueba_default') ?? 10),
-            // Ver MercadoPagoService::montoACobrar — porcentaje que se le
-            // suma al monto de la seña para que, descontada la comision de
-            // MP, el negocio reciba el neto completo.
+            // Unica fuente de la comision de MP (ver
+            // MercadoPagoService::comisionVigente); la absorbe el profesional.
             'comision_mp_porcentaje' => (float) (Setting::get('comision_mp_porcentaje') ?? MercadoPagoService::COMISION_MP_DEFAULT),
         ]);
     }

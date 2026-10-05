@@ -73,7 +73,7 @@ class AuthController extends Controller
         $token = $user->createToken('app-mobile')->plainTextToken;
 
         return response()->json([
-            'user' => $user,
+            'user' => $user->append('comision_mp_vigente'),
             'token' => $token,
         ]);
     }
@@ -112,7 +112,7 @@ class AuthController extends Controller
         $token = $user->createToken('app-mobile')->plainTextToken;
 
         return response()->json([
-            'user' => $user,
+            'user' => $user->append('comision_mp_vigente'),
             'token' => $token,
         ]);
     }
@@ -134,7 +134,7 @@ class AuthController extends Controller
     // ─────────────────────────────────────────────
     public function me(Request $request): JsonResponse
     {
-        return response()->json($request->user());
+        return response()->json($request->user()->append('comision_mp_vigente'));
     }
 
     // ─────────────────────────────────────────────
@@ -162,11 +162,9 @@ class AuthController extends Controller
             // es porcentaje.
             'sena_tipo' => 'sometimes|in:fijo,porcentaje',
             'sena_porcentaje' => 'sometimes|nullable|numeric|min:0|max:100',
-            // Retencion de Ingresos Brutos que MP le aplica al negocio; la
-            // decide cada negocio (ver MercadoPagoService::montoACobrar).
+            // Retencion de Ingresos Brutos que MP le aplica al negocio: dato
+            // informativo para el preview, no cambia lo que se cobra.
             'retencion_iibb_porcentaje' => 'sometimes|nullable|numeric|min:0|max:50',
-            // Comision de MP propia del negocio; null = usa la global.
-            'comision_mp_porcentaje' => 'sometimes|nullable|numeric|min:0|max:50',
             'whatsapp_pide_sena' => 'sometimes|boolean',
             // not_regex: los datos bancarios viajan como parámetros de la
             // plantilla Meta reserva_turno_sena — un salto de línea o tab
@@ -382,9 +380,17 @@ class AuthController extends Controller
             $data['retencion_iibb_porcentaje'] = 0;
         }
 
+        // Modo de la seña mutuamente excluyente: se limpia el campo del modo
+        // que no quedo activo (fijo -> sena_porcentaje null, porcentaje ->
+        // sena_monto null). Solo si la request toco algun campo de la seña.
+        if (array_intersect(['sena_tipo', 'sena_monto', 'sena_porcentaje'], array_keys($data))) {
+            $tipoFinal = $data['sena_tipo'] ?? $user->sena_tipo;
+            $data[$tipoFinal === 'porcentaje' ? 'sena_monto' : 'sena_porcentaje'] = null;
+        }
+
         $user->update($data);
 
-        return response()->json($user);
+        return response()->json($user->append('comision_mp_vigente'));
     }
 
     // ─────────────────────────────────────────────

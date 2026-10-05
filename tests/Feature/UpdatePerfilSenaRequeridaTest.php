@@ -88,33 +88,30 @@ class UpdatePerfilSenaRequeridaTest extends TestCase
         }
     }
 
-    public function test_guarda_la_comision_mp_propia_y_vacia_vuelve_a_null(): void
+    // La comision de MP es solo global (Setting): el perfil la ignora.
+    public function test_el_perfil_ignora_comision_mp_propia(): void
     {
         $user = User::factory()->create(['is_exempt' => true]);
-        $this->assertNull($user->fresh()->comision_mp_porcentaje);
 
         $this->actingAs($user, 'sanctum')
-            ->putJson('/api/perfil', ['comision_mp_porcentaje' => 5.5])
+            ->putJson('/api/perfil', ['comision_mp_porcentaje' => 5.5, 'telefono' => '3765000000'])
             ->assertOk()
-            ->assertJsonPath('comision_mp_porcentaje', 5.5);
-        $this->assertSame(5.5, $user->fresh()->comision_mp_porcentaje);
-
-        $this->actingAs($user, 'sanctum')
-            ->putJson('/api/perfil', ['comision_mp_porcentaje' => null])
-            ->assertOk();
-        $this->assertNull($user->fresh()->comision_mp_porcentaje);
+            ->assertJsonMissingPath('comision_mp_porcentaje');
+        $this->assertFalse(\Illuminate\Support\Facades\Schema::hasColumn('users', 'comision_mp_porcentaje'));
     }
 
-    public function test_comision_mp_fuera_de_rango_es_rechazada(): void
+    public function test_el_perfil_expone_la_comision_mp_vigente_con_iva(): void
     {
         $user = User::factory()->create(['is_exempt' => true]);
 
-        foreach ([-1, 50.01] as $valor) {
-            $this->actingAs($user, 'sanctum')
-                ->putJson('/api/perfil', ['comision_mp_porcentaje' => $valor])
-                ->assertStatus(422)
-                ->assertJsonValidationErrors('comision_mp_porcentaje');
-        }
+        $this->actingAs($user, 'sanctum')->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJsonPath('comision_mp_vigente', 6.29 * 1.21);
+
+        \App\Models\Setting::create(['key' => 'comision_mp_porcentaje', 'value' => '8']);
+        $this->actingAs($user, 'sanctum')->putJson('/api/perfil', ['telefono' => '3765000000'])
+            ->assertOk()
+            ->assertJsonPath('comision_mp_vigente', 8 * 1.21);
     }
 
     public function test_activar_sena_sin_monto_es_rechazado(): void

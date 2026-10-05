@@ -69,7 +69,7 @@ class SenaPorcentajeTest extends TestCase
 
     // -- MercadoPagoService ------------------------------------------
 
-    public function test_cobra_el_neto_porcentual_con_el_gross_up_existente(): void
+    public function test_cobra_exactamente_el_porcentaje_sin_gross_up(): void
     {
         $user = $this->salonPct();
         $s = $this->crearServicio($user); // 12000
@@ -78,11 +78,11 @@ class SenaPorcentajeTest extends TestCase
 
         $pago = $svc->crearOReusarPreferencia($user, $this->reserva($user, [$s->id]));
 
-        // neto = 12000 * 30% = 3600 -> misma formula que el modo fijo.
-        $this->assertEquals($svc->montoACobrar(3600, $user), $pago->monto);
+        // 12000 * 30% = 3600 exactos: sin gross-up ni redondeo a 100.
+        $this->assertEquals(3600, $pago->monto);
     }
 
-    public function test_neto_se_redondea_a_pesos_enteros(): void
+    public function test_la_sena_se_redondea_a_pesos_enteros(): void
     {
         $user = $this->salonPct(['sena_porcentaje' => 33.33]);
         $s = $this->servicioConPrecio($user, 1001);
@@ -92,7 +92,7 @@ class SenaPorcentajeTest extends TestCase
         $pago = $svc->crearOReusarPreferencia($user, $this->reserva($user, [$s->id]));
 
         // 1001 * 33.33 / 100 = 333.633 -> 334
-        $this->assertEquals($svc->montoACobrar(334, $user), $pago->monto);
+        $this->assertEquals(334, $pago->monto);
     }
 
     public function test_sin_total_no_cobra_y_no_crea_pago_ni_llama_a_mp(): void
@@ -113,7 +113,7 @@ class SenaPorcentajeTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_neto_cero_por_redondeo_tambien_es_sena_sin_total(): void
+    public function test_sena_cero_por_redondeo_tambien_es_sena_sin_total(): void
     {
         $user = $this->salonPct(['sena_porcentaje' => 1]);
         $s = $this->servicioConPrecio($user, 10);
@@ -165,7 +165,43 @@ class SenaPorcentajeTest extends TestCase
 
         $pago = $svc->crearOReusarPreferencia($user, $this->reserva($user, [$s->id]));
 
-        $this->assertEquals($svc->montoACobrar(5000, $user), $pago->monto);
+        $this->assertEquals(5000, $pago->monto);
+    }
+
+    public function test_fijo_se_topea_al_precio_de_la_reserva(): void
+    {
+        $user = $this->crearSalon(['sena_monto' => 5000]);
+        UserMpCredential::create(['user_id' => $user->id, 'mp_access_token' => 'APP_USR-x', 'mp_user_id' => 'MP-1']);
+        $barato = $this->servicioConPrecio($user, 3000);
+        $this->fakeMp();
+
+        $pago = app(MercadoPagoService::class)->crearOReusarPreferencia($user, $this->reserva($user, [$barato->id]));
+
+        $this->assertEquals(3000, $pago->monto);
+    }
+
+    public function test_el_cobro_congela_el_precio_total_de_la_reserva(): void
+    {
+        $user = $this->salonPct();
+        $s = $this->crearServicio($user); // 12000
+        $this->fakeMp();
+        $reserva = $this->reserva($user, [$s->id]);
+
+        app(MercadoPagoService::class)->crearOReusarPreferencia($user, $reserva);
+
+        $this->assertSame(12000, $reserva->fresh()->precio_total);
+    }
+
+    public function test_show_usa_el_precio_congelado_aunque_cambie_el_servicio(): void
+    {
+        $user = $this->salonPct();
+        $s = $this->crearServicio($user); // 12000
+        $reserva = $this->reserva($user, [$s->id], ['estado' => 'held', 'precio_total' => 12000]);
+        $s->update(['precio' => 20000]);
+
+        $this->getJson("/api/public/{$user->slug}/reservas/{$reserva->public_token}", ['X-Device-Token' => 'device-token-de-prueba-0123456789abcdef'])
+            ->assertOk()
+            ->assertJsonPath('resumen.deposito', 3600);
     }
 
     // -- Endpoints publicos ------------------------------------------
@@ -225,8 +261,7 @@ class SenaPorcentajeTest extends TestCase
         $user = $this->salonPct();
         $s = $this->crearServicio($user); // 12000
         $reserva = $this->reserva($user, [$s->id], ['estado' => 'held']);
-        $esperado = app(MercadoPagoService::class)->montoACobrar(3600, $user);
-        $esperado = (int) $esperado;
+        $esperado = 3600;
 
         $this->getJson("/api/public/{$user->slug}/reservas/{$reserva->public_token}", ['X-Device-Token' => 'device-token-de-prueba-0123456789abcdef'])
             ->assertOk()
@@ -290,6 +325,16 @@ class SenaPorcentajeTest extends TestCase
         $this->putPerfil($user, ['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 1])->assertOk();
     }
 
+    public function test_perfil_limpia_el_campo_del_modo_inactivo(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true, 'sena_monto' => 5000]);
+
+        $this->putPerfil($user, ['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 30])
+            ->assertOk()->assertJsonPath('sena_monto', null)->assertJsonPath('sena_porcentaje', 30);
+        $this->putPerfil($user->fresh(), ['sena_tipo' => 'fijo', 'sena_monto' => 4000, 'sena_porcentaje' => 50])
+            ->assertOk()->assertJsonPath('sena_porcentaje', null)->assertJsonPath('sena_monto', '4000.00');
+    }
+
     public function test_perfil_con_mp_conectado_no_deja_vaciar_el_porcentaje(): void
     {
         $user = $this->salonPct();
@@ -304,8 +349,10 @@ class SenaPorcentajeTest extends TestCase
 
         $this->putPerfil($user, ['sena_tipo' => 'porcentaje'])->assertStatus(422)->assertJsonValidationErrors('sena_porcentaje');
         $this->putPerfil($user, ['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 30])->assertOk();
-        // Vuelta a fijo: el sena_monto previo sigue guardado y alcanza.
-        $this->putPerfil($user->fresh(), ['sena_tipo' => 'fijo'])->assertOk();
+        // Modos excluyentes: al pasar a porcentaje se limpio sena_monto, asi
+        // que volver a fijo exige cargar el monto de nuevo.
+        $this->putPerfil($user->fresh(), ['sena_tipo' => 'fijo'])->assertStatus(422)->assertJsonValidationErrors('sena_monto');
+        $this->putPerfil($user->fresh(), ['sena_tipo' => 'fijo', 'sena_monto' => 4000])->assertOk();
         // Fijo sin monto con MP conectado: mismo mensaje de siempre.
         $this->putPerfil($user->fresh(), ['sena_monto' => null])->assertStatus(422)->assertJsonValidationErrors('sena_monto');
     }

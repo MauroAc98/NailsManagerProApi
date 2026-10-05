@@ -36,7 +36,6 @@ class User extends Authenticatable
         'sena_tipo',
         'sena_porcentaje',
         'retencion_iibb_porcentaje',
-        'comision_mp_porcentaje',
         'whatsapp_pide_sena',
         'whatsapp_sena_titular',
         'whatsapp_sena_entidad',
@@ -87,8 +86,6 @@ class User extends Authenticatable
             'sena_porcentaje'         => 'float',
             // float: la columna es decimal(5,2) y asi el JSON sale numerico.
             'retencion_iibb_porcentaje' => 'float',
-            // float nullable: null = usar la comision global (Setting).
-            'comision_mp_porcentaje'  => 'float',
             // float (no decimal:N, a diferencia de sena_monto): decimal:N
             // serializa a string en el JSON, y el picker del frontend
             // necesita consumir user.latitud/longitud como number directo.
@@ -110,13 +107,27 @@ class User extends Authenticatable
 
     /**
      * Config de seña completa segun el modo: fijo = sena_monto > 0;
-     * porcentaje = sena_porcentaje > 0. El campo del otro modo se ignora.
+     * porcentaje = 0 < sena_porcentaje <= 100. El campo del otro modo se ignora.
      */
     public function senaConfigCompleta(): bool
     {
-        $valor = $this->senaEsPorcentaje() ? $this->sena_porcentaje : $this->sena_monto;
+        if ($this->senaEsPorcentaje()) {
+            return is_numeric($this->sena_porcentaje)
+                && (float) $this->sena_porcentaje > 0
+                && (float) $this->sena_porcentaje <= 100;
+        }
 
-        return is_numeric($valor) && (float) $valor > 0;
+        return is_numeric($this->sena_monto) && (float) $this->sena_monto > 0;
+    }
+
+    /**
+     * Comision efectiva de MP (con IVA) vigente: informativa para el preview del
+     * frontend. NO esta en $appends (haria una query por usuario serializado):
+     * los endpoints de perfil la piden con append('comision_mp_vigente').
+     */
+    public function getComisionMpVigenteAttribute(): float
+    {
+        return app(\App\Services\Reservas\MercadoPagoService::class)->comisionVigente();
     }
 
     // ── Slug automático ──────────────────────────────────────────

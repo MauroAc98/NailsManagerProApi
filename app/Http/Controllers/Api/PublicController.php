@@ -90,12 +90,11 @@ class PublicController extends Controller
             : [];
 
         return response()->json([
-            // Lo que se le cobra a la clienta, no el neto que pidió el
-            // negocio — tiene que coincidir con lo que ve en el checkout de
-            // MP (ver MercadoPagoService::montoACobrar).
+            // Fijo: la seña exacta (es lo que paga el cliente). Porcentaje:
+            // null, depende del precio de la reserva.
             'deposito' => $user->senaEsPorcentaje()
                 ? null
-                : $mercadoPago->montoACobrar((float) ($user->sena_monto ?? 0), $user),
+                : $mercadoPago->senaParaPrecio($user, null),
             ...$porcentaje,
             'ventana_pago_minutos' => (int) config('reservas.pago_minutos'),
             'anticipacion_minutos' => (int) config('reservas.anticipacion_minutos'),
