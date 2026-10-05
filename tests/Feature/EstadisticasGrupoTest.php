@@ -65,6 +65,31 @@ class EstadisticasGrupoTest extends TestCase
         $this->assertEquals(18000, $this->dashboard()['ingresos_agenda']);
     }
 
+    public function test_un_combo_de_dos_tramos_cuenta_como_un_solo_turno_en_los_conteos(): void
+    {
+        $g = TurnoGrupo::create(['modo' => 'secuencia']);
+        $this->completado($this->ana, 10636, '10:00', $g->id);
+        $this->completado($this->laura, 7364, '11:00', $g->id);
+        $this->completado($this->ana, 5000, '15:00');
+
+        $d = $this->dashboard();
+
+        $this->assertSame(2, $d['total_turnos']);
+        $this->assertSame(2, $d['turnos_por_estado']['completados']);
+        $diaSemana = collect($d['turnos_por_estado_por_dia_semana'])->sum('completados');
+        $this->assertSame(2, $diaSemana);
+    }
+
+    public function test_filtrando_por_profesional_su_tramo_del_combo_cuenta_uno(): void
+    {
+        $g = TurnoGrupo::create(['modo' => 'secuencia']);
+        $this->completado($this->ana, 10636, '10:00', $g->id);
+        $this->completado($this->laura, 7364, '11:00', $g->id);
+
+        $this->assertSame(1, $this->dashboard(['profesional_id' => $this->ana->id])['total_turnos']);
+        $this->assertSame(1, $this->dashboard(['profesional_id' => $this->laura->id])['total_turnos']);
+    }
+
     public function test_un_turno_sin_grupo_suma_igual_que_siempre(): void
     {
         $this->completado($this->ana, 5000, '10:00');
