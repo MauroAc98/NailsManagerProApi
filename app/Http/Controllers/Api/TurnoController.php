@@ -514,6 +514,15 @@ class TurnoController extends Controller
             ], 422);
         }
 
+        // ── Regla -1.5: solo se editan turnos confirmados ────────
+        // Un cancelado es historial y un completado es ingreso: sus servicios
+        // son la base del monto, reescribirlos descuadraria los reportes.
+        if ($turno->estado !== 'confirmado') {
+            return response()->json([
+                'message' => 'Solo se pueden modificar turnos confirmados.',
+            ], 422);
+        }
+
         // ── Regla -0.5: los servicios deben estar asignados a la profesional ──
         if ($servicios->pluck('id')->diff($profesional->servicios->pluck('id'))->isNotEmpty()) {
             return response()->json([
