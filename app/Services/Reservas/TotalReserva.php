@@ -30,9 +30,11 @@ class TotalReserva
 
         $total = 0.0;
         foreach ($tramos as $tramo) {
+            // servicios_sin_precio: tramo fusionado (promo + suelto) cuyo
+            // precio_sugerido no incluye esos servicios; ausente en reservas viejas.
             $total += isset($tramo['precio_sugerido'])
-                ? (float) $tramo['precio_sugerido']
-                : $this->precioDeServicios((int) $reserva->user_id, $tramo['servicio_ids'] ?? []);
+                ? (float) $tramo['precio_sugerido'] + $this->precioDeServicios((int) $reserva->user_id, $tramo['servicios_sin_precio'] ?? [])
+                :$this->precioDeServicios((int) $reserva->user_id, $tramo['servicio_ids'] ?? []);
         }
 
         return $total;

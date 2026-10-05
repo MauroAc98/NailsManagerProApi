@@ -104,6 +104,28 @@ class TotalReservaTest extends TestCase
         $this->assertSame(19000.0, (new TotalReserva())->de($reserva));
     }
 
+    public function test_tramo_fusionado_promo_mas_suelto_suma_el_precio_del_suelto(): void
+    {
+        $c1 = $this->servicio(10000);
+        $c2 = $this->servicio(10000);
+        $suelto = $this->servicio(4000);
+        // TramosResolver fusiono el suelto en el tramo de la misma profesional: precio_sugerido
+        // solo trae el prorrateo de la promo y servicios_sin_precio marca lo que no lo incluye.
+        $fusionado = $this->tramo([$c2->id, $suelto->id], 7500, 2, 0) + ['servicios_sin_precio' => [$suelto->id]];
+        $reserva = $this->reserva([$c1->id, $c2->id, $suelto->id], [$this->tramo([$c1->id], 7500, 1, 0), $fusionado]);
+
+        $this->assertSame(19000.0, (new TotalReserva())->de($reserva));
+    }
+
+    public function test_tramo_fusionado_con_pieza_con_precio_y_pieza_de_servicio_con_precio_nulo(): void
+    {
+        $a = $this->servicio(null);
+        $b = $this->servicio(3000);
+        $fusionado = $this->tramo([$a->id, $b->id], 5000, 1, 0) + ['servicios_sin_precio' => [$a->id, $b->id]];
+
+        $this->assertSame(8000.0, (new TotalReserva())->de($this->reserva([$a->id, $b->id], [$fusionado])));
+    }
+
     public function test_precios_nulos_cuentan_como_cero(): void
     {
         $a = $this->servicio(null);

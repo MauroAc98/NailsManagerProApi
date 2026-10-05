@@ -313,6 +313,14 @@ class AuthController extends Controller
                 ]);
             }
 
+            // La plantilla de WhatsApp de la seña (reserva_turno_sena) solo
+            // soporta un monto fijo hasta una slice posterior.
+            if ($esPorcentaje && $valorFinal('whatsapp_pide_sena')) {
+                throw ValidationException::withMessages([
+                    'whatsapp_pide_sena' => ['Con la seña en porcentaje todavía no se puede pedir la seña en las confirmaciones de WhatsApp: ese mensaje solo admite un monto fijo.'],
+                ]);
+            }
+
             if ($valorFinal('whatsapp_pide_sena')) {
                 $errores = [];
 

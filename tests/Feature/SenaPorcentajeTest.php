@@ -310,19 +310,31 @@ class SenaPorcentajeTest extends TestCase
         $this->putPerfil($user->fresh(), ['sena_monto' => null])->assertStatus(422)->assertJsonValidationErrors('sena_monto');
     }
 
-    public function test_pide_sena_en_porcentaje_exige_el_porcentaje_no_el_monto(): void
+    public function test_pide_sena_por_whatsapp_se_rechaza_en_modo_porcentaje(): void
     {
         $user = User::factory()->create([
             'is_exempt' => true, 'direccion' => 'Calle 1', 'latitud' => -27.4, 'longitud' => -58.8,
             'sena_monto' => null,
         ]);
 
+        // Todo completo, pero la plantilla de WhatsApp solo soporta monto fijo.
         $this->putPerfil($user, [
             'whatsapp_pide_sena' => true, 'sena_tipo' => 'porcentaje', 'sena_porcentaje' => 30,
             'whatsapp_sena_titular' => 'Ana', 'whatsapp_sena_alias' => 'ana.mp',
-        ])->assertOk();
+        ])->assertStatus(422)->assertJsonValidationErrors('whatsapp_pide_sena');
+        $this->assertFalse((bool) $user->fresh()->whatsapp_pide_sena);
 
-        $this->putPerfil($user->fresh(), ['sena_porcentaje' => null])
-            ->assertStatus(422)->assertJsonValidationErrors('sena_porcentaje');
+        // Cambiar a porcentaje con el toggle ya activo tambien se rechaza.
+        $activo = User::factory()->create([
+            'is_exempt' => true, 'direccion' => 'Calle 1', 'latitud' => -27.4, 'longitud' => -58.8,
+            'sena_monto' => 5000, 'whatsapp_pide_sena' => true,
+            'whatsapp_sena_titular' => 'Ana', 'whatsapp_sena_alias' => 'ana.mp',
+        ]);
+        $this->putPerfil($activo, ['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 30])
+            ->assertStatus(422)->assertJsonValidationErrors('whatsapp_pide_sena');
+
+        // Apagando el toggle en el mismo request si se permite.
+        $this->putPerfil($activo->fresh(), ['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 30, 'whatsapp_pide_sena' => false])
+            ->assertOk();
     }
 }
