@@ -9,6 +9,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use App\Models\User;
 use Illuminate\Validation\ValidationException;
 
 class ProfesionalController extends Controller
@@ -144,6 +145,10 @@ class ProfesionalController extends Controller
 
         $profesional = Profesional::delUsuario($request->user())->findOrFail($id);
 
+        if (array_key_exists('activo', $data) && ! $data['activo']) {
+            $this->exigirOtraActiva($request->user(), $profesional);
+        }
+
         // Merge por modo, NO reemplazo entero de la columna — un payload
         // que solo trae 'precios' (la validación de arriba lo permite,
         // 'sometimes' en cada hoja) no debe borrar 'promociones' ya
@@ -179,11 +184,30 @@ class ProfesionalController extends Controller
     public function destroy(Request $request, int $id): JsonResponse
     {
         $profesional = Profesional::delUsuario($request->user())->findOrFail($id);
+        $this->exigirOtraActiva($request->user(), $profesional);
         $profesional->update(['activo' => false]);
 
         return response()->json([
             'message' => 'Profesional desactivado correctamente.',
         ]);
+    }
+
+    /**
+     * Un salon sin profesionales activas no puede recibir reservas ni turnos:
+     * no se deja desactivar a la ultima.
+     */
+    private function exigirOtraActiva(User $user, Profesional $profesional): void
+    {
+        $hayOtra = Profesional::delUsuario($user)
+            ->where('activo', true)
+            ->where('id', '!=', $profesional->id)
+            ->exists();
+
+        if (! $hayOtra && $profesional->activo) {
+            throw ValidationException::withMessages([
+                'activo' => 'Tiene que quedar al menos una profesional activa.',
+            ]);
+        }
     }
 
     // ─────────────────────────────────────────────
