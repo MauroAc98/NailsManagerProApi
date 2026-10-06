@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Services\Reservas\MercadoPagoService;
+use App\Models\Setting;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Concerns\CreaSalonPublico;
 use Tests\TestCase;
@@ -16,44 +17,51 @@ class PublicTerminosTest extends TestCase
 {
     use CreaSalonPublico, RefreshDatabase;
 
-    // deposito ya NO es el neto de sena_monto: es lo que se le cobra a la
-    // clienta para que, descontada la comision de MP, el negocio reciba los
-    // 5000 completos (ver MercadoPagoService::montoACobrar) — tiene que
-    // coincidir con lo que despues ve en el checkout real de MP.
-    public function test_devuelve_el_deposito_a_cobrar_incluyendo_la_comision_de_mp(): void
+    // deposito = la seña fija exacta (sin gross-up por comision ni retencion):
+    // es lo que el cliente ve y despues paga en el checkout de MP.
+    public function test_devuelve_el_deposito_fijo_exacto(): void
     {
         config(['reservas.pago_minutos' => 15, 'reservas.anticipacion_minutos' => 120, 'reservas.cancelacion_horas' => 24]);
         $user = $this->crearSalon(['sena_monto' => 5000]);
-        // Con comision 6,29% + IVA el crudo es 5411,89 -> redondeado hacia arriba a 5500.
-        $depositoEsperado = 5500.0;
 
         $this->getJson("/api/public/{$user->slug}/terminos")
             ->assertOk()
             ->assertExactJson([
-                'deposito' => $depositoEsperado,
+                'deposito' => 5000.0,
                 'ventana_pago_minutos' => 15,
                 'anticipacion_minutos' => 120,
                 'ventana_cancelacion_horas' => 24,
             ]);
     }
 
-    // La retencion de IIBB es por negocio: se suma al deposito que ve el cliente.
-    public function test_el_deposito_incluye_la_retencion_iibb_del_negocio(): void
+    public function test_la_retencion_iibb_no_cambia_el_deposito(): void
     {
         $user = $this->crearSalon(['sena_monto' => 5000, 'retencion_iibb_porcentaje' => 4]);
 
         $this->getJson("/api/public/{$user->slug}/terminos")
             ->assertOk()
-            ->assertJsonPath('deposito', 5700);
+            ->assertJsonPath('deposito', 5000);
     }
 
-    public function test_la_comision_propia_del_negocio_cambia_el_deposito(): void
+    public function test_la_comision_global_no_cambia_el_deposito(): void
     {
-        $user = $this->crearSalon(['sena_monto' => 5000, 'comision_mp_porcentaje' => 10]);
+        Setting::create(['key' => 'comision_mp_porcentaje', 'value' => '15']);
+        $user = $this->crearSalon(['sena_monto' => 5000]);
 
         $this->getJson("/api/public/{$user->slug}/terminos")
             ->assertOk()
-            ->assertJsonPath('deposito', 5700);
+            ->assertJsonPath('deposito', 5000);
+    }
+
+    public function test_en_porcentaje_el_deposito_es_null_y_expone_tipo_y_porcentaje(): void
+    {
+        $user = $this->crearSalon(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 30, 'sena_monto' => null]);
+
+        $this->getJson("/api/public/{$user->slug}/terminos")
+            ->assertOk()
+            ->assertJsonPath('deposito', null)
+            ->assertJsonPath('sena_tipo', 'porcentaje')
+            ->assertJsonPath('sena_porcentaje', 30);
     }
 
     public function test_sin_sena_configurada_el_deposito_es_cero(): void

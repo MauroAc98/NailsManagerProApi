@@ -20,6 +20,8 @@ class AdminPerfilNotificacionesShapeTest extends AdminContractTestCase
             'recordatorio_automatico' => 'bool', 'confirmacion_automatica' => 'bool',
             'hora_recordatorio' => 'string', 'is_exempt' => 'bool', 'debe_cambiar_password' => 'bool',
             'whatsapp_pide_sena' => 'bool', 'sena_monto' => 'string',
+            'sena_tipo' => 'string', 'sena_porcentaje' => 'number|null',
+            'retencion_iibb_porcentaje' => 'number', 'comision_mp_vigente' => 'number',
             'whatsapp_sena_titular' => 'string|null', 'whatsapp_sena_entidad' => 'string|null',
             'whatsapp_sena_alias' => 'string|null', 'whatsapp_sena_cbu' => 'string|null',
             'notificaciones_vistas_at' => 'string|null',

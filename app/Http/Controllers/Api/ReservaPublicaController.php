@@ -125,10 +125,9 @@ class ReservaPublicaController extends Controller
             'fecha' => $this->fecha($reserva),
             'hora' => $this->hora($reserva),
             'duracion_total_minutos' => (int) $reserva->duracion_total_minutos,
-            // Lo cobrado, no el neto que pidio el negocio (ver
-            // MercadoPagoService::montoACobrar) — tiene que coincidir con lo
-            // que ya vio en Resumen/terminos antes de pagar.
-            'deposito' => $this->monto($this->mercadoPago->montoACobrar((float) ($user->sena_monto ?? 0), $user)),
+            // Con un PagoSena ya creado, el monto congelado de ese cobro; si
+            // no, la seña sobre el precio congelado del hold. Es lo que se cobra.
+            'deposito' => ($d = $this->mercadoPago->depositoParaReserva($user, $reserva)) === null ? null : $this->monto($d),
             'nota' => $reserva->nota,
         ];
         if ($reserva->tramos !== null) {

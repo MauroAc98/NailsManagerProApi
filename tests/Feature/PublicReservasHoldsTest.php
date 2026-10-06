@@ -106,6 +106,13 @@ class PublicReservasHoldsTest extends TestCase
         $this->assertSame(40, strlen($resp->json('token')));
     }
 
+    public function test_hold_congela_el_precio_total_de_la_reserva(): void
+    {
+        $token = $this->crearHold();
+
+        $this->assertSame(12000, ReservaWeb::where('public_token', $token)->value('precio_total'));
+    }
+
     public function test_hold_replay_con_la_misma_key_devuelve_200_y_el_mismo_token(): void
     {
         $token = $this->crearHold();
@@ -268,15 +275,14 @@ class PublicReservasHoldsTest extends TestCase
 
     // -- 5. estado --------------------------------------------------
 
-    // deposito ya NO es sena_monto crudo: es lo que se le cobra a la
-    // clienta para que, descontada la comision de MP, el negocio reciba los
-    // 5000 completos (ver MercadoPagoService::montoACobrar).
+    // deposito = la seña exacta que paga el cliente (sin gross-up por la
+    // comision de MP), tope el precio de la reserva.
     public function test_estado_devuelve_el_contrato_con_resumen(): void
     {
         $this->user->update(['sena_monto' => 5000]);
         $token = $this->crearHold();
         $this->datos($token)->assertOk();
-        $depositoEsperado = app(MercadoPagoService::class)->montoACobrar(5000);
+        $depositoEsperado = 5000;
 
         $this->getJson($this->url("/{$token}"), $this->headers(self::DEVICE, null))->assertOk()->assertExactJson([
             'token' => $token,

@@ -242,7 +242,7 @@ class TramosResolverTest extends TestCase
         $planes = $this->resolver()->planes($this->promo(PlanReserva::PARALELO), [$this->suelto(self::ANA, 13, 30)], true);
 
         $this->assertSame([
-            $this->tramo(self::ANA, 0, 90, [11, 13], 13000),
+            $this->tramo(self::ANA, 0, 90, [11, 13], 13000) + ['servicios_sin_precio' => [13]],
             $this->tramo(self::LAURA, 0, 45, [12], 9000),
         ], $planes[0]->tramos);
     }
@@ -262,7 +262,7 @@ class TramosResolverTest extends TestCase
 
         $this->assertSame([
             $this->tramo(self::ANA, 0, 60, [11], 13000),
-            $this->tramo(self::LAURA, 60, 75, [12, 13], 9000),
+            $this->tramo(self::LAURA, 60, 75, [12, 13], 9000) + ['servicios_sin_precio' => [13]],
         ], $planes[0]->tramos);
     }
 

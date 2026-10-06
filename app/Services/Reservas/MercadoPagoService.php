@@ -60,14 +60,18 @@ class MercadoPagoService
         }
 
         $credencial = $user->mpCredentials;
-        $senaMonto = round((float) ($user->sena_monto ?? 0), 2);
-        if ($credencial === null || $senaMonto <= 0) {
+        if ($credencial === null || ! $user->senaConfigCompleta()) {
             throw ReservaPublicaException::mpNoConectado();
         }
 
-        // Se cobra de mas para que, despues de la comision de MP, el negocio
-        // reciba el monto de seña completo — ver montoACobrar().
-        $monto = $this->montoACobrar($senaMonto, $user);
+        // El cliente paga EXACTAMENTE la seña (sin gross-up: la comision de MP
+        // la absorbe el profesional). Nunca se cobra 0: porcentaje sin precio
+        // conocido (o con seña que da 0) -> sena_sin_total.
+        $monto = $this->senaDeReserva($user, $reserva);
+        if ($monto <= 0) {
+            throw ReservaPublicaException::senaSinTotal();
+        }
+        $this->congelarPrecioTotal($reserva);
 
         // reservas.base_url, NUNCA services.frontend_url (ese apunta a
         // app.turnetto.com, el dashboard) — ver comentario en config/reservas.php.
@@ -144,11 +148,87 @@ class MercadoPagoService
         ]);
     }
 
+    /**
+     * Seña exacta que paga el cliente por un precio dado. Fijo: min(sena_monto,
+     * precio). Porcentaje: round(precio * pct / 100) en pesos enteros, tope el
+     * precio. 0 si la config es invalida o el precio es <= 0. `null` = precio
+     * desconocido (p. ej. /terminos): el fijo va sin tope y el porcentaje da 0.
+     */
+    public function senaParaPrecio(User $user, int|float|null $precio): float
+    {
+        if (! $user->senaConfigCompleta()) {
+            return 0.0;
+        }
+        if ($precio !== null && $precio <= 0) {
+            return 0.0;
+        }
+
+        if ($user->senaEsPorcentaje()) {
+            $pct = (float) $user->sena_porcentaje;
+            if ($precio === null || $pct > 100) {
+                return 0.0;
+            }
+
+            return min((float) round($precio * $pct / 100), (float) $precio);
+        }
+
+        $monto = round((float) $user->sena_monto, 2);
+
+        return $precio === null ? $monto : min($monto, (float) $precio);
+    }
+
+    /**
+     * Precio total de la reserva: el snapshot (reservas_web.precio_total, tomado
+     * al crear el hold) o, para reservas sin snapshot, el calculo de
+     * TotalReserva. null = desconocido (total 0).
+     */
+    public function precioTotalDe(ReservaWeb $reserva): ?int
+    {
+        if ($reserva->precio_total !== null) {
+            return (int) $reserva->precio_total;
+        }
+
+        $total = (int) round((new TotalReserva())->de($reserva));
+
+        return $total > 0 ? $total : null;
+    }
+
+    public function senaDeReserva(User $user, ReservaWeb $reserva): float
+    {
+        return $this->senaParaPrecio($user, $this->precioTotalDe($reserva));
+    }
+
+    private function congelarPrecioTotal(ReservaWeb $reserva): void
+    {
+        if ($reserva->precio_total === null && ($precio = $this->precioTotalDe($reserva)) !== null) {
+            $reserva->forceFill(['precio_total' => $precio])->save();
+        }
+    }
+
+    /**
+     * Seña que se le muestra al cliente para una reserva concreta: el monto
+     * ya cobrado (PagoSena, congelado en el primer /pago) si existe; si no, el
+     * calculo con la config actual. null = porcentaje sin total determinable.
+     */
+    public function depositoParaReserva(User $user, ReservaWeb $reserva): ?float
+    {
+        $pago = PagoSena::where('reserva_web_id', $reserva->id)->latest('id')->first();
+        if ($pago !== null) {
+            return (float) $pago->monto;
+        }
+
+        $sena = $this->senaDeReserva($user, $reserva);
+        if ($sena <= 0 && $user->senaEsPorcentaje()) {
+            return null;
+        }
+
+        return $sena;
+    }
+
     // Comision de Mercado Pago por cobro "al instante" (Setting global,
     // panel admin > Configuracion) — el negocio la ve en su propia cuenta de
-    // MP bajo "Dinero disponible en". Constante para todos los negocios por
-    // ahora (fase 1): si algun negocio tuviera una tasa negociada distinta,
-    // pasa a ser por-negocio mas adelante.
+    // MP bajo "Dinero disponible en". Unica fuente: ya no hay comision por
+    // negocio. La absorbe el profesional (el cliente paga solo la seña).
     // Publica: AdminController::obtenerSettings la usa como default a
     // mostrar cuando todavia no se guardo un valor explicito. Es la comision
     // TAL CUAL la muestra el panel de MP ("Dinero disponible en") — SIN IVA,
@@ -157,51 +237,15 @@ class MercadoPagoService
 
     // El cargo real que MP descuenta incluye 21% de IVA sobre su comision —
     // confirmado contra un cobro real: comision nominal 6,29%, cargo
-    // efectivo 7,59% (6,29 * 1,21). Se aplica siempre aca, no se le pide al
-    // admin que lo sume a mano al cargar el %.
+    // efectivo 7,59% (6,29 * 1,21).
     private const IVA_PORCENTAJE = 21;
 
-    // Multiplo al que se redondea SIEMPRE hacia arriba el monto cobrado
-    // (nunca al mas cercano ni hacia abajo). Un monto de prueba chico (ej.
-    // $10) se infla a $100: es intencional.
-    public const REDONDEO_SENA_MULTIPLO = 100;
-
-    // Tope de la tasa total (comision con IVA + retencion). Las tasas por
-    // separado estan acotadas (comision <= 50, retencion <= 50), pero juntas
-    // podrian llegar a >= 100% y dividir por cero o por un negativo.
-    private const TASA_TOTAL_MAXIMA = 95;
-
-    /**
-     * Monto a cobrarle al cliente para que, descontada la comision de MP (con
-     * IVA incluido; la del negocio o, si no cargo una, la global) y la
-     * retencion de Ingresos Brutos del negocio (0 si no tiene), el negocio reciba al menos `$senaMonto` neto. Formula:
-     * bruto = neto / (1 - (comision * 1,21 + retencion) / 100), y el resultado
-     * se redondea hacia arriba al proximo multiplo de REDONDEO_SENA_MULTIPLO.
-     * 0 se mantiene en 0 (sin seña configurada, no hay nada que cobrar).
-     */
-    public function montoACobrar(float $senaMonto, ?User $salon = null): float
+    /** Comision efectiva de MP (con IVA), en %: Setting global o la constante, por 1,21. */
+    public function comisionVigente(): float
     {
-        if ($senaMonto <= 0) {
-            return 0.0;
-        }
+        $nominal = (float) (Setting::get('comision_mp_porcentaje') ?? self::COMISION_MP_DEFAULT);
 
-        // Comision: la del negocio si la cargo; si no, la global (Setting);
-        // si no, la constante.
-        $comisionNominal = (float) ($salon?->comision_mp_porcentaje
-            ?? Setting::get('comision_mp_porcentaje')
-            ?? self::COMISION_MP_DEFAULT);
-        $retencionIibb = (float) ($salon?->retencion_iibb_porcentaje ?? 0);
-        $tasaTotal = $comisionNominal * (1 + self::IVA_PORCENTAJE / 100) + max(0.0, $retencionIibb);
-        $tasaTotal = min($tasaTotal, self::TASA_TOTAL_MAXIMA);
-
-        $bruto = $senaMonto / (1 - $tasaTotal / 100);
-
-        // Centavos enteros: primero a centavos (absorbe ruido de float como
-        // 5600.00000001) y recien despues el ceil al multiplo.
-        $centavos = (int) round($bruto * 100);
-        $multiplo = self::REDONDEO_SENA_MULTIPLO * 100;
-
-        return (float) ((int) ceil($centavos / $multiplo) * self::REDONDEO_SENA_MULTIPLO);
+        return $nominal * (1 + self::IVA_PORCENTAJE / 100);
     }
 
     /**

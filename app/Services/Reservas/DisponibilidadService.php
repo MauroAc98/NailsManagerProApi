@@ -127,7 +127,8 @@ class DisponibilidadService
                     'fin' => $inicioLider->copy()->addMinutes($plan->duracionTotalMinutos())->format('H:i'),
                     'profesional_ids' => array_values(array_unique(array_column($plan->tramos, 'profesional_id'))),
                     'modo' => $plan->modo,
-                    'tramos' => $plan->tramos,
+                    // servicios_sin_precio es un dato interno (ver TotalReserva): no sale en la API.
+                    'tramos' => array_map(fn (array $t) => array_diff_key($t, ['servicios_sin_precio' => true]), $plan->tramos),
                 ];
                 continue 2;
             }

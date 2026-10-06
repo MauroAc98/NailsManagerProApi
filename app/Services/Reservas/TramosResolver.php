@@ -125,11 +125,18 @@ class TramosResolver
             foreach ($fusionados as $i => $previo) {
                 if ($previo['profesional_id'] === $tramo['profesional_id']
                     && $previo['offset_minutos'] + $previo['duracion_minutos'] === $tramo['offset_minutos']) {
+                    $sinPrecio = [...($previo['servicios_sin_precio'] ?? ($previo['precio_sugerido'] === null ? $previo['servicio_ids'] : [])),
+                        ...($tramo['servicios_sin_precio'] ?? ($tramo['precio_sugerido'] === null ? $tramo['servicio_ids'] : []))];
                     $fusionados[$i]['duracion_minutos'] += $tramo['duracion_minutos'];
                     $fusionados[$i]['servicio_ids'] = [...$previo['servicio_ids'], ...$tramo['servicio_ids']];
                     $fusionados[$i]['precio_sugerido'] = $previo['precio_sugerido'] === null && $tramo['precio_sugerido'] === null
                         ? null
                         : ($previo['precio_sugerido'] ?? 0) + ($tramo['precio_sugerido'] ?? 0);
+                    // Pieza con precio + pieza sin precio: el precio sugerido no incluye a
+                    // estos servicios; se anotan para que TotalReserva los sume aparte.
+                    if ($fusionados[$i]['precio_sugerido'] !== null && $sinPrecio !== []) {
+                        $fusionados[$i]['servicios_sin_precio'] = $sinPrecio;
+                    }
                     continue 2;
                 }
             }

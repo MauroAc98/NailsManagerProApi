@@ -98,9 +98,9 @@ class Turno extends Model
      *
      * `sena` is null when the turno has no reserva web or that reserva has no
      * PagoSena; otherwise { monto, estado, reserva_web_id }. `monto` is what
-     * the client was CHARGED (stored PagoSena.monto, including the Mercado
-     * Pago commission/retention gross-up and rounding), NOT the net seña the
-     * salon configured. `estado` is the raw value; only 'aprobado' means paid
+     * the client was CHARGED (stored PagoSena.monto: exactly the deposit,
+     * no commission gross-up), which for percentage mode is computed on the
+     * reserva total. `estado` is the raw value; only 'aprobado' means paid
      * ('pendiente', 'rechazado', 'expirado' are exposed as-is for the UI to
      * decide). No paid-at key: pagos_sena has no dedicated timestamp.
      *

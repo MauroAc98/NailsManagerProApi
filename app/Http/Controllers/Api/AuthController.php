@@ -73,7 +73,7 @@ class AuthController extends Controller
         $token = $user->createToken('app-mobile')->plainTextToken;
 
         return response()->json([
-            'user' => $user,
+            'user' => $user->append('comision_mp_vigente'),
             'token' => $token,
         ]);
     }
@@ -112,7 +112,7 @@ class AuthController extends Controller
         $token = $user->createToken('app-mobile')->plainTextToken;
 
         return response()->json([
-            'user' => $user,
+            'user' => $user->append('comision_mp_vigente'),
             'token' => $token,
         ]);
     }
@@ -134,7 +134,7 @@ class AuthController extends Controller
     // ─────────────────────────────────────────────
     public function me(Request $request): JsonResponse
     {
-        return response()->json($request->user());
+        return response()->json($request->user()->append('comision_mp_vigente'));
     }
 
     // ─────────────────────────────────────────────
@@ -157,11 +157,14 @@ class AuthController extends Controller
             'confirmacion_automatica' => 'sometimes|boolean',
             'hora_recordatorio' => 'sometimes|string|in:18:00,19:00,20:00,21:00,22:00',
             'sena_monto' => 'sometimes|nullable|numeric|min:0',
-            // Retencion de Ingresos Brutos que MP le aplica al negocio; la
-            // decide cada negocio (ver MercadoPagoService::montoACobrar).
+            // Modo de la seña: monto fijo (sena_monto) o % del total de la
+            // reserva. El rango 1..100 se exige abajo solo si el modo final
+            // es porcentaje.
+            'sena_tipo' => 'sometimes|in:fijo,porcentaje',
+            'sena_porcentaje' => 'sometimes|nullable|numeric|min:0|max:100',
+            // Retencion de Ingresos Brutos que MP le aplica al negocio: dato
+            // informativo para el preview, no cambia lo que se cobra.
             'retencion_iibb_porcentaje' => 'sometimes|nullable|numeric|min:0|max:50',
-            // Comision de MP propia del negocio; null = usa la global.
-            'comision_mp_porcentaje' => 'sometimes|nullable|numeric|min:0|max:50',
             'whatsapp_pide_sena' => 'sometimes|boolean',
             // not_regex: los datos bancarios viajan como parámetros de la
             // plantilla Meta reserva_turno_sena — un salto de línea o tab
@@ -274,7 +277,7 @@ class AuthController extends Controller
         // pidiendo seña, se exige monto > 0 + titular + (alias o CBU).
         // Apagar el toggle no borra nada — los datos bancarios quedan
         // guardados para reactivarlo sin recargarlos.
-        $camposSena = ['whatsapp_pide_sena', 'sena_monto', 'whatsapp_sena_titular', 'whatsapp_sena_entidad', 'whatsapp_sena_alias', 'whatsapp_sena_cbu'];
+        $camposSena = ['whatsapp_pide_sena', 'sena_monto', 'sena_tipo', 'sena_porcentaje', 'whatsapp_sena_titular', 'whatsapp_sena_entidad', 'whatsapp_sena_alias', 'whatsapp_sena_cbu'];
         $tocaSena = (bool) array_intersect($camposSena, array_keys($data));
 
         if ($tocaSena) {
@@ -285,19 +288,44 @@ class AuthController extends Controller
             // PublicController::info -> pago_habilitado). Vaciarla sin darse
             // cuenta dejaría el flujo bloqueado para cualquier clienta nueva
             // sin ningún aviso — se corta acá antes de guardar.
-            $montoFinalMp = $valorFinal('sena_monto');
-            if ((! is_numeric($montoFinalMp) || (float) $montoFinalMp <= 0) && $user->mpCredentials !== null) {
+            // Seña completa segun el modo FINAL: fijo = sena_monto > 0,
+            // porcentaje = sena_porcentaje > 0 (el campo del otro modo no cuenta).
+            $esPorcentaje = $valorFinal('sena_tipo') === 'porcentaje';
+            $campoSena = $esPorcentaje ? 'sena_porcentaje' : 'sena_monto';
+            $valorSena = $valorFinal($campoSena);
+            $senaCompleta = is_numeric($valorSena) && (float) $valorSena > 0;
+
+            // En modo porcentaje el valor tiene que estar entre 1 y 100.
+            // Vaciarlo con MP conectado lo cubre el guard de abajo (mensaje propio).
+            $porcentajeVacio = ! is_numeric($valorSena) || (float) $valorSena <= 0;
+            $fueraDeRango = is_numeric($valorSena) && ((float) $valorSena < 1 || (float) $valorSena > 100);
+            if ($esPorcentaje && ($fueraDeRango || ($porcentajeVacio && $user->mpCredentials === null))) {
                 throw ValidationException::withMessages([
-                    'sena_monto' => ['No podés vaciar la seña: tenés Mercado Pago conectado y la reserva online la necesita para cobrar.'],
+                    'sena_porcentaje' => ['El porcentaje de la seña tiene que estar entre 1 y 100.'],
+                ]);
+            }
+
+            if (! $senaCompleta && $user->mpCredentials !== null) {
+                throw ValidationException::withMessages([
+                    $campoSena => ['No podés vaciar la seña: tenés Mercado Pago conectado y la reserva online la necesita para cobrar.'],
+                ]);
+            }
+
+            // La plantilla de WhatsApp de la seña (reserva_turno_sena) solo
+            // soporta un monto fijo hasta una slice posterior.
+            if ($esPorcentaje && $valorFinal('whatsapp_pide_sena')) {
+                throw ValidationException::withMessages([
+                    'whatsapp_pide_sena' => ['Con la seña en porcentaje todavía no se puede pedir la seña en las confirmaciones de WhatsApp: ese mensaje solo admite un monto fijo.'],
                 ]);
             }
 
             if ($valorFinal('whatsapp_pide_sena')) {
                 $errores = [];
 
-                $montoFinal = $valorFinal('sena_monto');
-                if (! is_numeric($montoFinal) || (float) $montoFinal <= 0) {
-                    $errores['sena_monto'] = ['Cargá el monto de la seña para pedirla en las confirmaciones.'];
+                if (! $senaCompleta) {
+                    $errores[$campoSena] = [$esPorcentaje
+                        ? 'Cargá el porcentaje de la seña para pedirla en las confirmaciones.'
+                        : 'Cargá el monto de la seña para pedirla en las confirmaciones.'];
                 }
 
                 // direccion es el parámetro fijo {{6}} de reserva_turno_sena.
@@ -352,9 +380,17 @@ class AuthController extends Controller
             $data['retencion_iibb_porcentaje'] = 0;
         }
 
+        // Modo de la seña mutuamente excluyente: se limpia el campo del modo
+        // que no quedo activo (fijo -> sena_porcentaje null, porcentaje ->
+        // sena_monto null). Solo si la request toco algun campo de la seña.
+        if (array_intersect(['sena_tipo', 'sena_monto', 'sena_porcentaje'], array_keys($data))) {
+            $tipoFinal = $data['sena_tipo'] ?? $user->sena_tipo;
+            $data[$tipoFinal === 'porcentaje' ? 'sena_monto' : 'sena_porcentaje'] = null;
+        }
+
         $user->update($data);
 
-        return response()->json($user);
+        return response()->json($user->append('comision_mp_vigente'));
     }
 
     // ─────────────────────────────────────────────

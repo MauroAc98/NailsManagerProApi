@@ -43,6 +43,7 @@ class ReservaWeb extends Model
         'motivo_cierre',
         'tramos',
         'tramos_modo',
+        'precio_total',
     ];
 
     protected function casts(): array
@@ -52,6 +53,7 @@ class ReservaWeb extends Model
             // Offsets/duraciones en minutos enteros: JSON puro, sin fechas.
             'tramos'                 => 'array',
             'duracion_total_minutos' => 'integer',
+            'precio_total'           => 'integer',
             'expira_en'              => 'integer',
             'confirmada_en'          => 'integer',
             'pago_extendido'         => 'boolean',
