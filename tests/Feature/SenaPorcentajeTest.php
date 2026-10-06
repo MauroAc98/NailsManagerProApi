@@ -69,7 +69,7 @@ class SenaPorcentajeTest extends TestCase
 
     // -- MercadoPagoService ------------------------------------------
 
-    public function test_cobra_el_porcentaje_con_gross_up_redondeado_a_100(): void
+    public function test_cobra_exactamente_el_porcentaje_sin_gross_up(): void
     {
         $user = $this->salonPct();
         $s = $this->crearServicio($user); // 12000
@@ -78,28 +78,8 @@ class SenaPorcentajeTest extends TestCase
 
         $pago = $svc->crearOReusarPreferencia($user, $this->reserva($user, [$s->id]));
 
-        // neto 12000 * 30% = 3600; 3600 / 0.923891 = 3896.5 -> 3900.
-        $this->assertEquals(3900, $pago->monto);
-    }
-
-    public function test_50_por_ciento_de_18000_cobra_9800_y_el_cap_al_precio_con_100(): void
-    {
-        $user = $this->salonPct(['sena_porcentaje' => 50]);
-        $s = $this->servicioConPrecio($user, 18000);
-        $this->fakeMp();
-        $svc = app(MercadoPagoService::class);
-
-        $pago = $svc->crearOReusarPreferencia($user, $this->reserva($user, [$s->id]));
-
-        // neto 9000; t = 7.6109 -> 9741.4 -> 9800
-        $this->assertEquals(9800, $pago->monto);
-
-        $user2 = $this->salonPct(['sena_porcentaje' => 100]);
-        $s2 = $this->servicioConPrecio($user2, 18000);
-        $pago2 = $svc->crearOReusarPreferencia($user2, $this->reserva($user2, [$s2->id]));
-
-        // Gross would exceed the price: capped, the professional absorbs the rest.
-        $this->assertEquals(18000, $pago2->monto);
+        // 12000 * 30% = 3600 exactos: sin gross-up ni redondeo a 100.
+        $this->assertEquals(3600, $pago->monto);
     }
 
     public function test_la_sena_se_redondea_a_pesos_enteros(): void
@@ -111,9 +91,8 @@ class SenaPorcentajeTest extends TestCase
 
         $pago = $svc->crearOReusarPreferencia($user, $this->reserva($user, [$s->id]));
 
-        // neto: 1001 * 33.33 / 100 = 333.633 -> 334 (pesos enteros);
-        // cobrado: 334 / 0.923891 = 361.5 -> 400.
-        $this->assertEquals(400, $pago->monto);
+        // 1001 * 33.33 / 100 = 333.633 -> 334
+        $this->assertEquals(334, $pago->monto);
     }
 
     public function test_sin_total_no_cobra_y_no_crea_pago_ni_llama_a_mp(): void
@@ -186,8 +165,7 @@ class SenaPorcentajeTest extends TestCase
 
         $pago = $svc->crearOReusarPreferencia($user, $this->reserva($user, [$s->id]));
 
-        // 5000 / 0.923891 = 5411.9 -> 5500
-        $this->assertEquals(5500, $pago->monto);
+        $this->assertEquals(5000, $pago->monto);
     }
 
     public function test_fijo_se_topea_al_precio_de_la_reserva(): void
@@ -223,7 +201,7 @@ class SenaPorcentajeTest extends TestCase
 
         $this->getJson("/api/public/{$user->slug}/reservas/{$reserva->public_token}", ['X-Device-Token' => 'device-token-de-prueba-0123456789abcdef'])
             ->assertOk()
-            ->assertJsonPath('resumen.deposito', 3900);
+            ->assertJsonPath('resumen.deposito', 3600);
     }
 
     // -- Endpoints publicos ------------------------------------------
@@ -283,7 +261,7 @@ class SenaPorcentajeTest extends TestCase
         $user = $this->salonPct();
         $s = $this->crearServicio($user); // 12000
         $reserva = $this->reserva($user, [$s->id], ['estado' => 'held']);
-        $esperado = 3900; // 3600 neto grossed up and rounded to 100
+        $esperado = 3600;
 
         $this->getJson("/api/public/{$user->slug}/reservas/{$reserva->public_token}", ['X-Device-Token' => 'device-token-de-prueba-0123456789abcdef'])
             ->assertOk()

@@ -93,11 +93,10 @@ class MercadoPagoServiceTest extends TestCase
         $this->assertSame(0, PagoSena::count());
     }
 
-    // El cliente paga la seña BRUTA: el neto que el profesional quiere recibir
-    // mas la comision de MP (con IVA) y la retencion de IIBB, redondeado hacia
-    // arriba al proximo multiplo de $100. Lo que se manda a MP y lo que queda en
-    // PagoSena.monto es el MISMO numero (sincronizarPago() lo compara contra
-    // transaction_amount). Sin precio conocido el fijo va sin tope.
+    // El cliente paga EXACTAMENTE la seña: lo que se manda a MP y lo que queda
+    // en PagoSena.monto es el deposito, sin gross-up por comision ni retencion
+    // (la comision de MP la absorbe el profesional). sincronizarPago() compara
+    // esto contra transaction_amount, asi que tienen que ser el MISMO numero.
     public function test_crea_la_preferencia_con_el_token_del_negocio_y_guarda_el_pago(): void
     {
         $user = $this->negocio();
@@ -110,19 +109,19 @@ class MercadoPagoServiceTest extends TestCase
         $this->assertSame('ORDER-123', $pago->mp_preference_id);
         $this->assertSame('https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=ORDER-123', $pago->init_point);
         $this->assertSame('pendiente', $pago->estado);
-        // 5000 / (1 - 0.076109) = 5411.9 -> 5500
-        $this->assertSame(5500.0, (float) $pago->monto);
+        $this->assertSame(5000.0, (float) $pago->monto);
 
         Http::assertSent(function (HttpRequest $r) use ($reserva) {
             return $r->hasHeader('Authorization', 'Bearer APP_USR-token-de-natalia')
                 && $r['type'] === 'online'
-                && $r['total_amount'] === '5500.00'
+                && $r['total_amount'] === '5000.00'
                 && $r['external_reference'] === $reserva->public_token
-                && $r['items'][0]['unit_price'] === '5500.00';
+                && $r['items'][0]['unit_price'] === '5000.00';
         });
     }
 
-    public function test_la_retencion_iibb_se_suma_a_la_tasa_y_sube_el_monto_cobrado(): void
+    // La retencion de IIBB es solo informativa: no cambia lo cobrado.
+    public function test_la_retencion_iibb_no_cambia_el_monto_cobrado(): void
     {
         $user = $this->negocio();
         $user->update(['retencion_iibb_porcentaje' => 4]);
@@ -132,11 +131,10 @@ class MercadoPagoServiceTest extends TestCase
 
         $pago = app(MercadoPagoService::class)->crearOReusarPreferencia($user->fresh(), $reserva);
 
-        // t = 7.6109 + 4 = 11.6109 -> 5000 / 0.883891 = 5656.8 -> 5700
-        $this->assertSame(5700.0, (float) $pago->monto);
+        $this->assertSame(5000.0, (float) $pago->monto);
     }
 
-    public function test_la_comision_global_cambia_el_monto_cobrado(): void
+    public function test_la_comision_global_no_cambia_el_monto_cobrado(): void
     {
         Setting::create(['key' => 'comision_mp_porcentaje', 'value' => '15']);
         $user = $this->negocio();
@@ -145,88 +143,43 @@ class MercadoPagoServiceTest extends TestCase
 
         $pago = app(MercadoPagoService::class)->crearOReusarPreferencia($user, $this->reserva($user));
 
-        // t = 15 * 1.21 = 18.15 -> 5000 / 0.8185 = 6108.9 -> 6200
-        $this->assertSame(6200.0, (float) $pago->monto);
+        $this->assertSame(5000.0, (float) $pago->monto);
     }
 
-    public function test_sena_para_precio_fijo_es_bruta_redondeada_a_100_y_topeada_al_precio(): void
+    public function test_sena_para_precio_fijo_es_el_minimo_entre_la_sena_y_el_precio(): void
     {
         $svc = app(MercadoPagoService::class);
         $user = User::factory()->make(['sena_tipo' => 'fijo', 'sena_monto' => 5000]);
 
-        $this->assertSame(5500.0, $svc->senaParaPrecio($user, 20000));
-        $this->assertSame(5000.0, $svc->senaNetaParaPrecio($user, 20000));
-        // Tope: nunca cobra mas que el precio.
+        $this->assertSame(5000.0, $svc->senaParaPrecio($user, 20000));
         $this->assertSame(3000.0, $svc->senaParaPrecio($user, 3000));
         $this->assertSame(5000.0, $svc->senaParaPrecio($user, 5000));
         // Sin precio conocido (terminos, servicios sin precio): sin tope.
-        $this->assertSame(5500.0, $svc->senaParaPrecio($user, null));
-        $this->assertSame(5000.0, $svc->senaNetaParaPrecio($user, null));
+        $this->assertSame(5000.0, $svc->senaParaPrecio($user, null));
         $this->assertSame(0.0, $svc->senaParaPrecio($user, 0));
-        $this->assertSame(0.0, $svc->senaNetaParaPrecio($user, 0));
     }
 
-    public function test_sena_para_precio_porcentaje_cubre_la_comision_de_mp(): void
-    {
-        $svc = app(MercadoPagoService::class);
-        $user = User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 50]);
-
-        // 50% de 18000 = 9000 neto; t = 6.29 * 1.21 = 7.6109 -> 9000 / 0.923891 = 9741.4 -> 9800
-        $this->assertSame(9000.0, $svc->senaNetaParaPrecio($user, 18000));
-        $this->assertSame(9800.0, $svc->senaParaPrecio($user, 18000));
-    }
-
-    public function test_sena_para_precio_porcentaje_redondea_el_neto_a_pesos_enteros(): void
+    public function test_sena_para_precio_porcentaje_redondea_a_pesos_enteros_y_se_topea_al_precio(): void
     {
         $svc = app(MercadoPagoService::class);
         $user = User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 30]);
 
-        $this->assertSame(3600.0, $svc->senaNetaParaPrecio($user, 12000));
-        $this->assertSame(335.0, $svc->senaNetaParaPrecio($user, 1115));   // 334.5 rounds half up
-        $this->assertSame(400.0, $svc->senaParaPrecio($user, 1115));       // 335 / 0.923891 = 362.6 -> 400
+        $this->assertSame(3600.0, $svc->senaParaPrecio($user, 12000));
+        $this->assertSame(335.0, $svc->senaParaPrecio($user, 1115));   // 334.5 rounds half up
         $this->assertSame(0.0, $svc->senaParaPrecio($user, null));
-        $this->assertSame(0.0, $svc->senaNetaParaPrecio($user, null));
         $this->assertSame(0.0, $svc->senaParaPrecio($user, 0));
-    }
-
-    public function test_sena_para_precio_se_topea_al_precio_con_porcentaje_100(): void
-    {
-        $svc = app(MercadoPagoService::class);
-        $user = User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 100]);
-
-        // Bruto seria 1100: se topea al precio, el profesional absorbe el resto.
-        $this->assertSame(1000.0, $svc->senaParaPrecio($user, 1000));
-        $this->assertSame(1000.0, $svc->senaNetaParaPrecio($user, 1000));
-    }
-
-    public function test_sena_para_precio_redondea_hacia_arriba_al_multiplo_de_100(): void
-    {
-        $svc = app(MercadoPagoService::class);
-
-        // 1000 / 0.923891 = 1082.4 -> 1100
-        $this->assertSame(1100.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'fijo', 'sena_monto' => 1000]), 50000));
-        // 2000 / 0.923891 = 2164.8 -> 2200
-        $this->assertSame(2200.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'fijo', 'sena_monto' => 2000]), 50000));
-        // Con comision 0 y sin retencion, un neto que ya es multiplo no sube.
-        Setting::create(['key' => 'comision_mp_porcentaje', 'value' => '0']);
-        $this->assertSame(2000.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'fijo', 'sena_monto' => 2000]), 50000));
+        $this->assertSame(1000.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 100]), 1000));
     }
 
     public function test_sena_para_precio_es_cero_con_config_invalida(): void
     {
         $svc = app(MercadoPagoService::class);
 
-        foreach ([
-            ['sena_tipo' => 'fijo', 'sena_monto' => null],
-            ['sena_tipo' => 'fijo', 'sena_monto' => 0],
-            ['sena_tipo' => 'porcentaje', 'sena_porcentaje' => null],
-            ['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 0],
-            ['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 101],
-        ] as $attrs) {
-            $user = User::factory()->make($attrs);
-            $this->assertSame(0.0, $svc->senaParaPrecio($user, 1000));
-            $this->assertSame(0.0, $svc->senaNetaParaPrecio($user, 1000));
-        }
+        $this->assertSame(0.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'fijo', 'sena_monto' => null]), 1000));
+        $this->assertSame(0.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'fijo', 'sena_monto' => 0]), 1000));
+        $this->assertSame(0.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => null]), 1000));
+        $this->assertSame(0.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 0]), 1000));
+        $this->assertSame(0.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 101]), 1000));
     }
 
     public function test_comision_vigente_usa_solo_el_setting_global_con_iva_y_cae_a_la_constante(): void

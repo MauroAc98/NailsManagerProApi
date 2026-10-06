@@ -275,14 +275,14 @@ class PublicReservasHoldsTest extends TestCase
 
     // -- 5. estado --------------------------------------------------
 
-    // deposito = la seña BRUTA que paga el cliente (neto + comision de MP,
-    // redondeada a 100), tope el precio de la reserva.
+    // deposito = la seña exacta que paga el cliente (sin gross-up por la
+    // comision de MP), tope el precio de la reserva.
     public function test_estado_devuelve_el_contrato_con_resumen(): void
     {
         $this->user->update(['sena_monto' => 5000]);
         $token = $this->crearHold();
         $this->datos($token)->assertOk();
-        $depositoEsperado = 5500; // 5000 / (1 - 0.076109) = 5411.9 -> 5500
+        $depositoEsperado = 5000;
 
         $this->getJson($this->url("/{$token}"), $this->headers(self::DEVICE, null))->assertOk()->assertExactJson([
             'token' => $token,
