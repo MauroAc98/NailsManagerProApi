@@ -64,9 +64,9 @@ class MercadoPagoService
             throw ReservaPublicaException::mpNoConectado();
         }
 
-        // El cliente paga EXACTAMENTE la seña (sin gross-up: la comision de MP
-        // la absorbe el profesional). Nunca se cobra 0: porcentaje sin precio
-        // conocido (o con seña que da 0) -> sena_sin_total.
+        // Se cobra la seña BRUTA (cubre la comision de MP y la retencion, ver
+        // senaParaPrecio). Nunca se cobra 0: porcentaje sin precio conocido (o
+        // con seña que da 0) -> sena_sin_total.
         $monto = $this->senaDeReserva($user, $reserva);
         if ($monto <= 0) {
             throw ReservaPublicaException::senaSinTotal();
@@ -149,12 +149,12 @@ class MercadoPagoService
     }
 
     /**
-     * Seña exacta que paga el cliente por un precio dado. Fijo: min(sena_monto,
+     * Seña NETA: lo que el profesional quiere recibir. Fijo: min(sena_monto,
      * precio). Porcentaje: round(precio * pct / 100) en pesos enteros, tope el
      * precio. 0 si la config es invalida o el precio es <= 0. `null` = precio
      * desconocido (p. ej. /terminos): el fijo va sin tope y el porcentaje da 0.
      */
-    public function senaParaPrecio(User $user, int|float|null $precio): float
+    public function senaNetaParaPrecio(User $user, int|float|null $precio): float
     {
         if (! $user->senaConfigCompleta()) {
             return 0.0;
@@ -175,6 +175,35 @@ class MercadoPagoService
         $monto = round((float) $user->sena_monto, 2);
 
         return $precio === null ? $monto : min($monto, (float) $precio);
+    }
+
+    /**
+     * Seña que PAGA el cliente (y que se le manda a MP): el neto mas la
+     * comision de MP con IVA y la retencion de IIBB, redondeado hacia arriba al
+     * proximo multiplo de $100 y topeado al precio (si el tope aplica, el
+     * profesional absorbe el resto). 0 si el neto es 0. `null` = precio
+     * desconocido: sin tope.
+     */
+    public function senaParaPrecio(User $user, int|float|null $precio): float
+    {
+        $neta = $this->senaNetaParaPrecio($user, $precio);
+        if ($neta <= 0) {
+            return 0.0;
+        }
+
+        $tasa = min(
+            $this->comisionVigente() + max(0.0, (float) ($user->retencion_iibb_porcentaje ?? 0)),
+            self::TASA_TOTAL_MAXIMA,
+        );
+        $bruto = $neta / (1 - $tasa / 100);
+
+        // Centavos enteros: primero a centavos (absorbe ruido de float como
+        // 5600.00000001) y recien despues el ceil al multiplo.
+        $centavos = (int) round($bruto * 100);
+        $multiplo = self::REDONDEO_SENA_MULTIPLO * 100;
+        $cobrada = (float) ((int) ceil($centavos / $multiplo) * self::REDONDEO_SENA_MULTIPLO);
+
+        return $precio === null ? $cobrada : min($cobrada, (float) $precio);
     }
 
     /**
@@ -234,6 +263,13 @@ class MercadoPagoService
     // TAL CUAL la muestra el panel de MP ("Dinero disponible en") — SIN IVA,
     // el admin la copia directo de ahi sin hacer ninguna cuenta.
     public const COMISION_MP_DEFAULT = 6.29;
+
+    // Techo de la tasa total (comision + retencion) para el gross-up: evita
+    // dividir por ~0 con una config absurda.
+    private const TASA_TOTAL_MAXIMA = 95;
+
+    // La seña cobrada se redondea hacia arriba a multiplos de este monto.
+    private const REDONDEO_SENA_MULTIPLO = 100;
 
     // El cargo real que MP descuenta incluye 21% de IVA sobre su comision —
     // confirmado contra un cobro real: comision nominal 6,29%, cargo
