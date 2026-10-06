@@ -31,6 +31,8 @@ class UserFactory extends Factory
             'password' => static::$password ??= Hash::make('password'),
             'remember_token' => Str::random(10),
             'direccion' => fake()->streetAddress(),
+            // Los tests de la reserva publica asumen el add-on contratado; en prod default false.
+            'reserva_online' => true,
         ];
     }
 
