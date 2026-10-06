@@ -73,7 +73,7 @@ class AuthController extends Controller
         $token = $user->createToken('app-mobile')->plainTextToken;
 
         return response()->json([
-            'user' => $user->append('comision_mp_vigente'),
+            'user' => $user->append(['comision_mp_vigente', 'reserva_online_activa']),
             'token' => $token,
         ]);
     }
@@ -112,7 +112,7 @@ class AuthController extends Controller
         $token = $user->createToken('app-mobile')->plainTextToken;
 
         return response()->json([
-            'user' => $user->append('comision_mp_vigente'),
+            'user' => $user->append(['comision_mp_vigente', 'reserva_online_activa']),
             'token' => $token,
         ]);
     }
@@ -134,7 +134,7 @@ class AuthController extends Controller
     // ─────────────────────────────────────────────
     public function me(Request $request): JsonResponse
     {
-        return response()->json($request->user()->append('comision_mp_vigente'));
+        return response()->json($request->user()->append(['comision_mp_vigente', 'reserva_online_activa']));
     }
 
     // ─────────────────────────────────────────────
@@ -390,7 +390,7 @@ class AuthController extends Controller
 
         $user->update($data);
 
-        return response()->json($user->append('comision_mp_vigente'));
+        return response()->json($user->append(['comision_mp_vigente', 'reserva_online_activa']));
     }
 
     // ─────────────────────────────────────────────

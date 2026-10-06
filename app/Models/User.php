@@ -79,6 +79,7 @@ class User extends Authenticatable
             'email_verified_at'       => 'datetime',
             'password'                => 'hashed',
             'is_exempt'               => 'boolean',
+            'reserva_online'          => 'boolean',
             'recordatorio_automatico' => 'boolean',
             'confirmacion_automatica' => 'boolean',
             'sena_monto'              => 'decimal:2',
@@ -245,6 +246,15 @@ class User extends Authenticatable
         // SUSPENDIDO es el único status no derivable de ends_at: una cuenta
         // suspendida por el admin queda cortada aunque le queden días.
         return $subscription->status === 'SUSPENDIDO' || $subscription->ends_at < now();
+    }
+
+    /**
+     * Add-on de reserva online efectivo: contratado (flag que solo setea el
+     * admin) Y con suscripcion vigente, evaluado en vivo con ends_at.
+     */
+    public function getReservaOnlineActivaAttribute(): bool
+    {
+        return (bool) $this->reserva_online && ! $this->suscripcionVencida();
     }
 
     public function servicios()

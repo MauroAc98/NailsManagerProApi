@@ -27,9 +27,11 @@ use Illuminate\Support\Facades\Route;
 // Rutas públicas — sin autenticación
 // ─────────────────────────────────────────────
 Route::prefix('public/{slug}')->group(function () {
+    // El login usa branding sin add-on; el resto exige reserva online activa.
+    Route::get('branding', [PublicController::class, 'branding']);
+    Route::middleware('reserva.online')->group(function () {
     Route::get('info', [PublicController::class, 'info'])->middleware('throttle:60,1');
     Route::get('terminos', [PublicController::class, 'terminos'])->middleware('throttle:60,1');
-    Route::get('branding', [PublicController::class, 'branding']);
     Route::get('servicios', [PublicController::class, 'servicios'])->middleware('throttle:60,1');
     Route::get('disponibilidad', [PublicController::class, 'disponibilidad'])->middleware('throttle:60,1');
     Route::get('disponibilidad/dias', [PublicController::class, 'disponibilidadDias'])->middleware('throttle:30,1');
@@ -41,6 +43,7 @@ Route::prefix('public/{slug}')->group(function () {
         Route::post('reservas/{token}/pago', [ReservaPublicaController::class, 'pago'])->middleware('throttle:reservas-pago');
         Route::delete('reservas/{token}', [ReservaPublicaController::class, 'destroy'])->middleware('throttle:reservas-estado');
         Route::get('reservas/{token}', [ReservaPublicaController::class, 'show'])->middleware('throttle:reservas-estado');
+    });
     });
 });
 
@@ -104,6 +107,7 @@ Route::prefix('admin')->group(function () {
         Route::post('negocios', [AdminController::class, 'crearNegocio']);
         Route::get('negocios', [AdminController::class, 'listarNegocios']);
         Route::get('negocios/buscar', [AdminController::class, 'buscarNegocio']);
+        Route::put('negocios/{user}/reserva-online', [AdminController::class, 'actualizarReservaOnline']);
 
         Route::get('settings', [AdminController::class, 'obtenerSettings']);
         Route::put('settings', [AdminController::class, 'actualizarSettings']);

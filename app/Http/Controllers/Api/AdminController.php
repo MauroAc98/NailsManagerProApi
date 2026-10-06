@@ -280,6 +280,7 @@ class AdminController extends Controller
             'slug' => $negocio->slug,
             'email' => $negocio->email,
             'is_exempt' => $negocio->is_exempt,
+            'reserva_online' => $negocio->reserva_online,
             'subscription' => $negocio->subscription ? [
                 'ends_at' => $negocio->subscription->ends_at,
                 // Status computado en vivo, no la columna guardada — ver
@@ -294,6 +295,32 @@ class AdminController extends Controller
                 'renewed_at' => $negocio->subscription->renewed_at,
             ] : null,
         ])->values());
+    }
+
+    /**
+     * PUT /api/admin/negocios/{user}/reserva-online
+     * Activa/desactiva el add-on de reserva online del negocio. Solo el admin
+     * lo setea (el flag no es fillable). Ver User::reserva_online_activa.
+     */
+    public function actualizarReservaOnline(Request $request, User $user): JsonResponse
+    {
+        $data = $request->validate(['habilitada' => ['required', 'boolean']]);
+
+        $user->forceFill(['reserva_online' => $data['habilitada']])->save();
+
+        AdminAudit::record(
+            $request->user('admin'),
+            $data['habilitada'] ? 'negocio.reserva_online_habilitada' : 'negocio.reserva_online_deshabilitada',
+            $user->id,
+            [],
+            $request,
+        );
+
+        return response()->json([
+            'user_id' => $user->id,
+            'reserva_online' => $user->reserva_online,
+            'reserva_online_activa' => $user->reserva_online_activa,
+        ]);
     }
 
     /**

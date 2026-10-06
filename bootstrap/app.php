@@ -14,6 +14,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'subscription.check' => \App\Http\Middleware\CheckSubscription::class,
+            'reserva.online' => \App\Http\Middleware\RequiereReservaOnline::class,
             'reservas.creacion' => \App\Http\Middleware\RequiereCreacionHabilitada::class,
             'reservas.device' => \App\Http\Middleware\ExigeDeviceToken::class,
         ]);
