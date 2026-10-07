@@ -22,7 +22,14 @@ class ClienteController extends Controller
     // ─────────────────────────────────────────────
     public function index(Request $request): JsonResponse
     {
+        $request->validate(['activo' => 'sometimes|in:0,1']);
+
         $query = Cliente::delUsuario($request->user());
+
+        // Sin `activo` se listan todos (comportamiento de siempre).
+        if ($request->has('activo')) {
+            $query->where('activo', $request->boolean('activo'));
+        }
 
         if ($request->filled('buscar')) {
             $buscar = $request->buscar;
