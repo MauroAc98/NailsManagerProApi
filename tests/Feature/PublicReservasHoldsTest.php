@@ -275,6 +275,30 @@ class PublicReservasHoldsTest extends TestCase
 
     // -- 5. estado --------------------------------------------------
 
+    // El admin puede desactivar la reserva online con un cliente en medio del
+    // proceso (o que ya pagó y vuelve de Mercado Pago): leer el estado de SU
+    // reserva tiene que seguir funcionando; lo que se corta es crear/avanzar.
+    public function test_estado_sigue_disponible_si_el_negocio_desactiva_la_reserva_online(): void
+    {
+        $token = $this->crearHold();
+        $this->datos($token)->assertOk();
+        $this->user->forceFill(['reserva_online' => false])->save();
+
+        $this->getJson($this->url("/{$token}"), $this->headers(self::DEVICE, null))
+            ->assertOk()
+            ->assertJsonPath('token', $token);
+    }
+
+    public function test_con_la_reserva_online_desactivada_no_se_puede_crear_ni_avanzar_una_reserva(): void
+    {
+        $token = $this->crearHold();
+        $this->user->forceFill(['reserva_online' => false])->save();
+
+        $this->postJson($this->url('/holds'), $this->body('11:00'), $this->headers(self::DEVICE, 'key-2'))->assertNotFound();
+        $this->datos($token)->assertNotFound();
+        $this->postJson($this->url("/{$token}/pago"), [], $this->headers(self::DEVICE, null))->assertNotFound();
+    }
+
     // deposito = la seña exacta que paga el cliente (sin gross-up por la
     // comision de MP), tope el precio de la reserva.
     public function test_estado_devuelve_el_contrato_con_resumen(): void
