@@ -42,8 +42,17 @@ Route::prefix('public/{slug}')->group(function () {
         Route::put('reservas/{token}/datos', [ReservaPublicaController::class, 'datos'])->middleware('throttle:reservas-datos');
         Route::post('reservas/{token}/pago', [ReservaPublicaController::class, 'pago'])->middleware('throttle:reservas-pago');
         Route::delete('reservas/{token}', [ReservaPublicaController::class, 'destroy'])->middleware('throttle:reservas-estado');
-        Route::get('reservas/{token}', [ReservaPublicaController::class, 'show'])->middleware('throttle:reservas-estado');
     });
+    });
+
+    // Leer el estado de una reserva YA existente NO depende del add-on: si el
+    // admin desactiva la reserva online con un cliente a mitad de camino, o que
+    // ya pagó y vuelve de Mercado Pago (el webhook confirma igual), tiene que
+    // seguir viendo SU reserva en vez de un 404 que parece un pago perdido.
+    // Crear y avanzar (holds/datos/pago) siguen exigiendo el add-on arriba. La
+    // suscripcion vencida si corta esto (ver ReservaPublicaController::salon).
+    Route::middleware(['reservas.creacion', 'reservas.device'])->group(function () {
+        Route::get('reservas/{token}', [ReservaPublicaController::class, 'show'])->middleware('throttle:reservas-estado');
     });
 });
 
