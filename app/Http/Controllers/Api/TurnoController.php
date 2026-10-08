@@ -402,7 +402,7 @@ class TurnoController extends Controller
         $promoComponentes = app(PromoComponentes::class);
         $input = $promoComponentes->promoInput($promo);
         if (isset($data['precio_promo'])) {
-            $input = new PromoInput($input->modo, $input->componentes, (int) $data['precio_promo']);
+            $input = new PromoInput($input->modo, $input->componentes, (int) $data['precio_promo'], $input->servicioId);
         }
         $plan = (new TramosResolver())->planes($input, [], $promoComponentes->paraleloHabilitado($user))[0];
         $inicio = Carbon::parse($data['fecha_hora']);

@@ -180,7 +180,7 @@ class HoldService
 
         try {
             $reserva = $this->lock->conLocks($profesionalIds, fn () => $this->intentarPlan(
-                $user, $plan, $fecha, $hora, $deviceHash, $idempotencyKey, $ahora,
+                $user, $plan, $fecha, $hora, $deviceHash, $idempotencyKey, $ahora, $promo?->servicioId,
             ));
         } catch (SlotNoDisponible) {
             Log::info('reserva.hold.slot_taken', [
@@ -552,6 +552,7 @@ class HoldService
         string $deviceHash,
         string $idempotencyKey,
         Carbon $ahora,
+        ?int $promoServicioId = null,
     ): ReservaWeb {
         $ancla = (int) $plan->tramos[0]['profesional_id'];
         $this->liberarHoldAnterior($user, $deviceHash, $ancla);
@@ -591,6 +592,7 @@ class HoldService
                 'idempotency_key' => $idempotencyKey,
                 'tramos' => $plan->tramos,
                 'tramos_modo' => $plan->modo,
+                'promo_servicio_id' => $promoServicioId,
             ]));
         } catch (QueryException $e) {
             if ($this->esViolacionDeUnicoDeSlot($e)) {

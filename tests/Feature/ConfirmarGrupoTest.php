@@ -100,6 +100,7 @@ class ConfirmarGrupoTest extends TestCase
         $grupo = TurnoGrupo::first();
         $this->assertSame($r->id, $grupo->reserva_web_id);
         $this->assertSame('secuencia', $grupo->modo);
+        $this->assertNull($grupo->promo_servicio_id, 'una seleccion suelta no nace de una promo');
 
         $lider = $res->turno;
         $this->assertSame($this->ana->id, $lider->profesional_id);
@@ -157,6 +158,26 @@ class ConfirmarGrupoTest extends TestCase
 
         $segundo = Turno::where('profesional_id', $this->laura->id)->firstOrFail();
         $this->assertSame(4000, $segundo->servicios()->wherePivot('servicio_id', $semis->id)->first()->pivot->precio_sugerido);
+    }
+
+    public function test_una_reserva_de_promo_guarda_la_promo_en_la_reserva_y_en_el_grupo(): void
+    {
+        $softgel = Servicio::create(['user_id' => $this->user->id, 'nombre' => 'Softgel promo', 'duracion_minutos' => 60, 'precio' => 6000, 'activo' => true]);
+        $semis = Servicio::create(['user_id' => $this->user->id, 'nombre' => 'Semis promo', 'duracion_minutos' => 45, 'precio' => 4000, 'activo' => true]);
+        $promo = Servicio::create(['user_id' => $this->user->id, 'nombre' => 'Promo Día de la Madre', 'duracion_minutos' => 105, 'precio' => 10000, 'activo' => true, 'es_promo' => true]);
+        $this->ana->servicios()->attach($softgel->id);
+        $this->laura->servicios()->attach($semis->id);
+        app(PromoComponentes::class)->reemplazar($promo, 'secuencia', [
+            ['servicio_id' => $softgel->id, 'profesional_id' => $this->ana->id],
+            ['servicio_id' => $semis->id, 'profesional_id' => $this->laura->id],
+        ], null);
+
+        $r = $this->holdListoParaPagar([$this->asignacion(null, $promo)], 'secuencia');
+        $this->assertSame($promo->id, $r->fresh()->promo_servicio_id, 'el hold guarda la promo');
+
+        $this->confirmar($r);
+
+        $this->assertSame($promo->id, TurnoGrupo::firstOrFail()->promo_servicio_id, 'el grupo hereda la promo');
     }
 
     public function test_segunda_confirmacion_de_grupo_es_idempotente_sin_duplicar_turnos(): void

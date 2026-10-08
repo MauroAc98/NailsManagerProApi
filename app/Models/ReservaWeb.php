@@ -43,6 +43,7 @@ class ReservaWeb extends Model
         'motivo_cierre',
         'tramos',
         'tramos_modo',
+        'promo_servicio_id',
         'precio_total',
     ];
 

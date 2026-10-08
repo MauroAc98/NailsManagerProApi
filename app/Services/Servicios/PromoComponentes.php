@@ -142,6 +142,7 @@ class PromoComponentes
                 'precio' => (int) round((float) $c->componenteServicio->precio),
             ])->all(),
             (int) round((float) $promo->precio),
+            $promo->id,
         );
     }
 

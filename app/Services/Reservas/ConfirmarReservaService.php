@@ -247,7 +247,7 @@ class ConfirmarReservaService
                 'telefono' => $r->telefono,
             ]);
 
-        $grupo = TurnoGrupo::create(['reserva_web_id' => $r->id, 'modo' => $r->tramos_modo]);
+        $grupo = TurnoGrupo::create(['reserva_web_id' => $r->id, 'modo' => $r->tramos_modo, 'promo_servicio_id' => $r->promo_servicio_id]);
 
         $fecha = substr((string) $r->getRawOriginal('fecha'), 0, 10);
         $inicio = Carbon::parse($fecha . ' ' . $r->getRawOriginal('slot_hora'));
