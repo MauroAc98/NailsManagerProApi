@@ -49,16 +49,21 @@ trait DecoraListadoDeTurnos
         if ($ids->isEmpty()) {
             return;
         }
-        $modos = TurnoGrupo::whereIn('id', $ids)->pluck('modo', 'id');
+        $grupos = TurnoGrupo::with('promo:id,nombre')->whereIn('id', $ids)->get()->keyBy('id');
         $tramos = Turno::whereIn('grupo_id', $ids)->with('profesional:id,nombre')->orderBy('id')->get()->groupBy('grupo_id');
 
         foreach ($turnos as $turno) {
             if ($turno->grupo_id === null) {
                 continue;
             }
+            $grupo = $grupos[$turno->grupo_id] ?? null;
+            // Promo de la que nace el grupo; null si es una seleccion suelta
+            // (o si la promo se borro: la FK es nullOnDelete).
+            $promo = $grupo?->promo;
             $turno->setAttribute('grupo', [
                 'id' => $turno->grupo_id,
-                'modo' => $modos[$turno->grupo_id] ?? null,
+                'modo' => $grupo?->modo,
+                'promo' => $promo ? ['id' => $promo->id, 'nombre' => $promo->nombre] : null,
                 'tramos' => $tramos[$turno->grupo_id]->map(fn (Turno $t) => [
                     'turno_id' => $t->id,
                     'profesional_id' => $t->profesional_id,
