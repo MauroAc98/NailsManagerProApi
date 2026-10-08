@@ -55,8 +55,8 @@ class TurnoGrupoResourceTest extends AdminContractTestCase
             'modo' => 'secuencia',
             'promo' => null,
             'tramos' => [
-                ['turno_id' => $a->id, 'profesional_id' => $this->ana->id, 'profesional_nombre' => 'Ana', 'fecha_hora' => '2099-06-10T10:00:00', 'duracion_total_minutos' => 30, 'estado' => 'confirmado'],
-                ['turno_id' => $b->id, 'profesional_id' => $this->laura->id, 'profesional_nombre' => 'Laura', 'fecha_hora' => '2099-06-10T11:00:00', 'duracion_total_minutos' => 45, 'estado' => 'confirmado'],
+                ['turno_id' => $a->id, 'profesional_id' => $this->ana->id, 'profesional_nombre' => 'Ana', 'fecha_hora' => '2099-06-10T10:00:00', 'duracion_total_minutos' => 30, 'estado' => 'confirmado', 'servicios' => [['id' => $this->servicio->id, 'nombre' => 'Mani']]],
+                ['turno_id' => $b->id, 'profesional_id' => $this->laura->id, 'profesional_nombre' => 'Laura', 'fecha_hora' => '2099-06-10T11:00:00', 'duracion_total_minutos' => 45, 'estado' => 'confirmado', 'servicios' => [['id' => $this->servicio->id, 'nombre' => 'Mani']]],
             ],
         ];
 
@@ -92,6 +92,20 @@ class TurnoGrupoResourceTest extends AdminContractTestCase
         $promo->delete();
 
         $this->assertNull($this->admin()->getJson("/api/turnos/{$a->id}")->assertOk()->json('grupo.promo'));
+    }
+
+    public function test_cada_tramo_trae_todos_sus_servicios_tambien_los_de_otro_dia_y_los_cancelados(): void
+    {
+        [$a, $b] = $this->crearGrupo();
+        $pedicura = Servicio::create(['user_id' => $this->user->id, 'nombre' => 'Pedicura', 'duracion_minutos' => 30, 'precio' => 1000, 'activo' => true]);
+        $b->servicios()->attach($pedicura->id);
+        $b->update(['fecha_hora' => '2099-06-11 10:00:00', 'estado' => 'cancelado']);
+
+        $tramos = $this->admin()->getJson("/api/turnos/{$a->id}")->assertOk()->json('grupo.tramos');
+
+        $this->assertSame(['Mani'], array_column($tramos[0]['servicios'], 'nombre'));
+        $this->assertEqualsCanonicalizing(['Mani', 'Pedicura'], array_column($tramos[1]['servicios'], 'nombre'));
+        $this->assertSame(['id', 'nombre'], array_keys($tramos[1]['servicios'][0]));
     }
 
     public function test_un_tramo_cancelado_sigue_figurando_en_el_grupo_con_su_estado(): void

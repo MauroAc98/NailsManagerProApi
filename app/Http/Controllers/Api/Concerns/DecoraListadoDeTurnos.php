@@ -50,7 +50,7 @@ trait DecoraListadoDeTurnos
             return;
         }
         $grupos = TurnoGrupo::with('promo:id,nombre')->whereIn('id', $ids)->get()->keyBy('id');
-        $tramos = Turno::whereIn('grupo_id', $ids)->with('profesional:id,nombre')->orderBy('id')->get()->groupBy('grupo_id');
+        $tramos = Turno::whereIn('grupo_id', $ids)->with(['profesional:id,nombre', 'servicios'])->orderBy('id')->get()->groupBy('grupo_id');
 
         foreach ($turnos as $turno) {
             if ($turno->grupo_id === null) {
@@ -71,6 +71,9 @@ trait DecoraListadoDeTurnos
                     'fecha_hora' => $t->fecha_hora->format('Y-m-d\TH:i:s'),
                     'duracion_total_minutos' => $t->duracion_total_minutos,
                     'estado' => $t->estado,
+                    // Servicios de ese tramo: la tarjeta muestra tambien los pasos de
+                    // otra profesional (o de otro dia), que no estan en el listado.
+                    'servicios' => $t->servicios->map(fn ($s) => ['id' => $s->id, 'nombre' => $s->nombre])->values()->all(),
                 ])->all(),
             ]);
         }
