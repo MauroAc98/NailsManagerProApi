@@ -104,6 +104,27 @@ final class WhatsappTemplate
         return $tramos->isEmpty() ? collect([$turno]) : $tramos;
     }
 
+    private static function primerNombre(Turno $turno): string
+    {
+        return trim(explode(' ', trim($turno->profesional->nombre ?? ''))[0]);
+    }
+
+    // "Mani con Ana · Pedicura con Laura": los servicios de cada tramo juntos con
+    // " + " y los tramos separados por " · ". Una sola línea (Meta no admite
+    // saltos de línea dentro de una variable).
+    private static function serviciosPorProfesional(\Illuminate\Support\Collection $tramos): string
+    {
+        return $tramos
+            ->map(function (Turno $t) {
+                $servicios = $t->servicios->pluck('nombre')->join(' + ');
+                $nombre = static::primerNombre($t);
+
+                return ($servicios !== '' && $nombre !== '') ? "{$servicios} con {$nombre}" : $servicios;
+            })
+            ->filter()
+            ->join(' · ');
+    }
+
     // "Ana", "Ana y Laura", "Ana, Laura y Sol".
     private static function listaDeNombres(array $nombres): string
     {
@@ -124,16 +145,24 @@ final class WhatsappTemplate
         // Turno de un grupo (varias profesionales): UN solo mensaje con los
         // servicios y las profesionales de todos los tramos vigentes.
         $tramos = static::tramosDelGrupo($turno);
-        $servicios = $tramos->flatMap(fn (Turno $t) => $t->servicios->pluck('nombre'))->join(' + ');
         $fecha = $turno->fecha_hora->format('d/m');
         $hora = $turno->fecha_hora->format('H:i');
         $direccion = $user->direccion ?? '';
         // Primer nombre solamente (no "María José" completo) — el pedido
         // original era sonar cercano en el mensaje, un nombre compuesto
         // completo ahí se siente más formal/impersonal que cálido.
-        $profesional = static::listaDeNombres(
-            $tramos->map(fn (Turno $t) => trim(explode(' ', trim($t->profesional->nombre ?? ''))[0]))->filter()->unique()->values()->all()
-        );
+        $nombres = $tramos->map(fn (Turno $t) => static::primerNombre($t))->filter()->unique()->values()->all();
+
+        if (count($nombres) > 1) {
+            // Combo atendido por varias profesionales: la clienta tiene que saber
+            // qué servicio hace cada una. El aviso de la plantilla ("{{7}} no lo
+            // recibe") sigue concordando en singular con un sujeto colectivo.
+            $servicios = static::serviciosPorProfesional($tramos);
+            $profesional = 'el equipo';
+        } else {
+            $servicios = $tramos->flatMap(fn (Turno $t) => $t->servicios->pluck('nombre'))->join(' + ');
+            $profesional = static::listaDeNombres($nombres);
+        }
         // Formateado ("376 500-0000"), no el crudo — mismo criterio que
         // phoneUtils.formatDisplay() en el frontend (usado también en la
         // "historia" de Instagram), para que el teléfono se vea igual en

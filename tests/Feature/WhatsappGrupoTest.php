@@ -19,8 +19,9 @@ use Tests\TestCase;
 
 /**
  * combo-multi-profesional, PR 6a: UN mensaje de WhatsApp por grupo (confirmacion
- * y recordatorio), con {{7}} = "Ana y Laura" y {{5}} = servicios de todos los
- * tramos vigentes. Un turno sin grupo manda exactamente lo de siempre (Rule L).
+ * y recordatorio). Con varias profesionales {{5}} = "Softgel con Ana · Semis con
+ * Laura" y {{7}} = "el equipo"; con una sola, los servicios de todos los tramos
+ * vigentes y su nombre. Un turno sin grupo manda exactamente lo de siempre (Rule L).
  * Nada sale a la red: Http::fake().
  */
 class WhatsappGrupoTest extends TestCase
@@ -90,14 +91,14 @@ class WhatsappGrupoTest extends TestCase
         $this->assertSame('Fernanda', $p[6]);
     }
 
-    public function test_un_grupo_lista_a_las_profesionales_y_los_servicios_de_todos_los_tramos(): void
+    public function test_un_grupo_dice_que_servicio_hace_cada_profesional_y_avisa_como_el_equipo(): void
     {
         [$a] = $this->grupo(now()->addDay()->setTime(10, 0));
 
         $p = $this->parametros($a);
 
-        $this->assertSame('Softgel + Semis', $p[4]);
-        $this->assertSame('Ana y Laura', $p[6]);
+        $this->assertSame('Softgel con Ana · Semis con Laura', $p[4]);
+        $this->assertSame('el equipo', $p[6]);
         $this->assertSame('10:00', $p[3]);
     }
 
@@ -112,12 +113,15 @@ class WhatsappGrupoTest extends TestCase
         $this->assertSame('Ana', $p[6]);
     }
 
-    public function test_tres_profesionales_se_unen_con_comas_y_una_y(): void
+    public function test_con_tres_profesionales_cada_servicio_lleva_su_nombre(): void
     {
         [$a] = $this->grupo(now()->addDay()->setTime(10, 0));
         $this->turno($this->profesional('Sol'), $this->semis, now()->addDay()->setTime(12, 0), $a->grupo_id);
 
-        $this->assertSame('Ana, Laura y Sol', $this->parametros($a)[6]);
+        $p = $this->parametros($a);
+
+        $this->assertSame('Softgel con Ana · Semis con Laura · Semis con Sol', $p[4]);
+        $this->assertSame('el equipo', $p[6]);
     }
 
     public function test_la_confirmacion_de_un_grupo_sale_una_sola_vez_aunque_se_dispare_para_cada_tramo(): void

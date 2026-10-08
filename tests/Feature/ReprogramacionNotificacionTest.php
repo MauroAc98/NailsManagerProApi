@@ -114,7 +114,8 @@ class ReprogramacionNotificacionTest extends AdminContractTestCase
         $m = WhatsappMensaje::where('tipo', 'reprogramacion')->get();
         $this->assertCount(1, $m);
         Http::assertSentCount(1);
-        Http::assertSent(fn ($r) => str_contains(json_encode($r->data()), 'Ana y Laura'));
+        Http::assertSent(fn ($r) => str_contains(json_encode($r->data()), 'Mani con Ana')
+            && str_contains(json_encode($r->data()), 'Mani con Laura'));
     }
 
     public function test_una_segunda_reprogramacion_vuelve_a_avisar_reemplazando_el_registro_anterior(): void
