@@ -216,6 +216,59 @@ class CloudApiWebhookHandleTest extends TestCase
         $this->assertSame('read', $mensaje->fresh()->status);
     }
 
+    public function test_un_sent_con_el_mismo_timestamp_no_pisa_un_failed(): void
+    {
+        $user = User::factory()->create();
+        $mensaje = $this->crearMensaje($user, 'wamid.MISMO-SEGUNDO');
+
+        $ahora = now()->timestamp;
+
+        // Caso real (fila 2151 en prod): Meta manda 'failed' y 'sent' con el
+        // MISMO segundo y el 'sent' llega último por la red.
+        $this->postSigned($this->statusPayload('wamid.MISMO-SEGUNDO', 'failed', [
+            ['code' => 131026, 'title' => 'Message undeliverable'],
+        ], timestamp: $ahora))->assertOk();
+        $this->postSigned($this->statusPayload('wamid.MISMO-SEGUNDO', 'sent', timestamp: $ahora))
+            ->assertOk();
+
+        $fresco = $mensaje->fresh();
+        $this->assertSame('failed', $fresco->status);
+        $this->assertSame(131026, $fresco->error_code);
+    }
+
+    public function test_un_sent_con_el_mismo_timestamp_no_pisa_un_delivered(): void
+    {
+        $user = User::factory()->create();
+        $mensaje = $this->crearMensaje($user, 'wamid.MISMO-SEGUNDO-OK');
+
+        $ahora = now()->timestamp;
+
+        $this->postSigned($this->statusPayload('wamid.MISMO-SEGUNDO-OK', 'delivered', timestamp: $ahora))
+            ->assertOk();
+        $this->postSigned($this->statusPayload('wamid.MISMO-SEGUNDO-OK', 'sent', timestamp: $ahora))
+            ->assertOk();
+
+        $this->assertSame('delivered', $mensaje->fresh()->status);
+    }
+
+    public function test_con_el_mismo_timestamp_un_estado_mas_avanzado_si_se_aplica(): void
+    {
+        $user = User::factory()->create();
+        $mensaje = $this->crearMensaje($user, 'wamid.MISMO-SEGUNDO-AVANZA');
+
+        $ahora = now()->timestamp;
+
+        $this->postSigned($this->statusPayload('wamid.MISMO-SEGUNDO-AVANZA', 'sent', timestamp: $ahora))
+            ->assertOk();
+        $this->postSigned($this->statusPayload('wamid.MISMO-SEGUNDO-AVANZA', 'delivered', timestamp: $ahora))
+            ->assertOk();
+        $this->assertSame('delivered', $mensaje->fresh()->status);
+
+        $this->postSigned($this->statusPayload('wamid.MISMO-SEGUNDO-AVANZA', 'failed', timestamp: $ahora))
+            ->assertOk();
+        $this->assertSame('failed', $mensaje->fresh()->status);
+    }
+
     public function test_status_events_en_orden_cronologico_se_aplican_normalmente(): void
     {
         $user = User::factory()->create();
