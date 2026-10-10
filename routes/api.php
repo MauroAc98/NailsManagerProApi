@@ -203,6 +203,7 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
         Route::get('manana', [TurnoController::class, 'turnosManana']);
         Route::get('notificaciones', [TurnoController::class, 'notificaciones']);
         Route::post('notificaciones/marcar-vistas', [TurnoController::class, 'marcarNotificacionesVistas']);
+        Route::post('notificaciones/{id}/reenvio-manual', [TurnoController::class, 'reenvioManualMensaje']);
         Route::post('grupos/{grupo}/reprogramar', [TurnoController::class, 'reprogramarGrupo']);
         Route::get('/', [TurnoController::class, 'index']);
         Route::get('/{id}', [TurnoController::class, 'show']);

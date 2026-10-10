@@ -36,6 +36,18 @@ class WhatsappMensaje extends Model
         'status_event_at' => 'integer',
     ];
 
+    /**
+     * ¿Tiene sentido que la dueña lo reenvíe a mano por wa.me? Solo si Meta
+     * ACEPTÓ el envío (hay message_id) y después avisó que no lo pudo
+     * entregar: es un problema del lado del destinatario. Un 'failed' sin
+     * message_id es un error nuestro al enviar (config, token, plantilla) y
+     * reenviarlo a mano lo taparía en vez de arreglarlo.
+     */
+    public function esReenviableManual(): bool
+    {
+        return $this->status === 'failed' && $this->message_id !== null;
+    }
+
     // ── Relaciones ───────────────────────────────────────────────
     public function user(): BelongsTo
     {
