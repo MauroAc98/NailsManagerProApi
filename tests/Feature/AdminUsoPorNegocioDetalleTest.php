@@ -6,6 +6,7 @@ use App\Models\AdminUser;
 use App\Models\Turno;
 use App\Models\User;
 use App\Models\WhatsappMensaje;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -160,5 +161,53 @@ class AdminUsoPorNegocioDetalleTest extends TestCase
             ->assertOk();
 
         $response->assertJsonFragment(['totales' => ['turnos' => 1, 'confirmaciones' => 0, 'recordatorios' => 0, 'fallos' => 0]]);
+    }
+
+    public function test_ultimo_turno_epoch_es_el_instante_exacto_all_time(): void
+    {
+        $user = User::factory()->create();
+        $otro = User::factory()->create();
+
+        $this->crearTurno($user->id, '2026-03-01 08:00:00');
+        $this->crearTurno($user->id, '2026-03-01 11:30:15');
+        $this->crearTurno($otro->id, '2026-08-01 11:30:15');
+
+        $esperado = Carbon::parse('2026-03-01 11:30:15', config('app.timezone'))->timestamp;
+
+        $this->actingAs($this->admin, 'admin')
+            ->getJson("/api/admin/uso/negocios/{$user->id}?desde=2026-09-01&hasta=2026-09-30")
+            ->assertOk()
+            ->assertJsonPath('ultimo_turno_epoch', $esperado);
+    }
+
+    public function test_ultimo_turno_epoch_es_null_sin_turnos(): void
+    {
+        $user = User::factory()->create();
+
+        $this->actingAs($this->admin, 'admin')
+            ->getJson("/api/admin/uso/negocios/{$user->id}?desde=2026-09-01&hasta=2026-09-30")
+            ->assertOk()
+            ->assertJsonPath('ultimo_turno_epoch', null);
+    }
+
+    public function test_fallos_recientes_traen_epoch_exacto_y_hasta_50(): void
+    {
+        $user = User::factory()->create();
+
+        for ($i = 0; $i < 55; $i++) {
+            $this->crearMensaje($user->id, 'recordatorio', 'failed', '2026-09-10 10:00:'.str_pad((string) $i, 2, '0', STR_PAD_LEFT));
+        }
+        $this->crearMensaje($user->id, 'confirmacion', 'failed', '2026-09-20 15:45:30');
+
+        $response = $this->actingAs($this->admin, 'admin')
+            ->getJson("/api/admin/uso/negocios/{$user->id}?desde=2026-09-01&hasta=2026-09-30")
+            ->assertOk();
+
+        $response->assertJsonCount(50, 'fallos_recientes');
+        $response->assertJsonPath('fallos_recientes.0.fecha', '2026-09-20');
+        $response->assertJsonPath(
+            'fallos_recientes.0.epoch',
+            Carbon::parse('2026-09-20 15:45:30', config('app.timezone'))->timestamp
+        );
     }
 }
