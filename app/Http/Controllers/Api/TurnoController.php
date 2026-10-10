@@ -968,6 +968,9 @@ class TurnoController extends Controller
                 // no hace falta reconstruirlo. Útil para diagnosticar un
                 // fallo (ver exactamente qué se intentó mandar).
                 'mensaje' => $m->mensaje,
+                // Para el reenvío manual por wa.me desde el detalle.
+                'cliente_telefono' => $m->turno?->cliente?->telefono,
+                'reenviable' => $m->esReenviableManual(),
             ])
             ->values();
 
@@ -1029,6 +1032,25 @@ class TurnoController extends Controller
     // Idempotente: un segundo llamado sobre el mismo turno no duplica el
     // registro (el botón puede tocarse más de una vez sin problema).
     // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────
+    // POST /api/turnos/notificaciones/{id}/reenvio-manual
+    // La dueña reenvió por wa.me (desde su propio WhatsApp) un mensaje que
+    // Meta aceptó pero no pudo entregar. Se actualiza la MISMA fila (unique
+    // turno_id+tipo) y se dejan los campos de error como evidencia.
+    // ─────────────────────────────────────────────
+    public function reenvioManualMensaje(Request $request, int $id): JsonResponse
+    {
+        $mensaje = WhatsappMensaje::where('user_id', $request->user()->id)->findOrFail($id);
+
+        if (! $mensaje->esReenviableManual()) {
+            return response()->json(['message' => 'Este mensaje no se puede reenviar a mano.'], 422);
+        }
+
+        $mensaje->update(['status' => 'manual']);
+
+        return response()->json(['ok' => true]);
+    }
+
     public function marcarRecordatorioManual(Request $request, int $id): JsonResponse
     {
         $user = $request->user();

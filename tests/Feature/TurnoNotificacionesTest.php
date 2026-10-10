@@ -178,6 +178,90 @@ class TurnoNotificacionesTest extends TestCase
         $response->assertJsonCount(0, 'mensajes');
     }
 
+    private function crearMensajeFallido(User $user, Turno $turno, ?string $messageId = 'wamid.F'): WhatsappMensaje
+    {
+        return WhatsappMensaje::create([
+            'user_id' => $user->id, 'turno_id' => $turno->id, 'numero' => '543765123456',
+            'provider' => 'cloud_api', 'mensaje' => 'Hola Martina', 'tipo' => 'recordatorio',
+            'message_id' => $messageId, 'status' => 'failed', 'error_code' => $messageId ? 131026 : null,
+        ]);
+    }
+
+    public function test_un_fallido_que_meta_acepto_es_reenviable_y_trae_el_telefono_del_cliente(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $this->crearMensajeFallido($user, $this->crearTurno($user));
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson('/api/turnos/notificaciones')
+            ->assertOk()
+            ->assertJsonPath('mensajes.0.reenviable', true)
+            ->assertJsonPath('mensajes.0.cliente_telefono', '+543765123456');
+    }
+
+    public function test_un_fallido_de_nuestro_lado_sin_message_id_no_es_reenviable(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $this->crearMensajeFallido($user, $this->crearTurno($user), messageId: null);
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson('/api/turnos/notificaciones')
+            ->assertOk()
+            ->assertJsonPath('mensajes.0.reenviable', false);
+    }
+
+    public function test_reenvio_manual_pasa_el_fallido_a_manual_y_conserva_el_error(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $mensaje = $this->crearMensajeFallido($user, $this->crearTurno($user));
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson("/api/turnos/notificaciones/{$mensaje->id}/reenvio-manual")
+            ->assertOk();
+
+        $fresco = $mensaje->fresh();
+        $this->assertSame('manual', $fresco->status);
+        $this->assertSame(131026, $fresco->error_code);
+    }
+
+    public function test_reenvio_manual_rechaza_un_fallido_de_nuestro_lado(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $mensaje = $this->crearMensajeFallido($user, $this->crearTurno($user), messageId: null);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson("/api/turnos/notificaciones/{$mensaje->id}/reenvio-manual")
+            ->assertStatus(422);
+
+        $this->assertSame('failed', $mensaje->fresh()->status);
+    }
+
+    public function test_reenvio_manual_rechaza_un_mensaje_que_no_fallo(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $mensaje = $this->crearMensajeFallido($user, $this->crearTurno($user));
+        $mensaje->update(['status' => 'delivered']);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson("/api/turnos/notificaciones/{$mensaje->id}/reenvio-manual")
+            ->assertStatus(422);
+
+        $this->assertSame('delivered', $mensaje->fresh()->status);
+    }
+
+    public function test_reenvio_manual_no_toca_mensajes_de_otro_usuario(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $otro = User::factory()->create(['is_exempt' => true]);
+        $mensaje = $this->crearMensajeFallido($otro, $this->crearTurno($otro));
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson("/api/turnos/notificaciones/{$mensaje->id}/reenvio-manual")
+            ->assertNotFound();
+
+        $this->assertSame('failed', $mensaje->fresh()->status);
+    }
+
     public function test_incluye_el_conteo_de_turnos_confirmados_de_manana(): void
     {
         $user = User::factory()->create(['is_exempt' => true]);
