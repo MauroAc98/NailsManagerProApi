@@ -518,12 +518,46 @@ class AdminController extends Controller
     }
 
     /**
+     * Epoch (segundos) del último turno creado por usuario, all-time, en una
+     * sola query agrupada. Se lee el string crudo de MAX(created_at) por el
+     * query builder (sin pasar por el cast datetime de Eloquent, que en esta
+     * app —timezone no UTC— corrió instantes ~3 hs) y se interpreta en la
+     * zona de la app, que es en la que se guardó.
+     *
+     * @param  array<int>  $userIds
+     * @return array<int, int>
+     */
+    private function ultimoTurnoEpochPorUsuario(array $userIds): array
+    {
+        $epochs = [];
+
+        DB::table('turnos')
+            ->whereIn('user_id', $userIds)
+            ->selectRaw('user_id, MAX(created_at) as ultimo')
+            ->groupBy('user_id')
+            ->get()
+            ->each(function ($fila) use (&$epochs) {
+                if ($fila->ultimo !== null) {
+                    $epochs[(int) $fila->user_id] = $this->epochDesdeDb((string) $fila->ultimo);
+                }
+            });
+
+        return $epochs;
+    }
+
+    private function epochDesdeDb(string $raw): int
+    {
+        return Carbon::parse($raw, config('app.timezone'))->timestamp;
+    }
+
+    /**
      * GET /api/admin/uso/negocios?desde=&hasta=
      * Resumen por negocio: turnos agendados (created_at del turno, no la
      * fecha_hora del turno en sí — lo que nos interesa acá es CUÁNDO se usó
      * la app, no para cuándo quedó el turno) y mensajes automáticos
-     * desglosados por tipo, más los fallidos. Un negocio sin actividad en el
-     * rango no aparece.
+     * desglosados por tipo, más los fallidos (contadores del rango), y
+     * `ultimo_turno_epoch`: cuándo agendó su último turno, all-time. Aparecen
+     * todos los negocios con cuenta no vencida, tengan o no actividad.
      */
     public function usoResumenPorNegocio(Request $request): JsonResponse
     {
@@ -553,26 +587,46 @@ class AdminController extends Controller
                 $mensajesPorUsuario[$fila->user_id] = $acc;
             });
 
-        $userIds = collect($turnosPorUsuario->keys())
-            ->merge(array_keys($mensajesPorUsuario))
-            ->unique()
-            ->values();
+        // Todos los negocios con cuenta no vencida (exentos incluidos), con
+        // o sin actividad en el rango. Se carga `subscription` de una para
+        // que suscripcionVencida() no dispare una query por usuario.
+        $usuarios = User::with('subscription')
+            ->get()
+            ->filter(fn (User $u) => $u->is_exempt || ! $u->suscripcionVencida());
 
-        $nombres = User::whereIn('id', $userIds)->pluck('name', 'id');
+        $ultimosTurnos = $this->ultimoTurnoEpochPorUsuario($usuarios->pluck('id')->all());
 
-        $negocios = $userIds->map(function ($userId) use ($turnosPorUsuario, $mensajesPorUsuario, $nombres) {
-            $m = $mensajesPorUsuario[$userId] ?? ['confirmaciones' => 0, 'recordatorios' => 0, 'fallos' => 0];
+        $negocios = $usuarios->map(function (User $u) use ($turnosPorUsuario, $mensajesPorUsuario, $ultimosTurnos) {
+            $m = $mensajesPorUsuario[$u->id] ?? ['confirmaciones' => 0, 'recordatorios' => 0, 'fallos' => 0];
 
             return [
-                'user_id' => (int) $userId,
-                'nombre' => $nombres[$userId] ?? null,
-                'turnos' => (int) ($turnosPorUsuario[$userId] ?? 0),
+                'user_id' => (int) $u->id,
+                'nombre' => $u->name,
+                'turnos' => (int) ($turnosPorUsuario[$u->id] ?? 0),
                 'confirmaciones' => (int) $m['confirmaciones'],
                 'recordatorios' => (int) $m['recordatorios'],
                 'fallos' => (int) $m['fallos'],
+                'ultimo_turno_epoch' => $ultimosTurnos[$u->id] ?? null,
             ];
         })
-            ->sortByDesc(fn ($n) => $n['turnos'] + $n['confirmaciones'] + $n['recordatorios'])
+            // Los que nunca agendaron primero, después el último turno más
+            // viejo primero (los más "dormidos"); empate por nombre.
+            ->sort(function ($a, $b) {
+                $ea = $a['ultimo_turno_epoch'];
+                $eb = $b['ultimo_turno_epoch'];
+                if ($ea !== $eb) {
+                    if ($ea === null) {
+                        return -1;
+                    }
+                    if ($eb === null) {
+                        return 1;
+                    }
+
+                    return $ea <=> $eb;
+                }
+
+                return strcmp((string) $a['nombre'], (string) $b['nombre']);
+            })
             ->values();
 
         return response()->json([
@@ -620,6 +674,8 @@ class AdminController extends Controller
                 $mensajesPorDia[$fecha] = $acc;
             });
 
+        $ultimoTurnoEpoch = $this->ultimoTurnoEpochPorUsuario([$user->id])[$user->id] ?? null;
+
         $dias = [];
         $totales = ['turnos' => 0, 'confirmaciones' => 0, 'recordatorios' => 0, 'fallos' => 0];
         $cursor = $desde->copy()->startOfDay();
@@ -656,13 +712,15 @@ class AdminController extends Controller
             ->where('status', 'failed')
             ->whereBetween('created_at', [$desde, $hasta])
             ->orderByDesc('created_at')
-            ->limit(10)
+            ->limit(50)
+            ->toBase()
             ->get(['created_at', 'tipo', 'message_id', 'error_code', 'error_titulo', 'status_code'])
             ->map(function ($mensaje) {
                 $origen = $mensaje->message_id ? 'meta' : 'nuestro';
 
                 return [
-                    'fecha' => $mensaje->created_at->toDateString(),
+                    'fecha' => substr($mensaje->created_at, 0, 10),
+                    'epoch' => $this->epochDesdeDb($mensaje->created_at),
                     'tipo' => $mensaje->tipo,
                     'origen' => $origen,
                     'motivo' => $mensaje->error_titulo ?? ($origen === 'meta'
@@ -677,6 +735,7 @@ class AdminController extends Controller
             'nombre' => $user->name,
             'desde' => $desde->toDateString(),
             'hasta' => $hasta->toDateString(),
+            'ultimo_turno_epoch' => $ultimoTurnoEpoch,
             'totales' => $totales,
             'dias' => $dias,
             'fallos_recientes' => $fallosRecientes,
