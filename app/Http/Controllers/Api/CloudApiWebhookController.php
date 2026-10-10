@@ -161,6 +161,15 @@ class CloudApiWebhookController extends Controller
             && preg_replace('/\D/', '', (string) $display) === preg_replace('/\D/', '', (string) $compartido);
     }
 
+    // Avance de cada estado, para desempatar eventos de Meta con el mismo
+    // timestamp. 'failed' es terminal: ningún evento del mismo segundo lo pisa.
+    private const RANGO_STATUS = [
+        'pending' => 1,
+        'delivered' => 2,
+        'read' => 3,
+        'failed' => 4,
+    ];
+
     private function procesarStatus(array $status): void
     {
         $messageId = $status['id'] ?? null;
@@ -199,9 +208,21 @@ class CloudApiWebhookController extends Controller
         // timestamp (no debería pasar en la práctica), se aplica igual —
         // más forgiving que bloquear una actualización real por un dato
         // ausente.
+        //
+        // Con el MISMO segundo el reloj no alcanza para ordenar: Meta manda
+        // 'failed' y 'sent' (o 'delivered' y 'sent') con timestamps
+        // idénticos, y el que llegaba último por la red pisaba al otro — un
+        // mensaje fallido quedaba como 'pending' (fila 2151 en prod). En el
+        // empate se desempata por avance del estado: nunca se retrocede.
         $eventoTimestamp = isset($status['timestamp']) ? (int) $status['timestamp'] : null;
 
-        if ($eventoTimestamp !== null && $registro->status_event_at !== null && $eventoTimestamp < $registro->status_event_at) {
+        $esMasViejo = $eventoTimestamp !== null && $registro->status_event_at !== null && (
+            $eventoTimestamp < $registro->status_event_at
+            || ($eventoTimestamp === (int) $registro->status_event_at
+                && self::RANGO_STATUS[$nuevoStatus] < (self::RANGO_STATUS[$registro->status] ?? 0))
+        );
+
+        if ($esMasViejo) {
             Log::info('WhatsApp Cloud API: status descartado por llegar fuera de orden', [
                 'message_id' => $messageId,
                 'status_actual' => $registro->status,
