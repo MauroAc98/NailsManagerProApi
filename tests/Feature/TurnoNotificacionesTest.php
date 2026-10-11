@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Models\Cliente;
+use App\Models\PagoSena;
+use App\Models\ReservaWeb;
 use App\Models\Turno;
 use App\Models\User;
 use App\Models\WhatsappMensaje;
@@ -297,5 +299,83 @@ class TurnoNotificacionesTest extends TestCase
             ->assertOk();
 
         $response->assertJsonPath('turnos_manana', 1);
+    }
+
+    // Reserva online con seña aprobada que se convirtió en turno.
+    private function reservaPagada(User $user, ?int $confirmadaEn, string $estadoPago = 'aprobado', bool $conTurno = true, string $nombre = 'Camila'): ReservaWeb
+    {
+        $r = ReservaWeb::create([
+            'user_id' => $user->id,
+            'public_token' => ReservaWeb::generarToken(),
+            'servicio_ids' => [1],
+            'fecha' => now()->addDay()->toDateString(),
+            'slot_hora' => '10:00:00',
+            'duracion_total_minutos' => 60,
+            'estado' => 'confirmed',
+            'nombre' => $nombre,
+            'apellido' => 'Rodriguez',
+            'confirmada_en' => $confirmadaEn,
+        ]);
+        PagoSena::create([
+            'reserva_web_id' => $r->id, 'mp_preference_id' => 'P', 'init_point' => 'x',
+            'monto' => 5000, 'estado' => $estadoPago, 'mp_payment_id' => 'PAY-' . $r->id,
+        ]);
+        if ($conTurno) {
+            $cliente = Cliente::create(['user_id' => $user->id, 'nombre' => $nombre, 'apellido' => 'Rodriguez', 'telefono' => '+54376' . random_int(1000000, 9999999)]);
+            Turno::create([
+                'user_id' => $user->id, 'cliente_id' => $cliente->id, 'reserva_web_id' => $r->id,
+                'fecha_hora' => now()->addDay()->setTime(10, 0), 'duracion_total_minutos' => 60,
+                'estado' => 'confirmado', 'origen' => 'web',
+            ]);
+        }
+
+        return $r;
+    }
+
+    public function test_lista_reservas_online_pagadas_hoy_con_su_turno(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $r = $this->reservaPagada($user, now()->timestamp);
+
+        $res = $this->actingAs($user, 'sanctum')->getJson('/api/turnos/notificaciones')->assertOk();
+
+        $res->assertJsonCount(1, 'reservas_pagadas');
+        $item = $res->json('reservas_pagadas.0');
+        $this->assertSame($r->id, $item['id']);
+        $this->assertSame($r->turno->id, $item['turno_id']);
+        $this->assertSame('Camila', $item['cliente_nombre']);
+        $this->assertSame('Rodriguez', $item['cliente_apellido']);
+        $this->assertNotEmpty($item['fecha_hora']);
+        $this->assertSame(now()->timestamp, \Illuminate\Support\Carbon::parse($item['pagada_at'])->timestamp);
+        $res->assertJsonPath('no_vistos', 1);
+    }
+
+    public function test_no_lista_reservas_sin_pago_aprobado_ni_de_otros_dias_ni_sin_turno_ni_ajenas(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $otro = User::factory()->create(['is_exempt' => true]);
+        $this->reservaPagada($user, now()->timestamp, 'pendiente');
+        $this->reservaPagada($user, now()->subDay()->timestamp);
+        $this->reservaPagada($user, now()->timestamp, 'aprobado', false);
+        $this->reservaPagada($otro, now()->timestamp);
+
+        $res = $this->actingAs($user, 'sanctum')->getJson('/api/turnos/notificaciones')->assertOk();
+
+        $res->assertJsonCount(0, 'reservas_pagadas');
+        $res->assertJsonPath('no_vistos', 0);
+    }
+
+    public function test_no_vistos_cuenta_reservas_pagadas_despues_de_notificaciones_vistas_at(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $this->reservaPagada($user, now()->startOfDay()->addSecond()->timestamp, 'aprobado', true, 'Vieja');
+        $this->reservaPagada($user, now()->timestamp, 'aprobado', true, 'Nueva');
+        $user->forceFill(['notificaciones_vistas_at' => now()->subSeconds(30)])->save();
+
+        $res = $this->actingAs($user, 'sanctum')->getJson('/api/turnos/notificaciones')->assertOk();
+
+        $res->assertJsonCount(2, 'reservas_pagadas');
+        $res->assertJsonPath('reservas_pagadas.0.cliente_nombre', 'Nueva');
+        $res->assertJsonPath('no_vistos', 1);
     }
 }

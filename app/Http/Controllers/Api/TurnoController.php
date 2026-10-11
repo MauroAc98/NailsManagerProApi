@@ -937,6 +937,9 @@ class TurnoController extends Controller
     // marcarNotificacionesVistas(). La lista `mensajes` siempre trae TODOS
     // los de hoy, vistos o no; el frontend no distingue visualmente entre
     // ellos, solo el número del badge cambia.
+    // `reservas_pagadas`: reservas online cuya seña se aprobó HOY y ya son
+    // turno (evento informativo, no requiere acción). También suman a
+    // `no_vistos` si son posteriores a notificaciones_vistas_at.
     // ─────────────────────────────────────────────
     public function notificaciones(Request $request): JsonResponse
     {
@@ -954,6 +957,11 @@ class TurnoController extends Controller
         $noVistos = $vistasDesde
             ? $mensajes->where('created_at', '>', $vistasDesde)->count()
             : $mensajes->count();
+
+        $reservasPagadas = $this->reservasPagadasHoy($user);
+        $noVistos += $vistasDesde
+            ? $reservasPagadas->filter(fn (array $r) => $r['pagada_at']->gt($vistasDesde))->count()
+            : $reservasPagadas->count();
 
         $mensajes = $mensajes
             ->map(fn (WhatsappMensaje $m) => [
@@ -980,8 +988,33 @@ class TurnoController extends Controller
             'turnos_manana' => $turnosManana,
             'no_vistos' => $noVistos,
             'mensajes' => $mensajes,
+            'reservas_pagadas' => $reservasPagadas->values(),
             'reembolsos_pendientes' => $this->reembolsosPendientes($user),
         ]);
+    }
+
+    // Reservas online con seña aprobada y confirmadas (ya son turno) HOY.
+    // La hora de pago es confirmada_en (epoch): no depende de la zona horaria
+    // de la app como sí lo haría un cast datetime. Devuelve pagada_at como
+    // Carbon para comparar contra notificaciones_vistas_at.
+    private function reservasPagadasHoy(User $user): \Illuminate\Support\Collection
+    {
+        return ReservaWeb::delUsuario($user)
+            ->whereBetween('confirmada_en', [now()->startOfDay()->timestamp, now()->endOfDay()->timestamp])
+            ->whereHas('pagoSena', fn ($q) => $q->where('estado', 'aprobado'))
+            ->whereHas('turno')
+            ->with('turno')
+            ->orderByDesc('confirmada_en')
+            ->limit(50)
+            ->get()
+            ->map(fn (ReservaWeb $r) => [
+                'id' => $r->id,
+                'turno_id' => $r->turno->id,
+                'cliente_nombre' => $r->nombre,
+                'cliente_apellido' => $r->apellido,
+                'fecha_hora' => $r->turno->fecha_hora,
+                'pagada_at' => Carbon::createFromTimestamp($r->confirmada_en),
+            ]);
     }
 
     // Reservas online cuya seña se cobró pero no pudo convertirse en turno
