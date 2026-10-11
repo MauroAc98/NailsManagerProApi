@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\Concerns\DecoraListadoDeTurnos;
 use App\Http\Controllers\Controller;
 use App\Jobs\EnviarMensajeConfirmacion;
 use App\Models\BloqueoAgenda;
+use App\Models\CategoriaServicio;
 use App\Models\Profesional;
 use App\Models\Servicio;
 use App\Models\SlotDisponible;
@@ -136,9 +137,14 @@ class TurnoController extends Controller
             'desde' => 'required|date',
             'hasta' => 'required|date|after_or_equal:desde',
             'profesional_id' => 'sometimes|nullable|integer|exists:profesionales,id',
+            'categoria_id' => 'sometimes|nullable|integer',
         ]);
 
         $user = $request->user();
+
+        if ($request->filled('categoria_id')) {
+            return $this->disponibilidadPorCategoria($user, (int) $request->categoria_id, $request->desde, $request->hasta);
+        }
 
         $profesional = $this->resolverProfesional($user, $request->filled('profesional_id') ? (int) $request->profesional_id : null);
 
@@ -148,10 +154,61 @@ class TurnoController extends Controller
             ], 422);
         }
 
+        return response()->json($this->disponibilidadDeProfesional($user, $profesional, $request->desde, $request->hasta));
+    }
+
+    // Disponibilidad combinada de las profesionales activas que atienden algun
+    // servicio de la categoria: union de horarios, libre si lo esta para al
+    // menos una de ellas. Categoria ajena -> 404 (findOrFail).
+    private function disponibilidadPorCategoria(User $user, int $categoriaId, string $desde, string $hasta): JsonResponse
+    {
+        CategoriaServicio::delUsuario($user)->findOrFail($categoriaId);
+
+        $profesionales = Profesional::delUsuario($user)
+            ->where('activo', true)
+            ->whereHas('servicios', fn ($q) => $q->where('categoria_id', $categoriaId))
+            ->get();
+
+        $porFecha = [];
+        foreach ($profesionales as $profesional) {
+            foreach ($this->disponibilidadDeProfesional($user, $profesional, $desde, $hasta) as $dia) {
+                $porFecha[$dia['fecha']] ??= [];
+                foreach ($dia['slots'] as $slot) {
+                    $porFecha[$dia['fecha']][$slot['hora']] = ($porFecha[$dia['fecha']][$slot['hora']] ?? false) || $slot['libre'];
+                }
+            }
+        }
+
+        ksort($porFecha);
+
+        $resultado = [];
+        foreach ($porFecha as $fecha => $horas) {
+            uksort($horas, fn ($a, $b) => $this->minutosDeHora((string) $a) <=> $this->minutosDeHora((string) $b));
+            $slots = [];
+            foreach ($horas as $hora => $libre) {
+                $slots[] = ['hora' => (string) $hora, 'libre' => $libre];
+            }
+            $resultado[] = ['fecha' => $fecha, 'slots' => $slots];
+        }
+
+        return response()->json($resultado);
+    }
+
+    // '9hs' | '9:30hs' -> minutos desde medianoche.
+    private function minutosDeHora(string $hora): int
+    {
+        [$h, $m] = array_pad(explode(':', rtrim($hora, 'hs')), 2, 0);
+
+        return (int) $h * 60 + (int) $m;
+    }
+
+    private function disponibilidadDeProfesional(User $user, Profesional $profesional, string $desde, string $hasta): array
+    {
+
         $slots = SlotDisponible::where('profesional_id', $profesional->id)->activos()->orderBy('hora')->get();
         $turnos = Turno::where('profesional_id', $profesional->id)
             ->confirmados()
-            ->delRango($request->desde, $request->hasta)
+            ->delRango($desde, $hasta)
             ->get(['fecha_hora', 'duracion_total_minutos']);
 
         $reservas = collect();
@@ -161,13 +218,13 @@ class TurnoController extends Controller
         // horario bloqueado no puede figurar como libre. (La agenda propia sigue
         // permitiendo cargar turnos ahi: ese override es del dueno.)
         $bloqueos = BloqueoAgenda::delUsuario($user)
-            ->whereDate('fecha', '>=', $request->desde)
-            ->whereDate('fecha', '<=', $request->hasta)
+            ->whereDate('fecha', '>=', $desde)
+            ->whereDate('fecha', '<=', $hasta)
             ->where(fn ($q) => $q->whereNull('profesional_id')->orWhere('profesional_id', $profesional->id))
             ->get();
 
         $manana = Carbon::today()->toDateString();
-        $inicio = max($request->desde, $manana);
+        $inicio = max($desde, $manana);
 
         // Si hoy ya pasó el último horario de atención, no tiene sentido
         // incluirlo en la imagen — excluimos hoy del periodo. Comparación
@@ -184,14 +241,14 @@ class TurnoController extends Controller
             }
         }
 
-        if ($inicio > $request->hasta) {
-            return response()->json([]);
+        if ($inicio > $hasta) {
+            return [];
         }
 
         $periodo = new \DatePeriod(
             new \DateTime($inicio),
             new \DateInterval('P1D'),
-            (new \DateTime($request->hasta))->modify('+1 day'),
+            (new \DateTime($hasta))->modify('+1 day'),
         );
 
         $resultado = [];
@@ -258,7 +315,7 @@ class TurnoController extends Controller
             $resultado[] = ['fecha' => $fecha, 'slots' => $slotsDelDia->values()];
         }
 
-        return response()->json($resultado);
+        return $resultado;
     }
 
     public function store(Request $request): JsonResponse

@@ -149,6 +149,8 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
 
     // Categorías de servicio
     Route::apiResource('categorias-servicio', CategoriaServicioController::class);
+    Route::post('categorias-servicio/{id}/fondo-historia', [CategoriaServicioController::class, 'subirFondoHistoria']);
+    Route::delete('categorias-servicio/{id}/fondo-historia', [CategoriaServicioController::class, 'borrarFondoHistoria']);
 
     // Bloqueos de agenda (dias no laborables puntuales, por profesional o
     // para todo el salon). Sin update: editar = borrar + recrear (ver

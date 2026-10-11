@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\CategoriaServicio;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 class CategoriaServicioController extends Controller
@@ -77,6 +78,53 @@ class CategoriaServicioController extends Controller
         return response()->json([
             'message' => 'Categoría eliminada correctamente.',
         ]);
+    }
+
+    // ─────────────────────────────────────────────
+    // POST /api/categorias-servicio/{id}/fondo-historia
+    // Guarda (o reemplaza) el fondo de la historia de disponibilidad de la
+    // categoria. Mismo contrato que profesionales/{id}/fondo-historia.
+    // ─────────────────────────────────────────────
+    public function subirFondoHistoria(Request $request, int $id): JsonResponse
+    {
+        // mimes explícito (no solo 'image'): 'image' acepta SVG con <script>.
+        $request->validate([
+            'imagen' => 'required|image|mimes:jpeg,png,jpg,webp,gif,bmp|max:5120', // 5MB
+        ]);
+
+        $categoria = CategoriaServicio::delUsuario($request->user())->findOrFail($id);
+        $pathAnterior = $categoria->getRawOriginal('fondo_historia_path');
+
+        // Subir y confirmar ANTES de borrar el anterior: si store() falla el
+        // fondo previo sigue sirviendo.
+        $path = $request->file('imagen')->store('fondos_historia', 'public');
+        if (! $path) {
+            return response()->json(['message' => 'No se pudo guardar el fondo. Intentá de nuevo.'], 500);
+        }
+
+        $categoria->update(['fondo_historia_path' => $path]);
+
+        if ($pathAnterior) {
+            Storage::disk('public')->delete($pathAnterior);
+        }
+
+        return response()->json($categoria);
+    }
+
+    // ─────────────────────────────────────────────
+    // DELETE /api/categorias-servicio/{id}/fondo-historia
+    // ─────────────────────────────────────────────
+    public function borrarFondoHistoria(Request $request, int $id): JsonResponse
+    {
+        $categoria = CategoriaServicio::delUsuario($request->user())->findOrFail($id);
+
+        if ($categoria->getRawOriginal('fondo_historia_path')) {
+            Storage::disk('public')->delete($categoria->getRawOriginal('fondo_historia_path'));
+        }
+
+        $categoria->update(['fondo_historia_path' => null]);
+
+        return response()->json($categoria);
     }
 
     // ─────────────────────────────────────────────
