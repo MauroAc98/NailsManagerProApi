@@ -13,6 +13,7 @@ class Turno extends Model
         'cliente_id',
         'reserva_web_id',
         'grupo_id',
+        'lote_id',
         'fecha_hora',
         'duracion_total_minutos',
         'estado',

@@ -24,10 +24,12 @@ use App\Services\Servicios\PromoComponentes;
 use App\Models\TurnoGrupo;
 use App\Models\User;
 use App\Models\WhatsappMensaje;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class TurnoController extends Controller
@@ -376,13 +378,56 @@ class TurnoController extends Controller
             return $this->crearGrupoManual($user, $cliente, $promo, $data);
         }
 
-        $servicios = Servicio::whereIn('id', $data['servicio_ids'])->get();
-        $fechaHora = Carbon::parse($data['fecha_hora']);
-
         // Backward compat: la app RN nunca manda profesional_id, así que
         // por defecto se resuelve al único Profesional de la cuenta (el que
         // existe siempre, ya sea por el backfill o por AuthController@register).
         $profesional = $this->resolverProfesional($user, $data['profesional_id'] ?? null);
+
+        $fechaHora = Carbon::parse($data['fecha_hora']);
+
+        // Reglas -0.5 a 2 (profesional, horario, máximo por día, servicio repetido).
+        $servicios = $this->validarReglasDeTurno($user, $cliente, $profesional, $data['servicio_ids'], $fechaHora);
+        if ($servicios instanceof JsonResponse) {
+            return $servicios;
+        }
+
+        // ── Regla 3: choque de horario ───────────────────────────
+        // El chequeo y el insert van bajo el mismo lock por profesional que usa
+        // la confirmación online: sin él, dos dispositivos (o la dueña y una
+        // reserva online pagada) pasaban el chequeo a la vez y se pisaban.
+        $duracionTotal = $servicios->sum('duracion_minutos');
+
+        $resultado = app(SlotLock::class)->conLock($profesional->id, function () use ($profesional, $data, $duracionTotal, $fechaHora, $user, $cliente) {
+            $errorAgenda = $this->validarDisponibilidadDeAgenda($profesional->id, $data['fecha_hora'], $duracionTotal, $fechaHora);
+            if ($errorAgenda) {
+                return $errorAgenda;
+            }
+
+            return $this->crearTurnoManual($user, $cliente, $profesional, $data['servicio_ids'], $data['fecha_hora'], $duracionTotal, $data['notas'] ?? null);
+        });
+
+        if ($resultado instanceof JsonResponse) {
+            return $resultado;
+        }
+        $turno = $resultado;
+
+        // Disparar mensaje de confirmación por WhatsApp (en cola, no bloqueante)
+        EnviarMensajeConfirmacion::dispatch($turno->id);
+
+        return response()->json($this->conSena($turno->load(['cliente', 'servicios'])), 201);
+    }
+
+    /**
+     * Reglas de negocio de un turno manual que NO dependen de un lock: profesional
+     * resuelta, servicios asignados a ella, horario de atención, máximo de turnos
+     * por clienta por día y servicio no repetido ese día. Compartido por store() y
+     * storeLote(). Devuelve los servicios cargados, o el 422 listo para responder.
+     *
+     * @param  int[]  $servicioIds
+     */
+    private function validarReglasDeTurno(User $user, Cliente $cliente, ?Profesional $profesional, array $servicioIds, Carbon $fechaHora): JsonResponse|\Illuminate\Support\Collection
+    {
+        $servicios = Servicio::whereIn('id', $servicioIds)->get();
 
         if (! $profesional) {
             return response()->json([
@@ -425,7 +470,7 @@ class TurnoController extends Controller
             ->get()
             ->flatMap(fn ($t) => $t->servicios->pluck('id'));
 
-        $repetidos = collect($data['servicio_ids'])->intersect($serviciosYaAgendados);
+        $repetidos = collect($servicioIds)->intersect($serviciosYaAgendados);
 
         if ($repetidos->isNotEmpty()) {
             $nombresRepetidos = $servicios->whereIn('id', $repetidos)->pluck('nombre')->join(', ');
@@ -435,54 +480,146 @@ class TurnoController extends Controller
             ], 422);
         }
 
-        // ── Regla 3: choque de horario ───────────────────────────
-        // El chequeo y el insert van bajo el mismo lock por profesional que usa
-        // la confirmación online: sin él, dos dispositivos (o la dueña y una
-        // reserva online pagada) pasaban el chequeo a la vez y se pisaban.
-        $duracionTotal = $servicios->sum('duracion_minutos');
-
-        $resultado = app(SlotLock::class)->conLock($profesional->id, function () use ($profesional, $data, $duracionTotal, $fechaHora, $user, $cliente) {
-            $turnoChocado = $this->verificarChoque($profesional->id, $data['fecha_hora'], $duracionTotal);
-
-            if ($turnoChocado) {
-                return response()->json([
-                    'message' => $this->mensajeChoque($turnoChocado, $fechaHora),
-                ], 422);
-            }
-
-            if ($this->hayHoldVivo($profesional->id, $data['fecha_hora'], $duracionTotal)) {
-                return $this->respuestaHoldVivo();
-            }
-
-            // ── Crear turno ──────────────────────────────────────
-            $turno = Turno::create([
-                'user_id' => $user->id,
-                'profesional_id' => $profesional->id,
-                'cliente_id' => $cliente->id,
-                'reserva_web_id' => null,
-                'fecha_hora' => $data['fecha_hora'],
-                'duracion_total_minutos' => $duracionTotal,
-                'estado' => 'confirmado',
-                'origen' => 'app',
-                'notas' => $data['notas'] ?? null,
-            ]);
-
-            $turno->servicios()->attach($data['servicio_ids']);
-
-            return $turno;
-        });
-
-        if ($resultado instanceof JsonResponse) {
-            return $resultado;
-        }
-        $turno = $resultado;
-
-        // Disparar mensaje de confirmación por WhatsApp (en cola, no bloqueante)
-        EnviarMensajeConfirmacion::dispatch($turno->id);
-
-        return response()->json($this->conSena($turno->load(['cliente', 'servicios'])), 201);
+        return $servicios;
     }
 
+    /**
+     * Regla 3 (choque con otro turno) y hold online vivo. Debe correr dentro del
+     * SlotLock de la profesional. Devuelve el 422 o null si el hueco está libre.
+     */
+    private function validarDisponibilidadDeAgenda(int $profesionalId, string $fechaHoraTexto, int $duracion, Carbon $fechaHora): ?JsonResponse
+    {
+        $turnoChocado = $this->verificarChoque($profesionalId, $fechaHoraTexto, $duracion);
+
+        if ($turnoChocado) {
+            return response()->json([
+                'message' => $this->mensajeChoque($turnoChocado, $fechaHora),
+            ], 422);
+        }
+
+        if ($this->hayHoldVivo($profesionalId, $fechaHoraTexto, $duracion)) {
+            return $this->respuestaHoldVivo();
+        }
+
+        return null;
+    }
+
+    /** @param  int[]  $servicioIds */
+    private function crearTurnoManual(User $user, Cliente $cliente, Profesional $profesional, array $servicioIds, string $fechaHora, int $duracion, ?string $notas, ?string $loteId = null): Turno
+    {
+        $turno = Turno::create([
+            'user_id' => $user->id,
+            'profesional_id' => $profesional->id,
+            'cliente_id' => $cliente->id,
+            'reserva_web_id' => null,
+            'lote_id' => $loteId,
+            'fecha_hora' => $fechaHora,
+            'duracion_total_minutos' => $duracion,
+            'estado' => 'confirmado',
+            'origen' => 'app',
+            'notas' => $notas,
+        ]);
+
+        $turno->servicios()->attach($servicioIds);
+
+        return $turno;
+    }
+
+    /**
+     * POST /api/turnos/lote — N turnos independientes (días/horas distintos) para
+     * UNA misma clienta, todo o nada. Cada ítem pasa las mismas reglas que store();
+     * se crean en orden cronológico dentro de una sola transacción con los locks
+     * de todas las profesionales, así las reglas también valen entre ítems del lote.
+     * Las promos-combo no entran: tienen su propio flujo.
+     */
+    public function storeLote(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'cliente_id' => 'required|integer|exists:clientes,id',
+            'turnos' => 'required|array|min:2|max:10',
+            'turnos.*.fecha_hora' => 'required|date|after_or_equal:today',
+            'turnos.*.servicio_ids' => 'required|array|min:1',
+            'turnos.*.servicio_ids.*' => 'integer|exists:servicios,id',
+            'turnos.*.profesional_id' => 'sometimes|nullable|integer|exists:profesionales,id',
+            'turnos.*.notas' => 'nullable|string',
+        ]);
+
+        $user = $request->user();
+        $cliente = $user->clientes()->findOrFail($data['cliente_id']);
+
+        // Resolución y chequeo de promos antes del lock: el índice es el del ítem
+        // original, aunque después se procesen ordenados por fecha.
+        $items = [];
+        foreach ($data['turnos'] as $indice => $item) {
+            $hayCombo = Servicio::where('user_id', $user->id)
+                ->where('es_promo', true)
+                ->whereHas('componentes')
+                ->whereIn('id', $item['servicio_ids'])
+                ->exists();
+
+            if ($hayCombo) {
+                return $this->errorDeItem($indice, response()->json([
+                    'message' => 'Las promos combo no se pueden agendar en un lote. Agendalas por separado.',
+                ], 422));
+            }
+
+            $items[] = [
+                'indice' => $indice,
+                'item' => $item,
+                'profesional' => $this->resolverProfesional($user, $item['profesional_id'] ?? null),
+                'fechaHora' => Carbon::parse($item['fecha_hora']),
+            ];
+        }
+
+        usort($items, fn ($a, $b) => $a['fechaHora']->getTimestamp() <=> $b['fechaHora']->getTimestamp());
+
+        $profesionalIds = collect($items)->pluck('profesional.id')->filter()->all();
+        $loteId = (string) Str::uuid();
+
+        $turnos = app(SlotLock::class)->conLocks($profesionalIds, function () use ($items, $user, $cliente, $loteId) {
+            $creados = [];
+
+            foreach ($items as $entrada) {
+                ['indice' => $indice, 'item' => $item, 'profesional' => $profesional, 'fechaHora' => $fechaHora] = $entrada;
+
+                // Mismas reglas que store(); se evalúan contra la DB, que ya incluye
+                // los ítems anteriores de este lote (misma transacción).
+                $servicios = $this->validarReglasDeTurno($user, $cliente, $profesional, $item['servicio_ids'], $fechaHora);
+                $duracion = $servicios instanceof JsonResponse ? 0 : (int) $servicios->sum('duracion_minutos');
+                $error = $servicios instanceof JsonResponse
+                    ? $servicios
+                    : $this->validarDisponibilidadDeAgenda($profesional->id, $item['fecha_hora'], $duracion, $fechaHora);
+
+                if ($error) {
+                    // Lanzar revierte la transacción: no queda ningún turno del lote.
+                    throw new HttpResponseException($this->errorDeItem($indice, $error));
+                }
+
+                $creados[] = $this->crearTurnoManual($user, $cliente, $profesional, $item['servicio_ids'], $item['fecha_hora'], $duracion, $item['notas'] ?? null, $loteId);
+            }
+
+            return $creados;
+        });
+
+        // UNA confirmación combinada por lote (el job deduplica por lote_id), ya
+        // fuera de la transacción de conLocks. $turnos viene en orden cronológico.
+        EnviarMensajeConfirmacion::dispatch($turnos[0]->id);
+
+        $turnos = collect($turnos)->each->load(['cliente', 'servicios']);
+        Turno::adjuntarSena($turnos);
+
+        return response()->json(['lote_id' => $loteId, 'turnos' => $turnos->values()], 201);
+    }
+
+    /** Agrega el índice (0-based) del ítem del lote al 422 de una regla de turno. */
+    private function errorDeItem(int $indice, JsonResponse $respuesta): JsonResponse
+    {
+        $cuerpo = $respuesta->getData(true);
+        $cuerpo['message'] = 'Turno '.($indice + 1).': '.($cuerpo['message'] ?? 'No se pudo agendar.');
+        $cuerpo['indice'] = $indice;
+
+        return response()->json($cuerpo, $respuesta->getStatusCode());
+    }
     /**
      * combo-multi-profesional (PR 6b): alta manual de una promo con componentes.
      * Flujo de la duena: el inicio NO tiene que ser un slot activo, pero cada
