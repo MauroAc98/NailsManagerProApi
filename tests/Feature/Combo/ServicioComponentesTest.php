@@ -76,6 +76,26 @@ class ServicioComponentesTest extends AdminContractTestCase
         $this->assertArrayNotHasKey('componentes', $index[0]);
     }
 
+    // The index lists a short summary of what a promo is made of (service,
+    // duration and professional of each step, in order) so the list card can
+    // draw it, without the heavy `componentes` detail.
+    public function test_index_lists_a_summary_of_the_components_of_a_promo_in_order(): void
+    {
+        $this->ponerComponentes($this->payloadValido())->assertOk();
+
+        $index = collect($this->admin()->getJson('/api/servicios')->assertOk()->json());
+
+        $promo = $index->firstWhere('id', $this->promo->id);
+        $this->assertSame([
+            ['nombre' => 'Softgel', 'duracion_minutos' => 60, 'profesional_id' => $this->ana->id, 'profesional_nombre' => $this->ana->nombre],
+            ['nombre' => 'Semis pies', 'duracion_minutos' => 45, 'profesional_id' => $this->laura->id, 'profesional_nombre' => 'Laura'],
+        ], $promo['componentes_resumen']);
+        $this->assertArrayNotHasKey('componentes', $promo);
+
+        $suelto = $index->firstWhere('id', $this->softgel->id);
+        $this->assertSame([], $suelto['componentes_resumen']);
+    }
+
     public function test_legacy_promo_without_components_is_untouched_by_show(): void
     {
         $json = $this->admin()->getJson("/api/servicios/{$this->promo->id}")->assertOk()->json();
