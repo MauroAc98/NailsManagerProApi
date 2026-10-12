@@ -42,11 +42,30 @@ class ServicioController extends Controller
         // subidas parecian haber desaparecido hasta la primera mutacion de
         // esa sesion. Gap real encontrado al conectar el frontend.
         $servicios = Servicio::delUsuario($request->user())
-            ->with('fotos')
+            ->with(['fotos', 'componentes.componenteServicio', 'componentes.profesional'])
             ->orderBy('orden')
             ->get();
 
-        return response()->json($servicios);
+        // Resumen en orden de cada paso de la promo (servicio, duración y
+        // profesional) para que la tarjeta de la lista lo dibuje. El detalle
+        // completo (`componentes`) sigue siendo exclusivo de GET-one, por eso
+        // la relación se descarta antes de serializar. [] para un servicio
+        // común o una promo sin componentes.
+        return response()->json($servicios->map(function (Servicio $servicio) {
+            $resumen = $servicio->componentes
+                ->filter(fn ($componente) => $componente->componenteServicio && $componente->profesional)
+                ->map(fn ($componente) => [
+                    'nombre' => $componente->componenteServicio->nombre,
+                    'duracion_minutos' => $componente->componenteServicio->duracion_minutos,
+                    'profesional_id' => $componente->profesional_id,
+                    'profesional_nombre' => $componente->profesional->nombre,
+                ])
+                ->values()
+                ->all();
+            $servicio->unsetRelation('componentes');
+
+            return $servicio->toArray() + ['componentes_resumen' => $resumen];
+        })->values());
     }
 
     // ─────────────────────────────────────────────
