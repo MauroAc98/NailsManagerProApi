@@ -157,7 +157,19 @@ class WhatsappTemplateReservaSenaTest extends TestCase
 
     public function test_nombre_de_plantilla_meta_para_reserva_sena(): void
     {
-        $this->assertSame('reserva_turno_sena', WhatsappTemplate::nombrePlantillaMeta('reserva_sena'));
+        $this->assertSame('reserva_turno_sena_v2', WhatsappTemplate::nombrePlantillaMeta('reserva_sena'));
+    }
+
+    public function test_nombre_de_plantilla_meta_para_reserva_sena_con_ubicacion(): void
+    {
+        // El sufijo de versión va DESPUÉS de _mapa.
+        $this->assertSame('reserva_turno_sena_mapa_v2', WhatsappTemplate::nombrePlantillaMeta('reserva_sena', true));
+    }
+
+    public function test_las_otras_plantillas_no_cambian_de_nombre(): void
+    {
+        $this->assertSame('recordatorio_turno', WhatsappTemplate::nombrePlantillaMeta('recordatorio'));
+        $this->assertSame('confirmacion_turno_mapa', WhatsappTemplate::nombrePlantillaMeta('confirmacion', true));
     }
 
     // ── parametrosCloudApi ───────────────────────────────────────
@@ -212,20 +224,17 @@ class WhatsappTemplateReservaSenaTest extends TestCase
         $resultado = WhatsappTemplate::mensajeLegible('reserva_sena', $turno->cliente, $turno, $user);
 
         $esperado = <<<'TXT'
-            Hola Martina, tu turno en *Nails Studio* quedó reservado.
+            Hola Martina, tu turno en *Nails Studio* queda reservado.
 
             🗓️ 20/08 · 🕒 15:30 hs
             ✨ Manicura semipermanente
             📍 Av. Siempre Viva 742
 
-            Para confirmar tu turno se debe abonar una seña de $5.000,00.
+            💳 Seña: *$5.000,00*
+            🏦 Kimberley Macarena Faustino · Banco Macro SA · Alias: Kim1710 · CBU: 2850 0010 4009 4993 6823 58
 
-            *Datos para el pago:*
-            Kimberley Macarena Faustino · Banco Macro SA · Alias: Kim1710 · CBU: 2850 0010 4009 4993 6823 58
-
-            ⚠️ Desde este número solo se envían avisos. Si respondés a este mensaje, *Fernanda no lo recibe y no puede contestarte.*
-
-            Comunicate al +54 9 376 500-0000 para enviar el comprobante de la seña o por consultas y cambios de turno. Los cambios deben avisarse con al menos 24 hs de anticipación.
+            ⚠️ No responder a este mensaje: *Fernanda* no lo recibe.
+            📲 Enviar el comprobante al +54 9 376 500-0000. Para cambios, avisar con 24 hs de anticipación.
             TXT;
 
         $this->assertSame($esperado, $resultado);

@@ -63,7 +63,7 @@ class EnviarMensajeConfirmacionSenaTest extends TestCase
         (new EnviarMensajeConfirmacion($turno->id))->handle(app(CloudApiService::class));
 
         Http::assertSent(function ($request) {
-            return $request->data()['template']['name'] === 'reserva_turno_sena'
+            return $request->data()['template']['name'] === 'reserva_turno_sena_v2'
                 && count($this->parametrosDe($request)) === 10;
         });
 
@@ -104,7 +104,7 @@ class EnviarMensajeConfirmacionSenaTest extends TestCase
         Log::spy();
 
         // whatsapp_pide_sena quedó en true por una edición directa de DB,
-        // pero sin monto — reserva_turno_sena renderizaría "$0,00".
+        // pero sin monto — reserva_turno_sena_v2 renderizaría "$0,00".
         $user = User::factory()->create([
             'is_exempt' => true,
             'telefono' => '+543765111111',
@@ -238,7 +238,7 @@ class EnviarMensajeConfirmacionSenaTest extends TestCase
         Http::assertSent(function ($request) {
             $componentes = $request->data()['template']['components'];
 
-            return $request->data()['template']['name'] === 'reserva_turno_sena_mapa'
+            return $request->data()['template']['name'] === 'reserva_turno_sena_mapa_v2'
                 && $componentes[0]['type'] === 'header';
         });
     }
