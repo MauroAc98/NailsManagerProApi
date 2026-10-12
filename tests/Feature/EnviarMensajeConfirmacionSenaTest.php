@@ -63,7 +63,7 @@ class EnviarMensajeConfirmacionSenaTest extends TestCase
         (new EnviarMensajeConfirmacion($turno->id))->handle(app(CloudApiService::class));
 
         Http::assertSent(function ($request) {
-            return $request->data()['template']['name'] === 'reserva_turno_sena'
+            return $request->data()['template']['name'] === 'reserva_turno_sena_v2'
                 && count($this->parametrosDe($request)) === 10;
         });
 
@@ -238,7 +238,7 @@ class EnviarMensajeConfirmacionSenaTest extends TestCase
         Http::assertSent(function ($request) {
             $componentes = $request->data()['template']['components'];
 
-            return $request->data()['template']['name'] === 'reserva_turno_sena_mapa'
+            return $request->data()['template']['name'] === 'reserva_turno_sena_mapa_v2'
                 && $componentes[0]['type'] === 'header';
         });
     }

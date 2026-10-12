@@ -167,7 +167,7 @@ class AuthController extends Controller
             'retencion_iibb_porcentaje' => 'sometimes|nullable|numeric|min:0|max:50',
             'whatsapp_pide_sena' => 'sometimes|boolean',
             // not_regex: los datos bancarios viajan como parámetros de la
-            // plantilla Meta reserva_turno_sena — un salto de línea o tab
+            // plantilla Meta reserva_turno_sena_v2 — un salto de línea o tab
             // hace que Meta rechace el envío completo.
             'whatsapp_sena_titular' => 'sometimes|nullable|string|max:120|not_regex:/[\r\n\t]/',
             'whatsapp_sena_entidad' => 'sometimes|nullable|string|max:120|not_regex:/[\r\n\t]/',
@@ -311,7 +311,7 @@ class AuthController extends Controller
                 ]);
             }
 
-            // La plantilla de WhatsApp de la seña (reserva_turno_sena) solo
+            // La plantilla de WhatsApp de la seña (reserva_turno_sena_v2) solo
             // soporta un monto fijo hasta una slice posterior.
             if ($esPorcentaje && $valorFinal('whatsapp_pide_sena')) {
                 throw ValidationException::withMessages([
@@ -328,7 +328,7 @@ class AuthController extends Controller
                         : 'Cargá el monto de la seña para pedirla en las confirmaciones.'];
                 }
 
-                // direccion es el parámetro fijo {{6}} de reserva_turno_sena.
+                // direccion es el parámetro fijo {{6}} de reserva_turno_sena_v2.
                 if (blank($valorFinal('direccion'))) {
                     $errores['direccion'] = ['Cargá tu dirección antes de pedir la seña en las confirmaciones.'];
                 }

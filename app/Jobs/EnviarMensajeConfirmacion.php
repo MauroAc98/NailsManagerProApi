@@ -131,7 +131,7 @@ class EnviarMensajeConfirmacion implements ShouldQueue
         }
 
         // Los salones que activaron el opt-in de seña usan la plantilla
-        // reserva_turno_sena (10 vars: agrega monto y datos de la cuenta).
+        // reserva_turno_sena_v2 (10 vars: agrega monto y datos de la cuenta).
         // El resto sigue con confirmacion_turno (8 vars). La categoría del
         // registro (WhatsappMensaje.tipo) queda en 'confirmacion' en ambos
         // casos — es el tipo de evento para tracking/dedup, no el nombre de
@@ -220,7 +220,7 @@ class EnviarMensajeConfirmacion implements ShouldQueue
     }
 
     // Mismas condiciones que el guard de AuthController::updatePerfil: la
-    // plantilla reserva_turno_sena necesita monto > 0, titular, un medio de
+    // plantilla reserva_turno_sena_v2 necesita monto > 0, titular, un medio de
     // pago (alias o CBU) y la dirección ({{6}}) para que Meta acepte el envío.
     private function senaConfigCompleta(User $user): bool
     {

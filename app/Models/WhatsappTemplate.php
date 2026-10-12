@@ -24,7 +24,13 @@ final class WhatsappTemplate
             default => '',
         };
 
-        return ($base !== '' && $conUbicacion) ? "{$base}_mapa" : $base;
+        $nombre = ($base !== '' && $conUbicacion) ? "{$base}_mapa" : $base;
+
+        // La seña usa las plantillas v2 (re-aprobadas en Meta como utility,
+        // 2026-10-12): reserva_turno_sena_v2 y reserva_turno_sena_mapa_v2. El
+        // sufijo de versión va DESPUÉS de _mapa. Las otras plantillas no
+        // cambian de nombre.
+        return ($tipo === 'reserva_sena' && $nombre !== '') ? "{$nombre}_v2" : $nombre;
     }
 
     // ── Cloud API: header LOCATION (solo cuando hay coordenadas) ───
@@ -270,12 +276,9 @@ final class WhatsappTemplate
         if ($tipo === 'reserva_sena') {
             [$nombre, $negocio, $fecha, $hora, $servicios, $direccion, $monto, $cuenta, $profesional, $telefono] = $params;
 
-            $aviso = "⚠️ Desde este número solo se envían avisos. Si respondés a este mensaje, *{$profesional} no lo recibe y no puede contestarte.*";
-
-            // OJO: acá "🕒 {$hora} hs" SÍ lleva "hs" (como confirmacion). El
-            // párrafo de cierre es distinto al de confirmacion: apunta al
-            // envío del comprobante de la seña.
-            return "Hola {$nombre}, tu turno en *{$negocio}* quedó reservado.\n\n🗓️ {$fecha} · 🕒 {$hora} hs\n✨ {$servicios}\n📍 {$direccion}\n\nPara confirmar tu turno se debe abonar una seña de {$monto}.\n\n*Datos para el pago:*\n{$cuenta}\n\n{$aviso}\n\nComunicate al {$telefono} para enviar el comprobante de la seña o por consultas y cambios de turno. Los cambios deben avisarse con al menos 24 hs de anticipación.";
+            // Cuerpo re-aprobado en Meta (categoría utility, 2026-10-12):
+            // más corto que confirmacion; aviso ⚠️ y cierre 📲 propios.
+            return "Hola {$nombre}, tu turno en *{$negocio}* queda reservado.\n\n🗓️ {$fecha} · 🕒 {$hora} hs\n✨ {$servicios}\n📍 {$direccion}\n\n💳 Seña: *{$monto}*\n🏦 {$cuenta}\n\n⚠️ No responder a este mensaje: *{$profesional}* no lo recibe.\n📲 Enviar el comprobante al {$telefono}. Para cambios, avisar con 24 hs de anticipación.";
         }
 
         [$nombre, $negocio, $fecha, $hora, $servicios, $direccion, $profesional, $telefono] = $params;
