@@ -207,6 +207,7 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
         Route::post('notificaciones/marcar-vistas', [TurnoController::class, 'marcarNotificacionesVistas']);
         Route::post('notificaciones/{id}/reenvio-manual', [TurnoController::class, 'reenvioManualMensaje']);
         Route::post('grupos/{grupo}/reprogramar', [TurnoController::class, 'reprogramarGrupo']);
+        Route::post('lote', [TurnoController::class, 'storeLote']);
         Route::get('/', [TurnoController::class, 'index']);
         Route::get('/{id}', [TurnoController::class, 'show']);
         Route::post('/', [TurnoController::class, 'store']);

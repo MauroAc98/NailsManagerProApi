@@ -36,11 +36,23 @@ class EnviarMensajeConfirmacion implements ShouldQueue
     // tiene que quedar como 'confirmacion' en vez de una propiedad sin inicializar.
     public string $tipo = 'confirmacion';
 
+    // Máximo de caracteres del cuerpo de una plantilla de WhatsApp (Meta). Si el
+    // texto combinado de un lote lo supera, no se manda: se confirma turno por turno.
+    private const LIMITE_CUERPO = 1024;
+
+    // true = confirmación individual de UN turno de un lote (fallback por longitud):
+    // no usa el camino de lote y deduplica solo por turno, así las confirmaciones
+    // de los demás turnos del lote no se bloquean entre sí. Mismo criterio que
+    // `tipo`: valor por defecto de clase para jobs serializados antes de existir.
+    public bool $porTurno = false;
+
     public function __construct(
         public int $turnoId,
         string $tipo = 'confirmacion',
+        bool $porTurno = false,
     ) {
         $this->tipo = $tipo;
+        $this->porTurno = $porTurno;
     }
 
     /**
@@ -101,9 +113,15 @@ class EnviarMensajeConfirmacion implements ShouldQueue
         // etc.) después de haber enviado y registrado exitosamente.
         // Turno de un grupo: la confirmacion es UNA por grupo, sea cual sea el
         // tramo por el que se dispare.
-        $idsDelGrupo = $turno->grupo_id === null
-            ? [$turno->id]
-            : Turno::where('grupo_id', $turno->grupo_id)->pluck('id')->all();
+        // Turno de un lote (confirmacion): también UNA por lote, y el mensaje
+        // combinado cubre todos los turnos vigentes. Reprogramación y
+        // recordatorios no usan este camino: siguen siendo por turno.
+        $esDeLote = $turno->lote_id !== null && $this->tipo === 'confirmacion' && ! $this->porTurno;
+        $idsDelGrupo = match (true) {
+            $esDeLote => Turno::where('lote_id', $turno->lote_id)->pluck('id')->all(),
+            $turno->grupo_id === null || $this->porTurno => [$turno->id],
+            default => Turno::where('grupo_id', $turno->grupo_id)->pluck('id')->all(),
+        };
         $yaEnviado = WhatsappMensaje::whereIn('turno_id', $idsDelGrupo)
             ->where('tipo', $this->tipo)
             ->exists();
@@ -151,6 +169,36 @@ class EnviarMensajeConfirmacion implements ShouldQueue
             ]);
 
             $templateTipo = 'confirmacion';
+        }
+
+        if ($esDeLote) {
+            $vigentes = Turno::where('lote_id', $turno->lote_id)->where('estado', '!=', 'cancelado')
+                ->orderBy('fecha_hora')->orderBy('id')->get();
+
+            if ($vigentes->isEmpty()) {
+                return;
+            }
+
+            if ($vigentes->count() === 1) {
+                // Quedó un solo turno vigente (el disparado pudo ser el cancelado):
+                // se confirma ese turno por el camino individual de siempre.
+                $turno = Turno::with(['cliente', 'servicios', 'user', 'profesional'])->find($vigentes->first()->id);
+            } else {
+                $templateTipo = $templateTipo === 'reserva_sena' ? 'reserva_sena_lote' : 'confirmacion_lote';
+
+                if (mb_strlen(WhatsappTemplate::mensajeLegible($templateTipo, $cliente, $turno, $user)) > self::LIMITE_CUERPO) {
+                    Log::warning('EnviarMensajeConfirmacion: mensaje de lote supera el límite, se confirma turno por turno', [
+                        'turno_id' => $this->turnoId,
+                        'user_id' => $user->id,
+                    ]);
+
+                    foreach ($vigentes as $vigente) {
+                        self::dispatch($vigente->id, $this->tipo, true);
+                    }
+
+                    return;
+                }
+            }
         }
 
         $mensaje = WhatsappTemplate::mensajeLegible($templateTipo, $cliente, $turno, $user);

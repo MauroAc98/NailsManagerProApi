@@ -21,6 +21,10 @@ final class WhatsappTemplate
             'recordatorio' => 'recordatorio_turno',
             'confirmacion' => 'confirmacion_turno',
             'reserva_sena' => 'reserva_turno_sena',
+            // Batch (lote) templates: ONE combined message for N turnos of the
+            // same client, approved in Meta as separate templates.
+            'confirmacion_lote' => 'confirmacion_lote',
+            'reserva_sena_lote' => 'reserva_lote_sena',
             default => '',
         };
 
@@ -30,7 +34,8 @@ final class WhatsappTemplate
         // 2026-10-12): reserva_turno_sena_v2 y reserva_turno_sena_mapa_v2. El
         // sufijo de versión va DESPUÉS de _mapa. Las otras plantillas no
         // cambian de nombre.
-        return ($tipo === 'reserva_sena' && $nombre !== '') ? "{$nombre}_v2" : $nombre;
+        // Same for the batch deposit one: reserva_lote_sena_v2 / reserva_lote_sena_mapa_v2.
+        return (in_array($tipo, ['reserva_sena', 'reserva_sena_lote'], true) && $nombre !== '') ? "{$nombre}_v2" : $nombre;
     }
 
     // ── Cloud API: header LOCATION (solo cuando hay coordenadas) ───
@@ -142,12 +147,64 @@ final class WhatsappTemplate
         return implode(', ', $nombres).' y '.$ultimo;
     }
 
+    // Turnos vigentes (no cancelados) del lote del turno, por fecha; un turno sin
+    // lote es su propio y único ítem. Un lote es N turnos independientes (días
+    // distintos), a diferencia del grupo, que es UN turno repartido en tramos.
+    public static function turnosDelLote(Turno $turno): \Illuminate\Support\Collection
+    {
+        if ($turno->lote_id === null) {
+            return collect([$turno]);
+        }
+        $turnos = Turno::with(['servicios', 'profesional'])
+            ->where('lote_id', $turno->lote_id)->where('estado', '!=', 'cancelado')
+            ->orderBy('fecha_hora')->orderBy('id')->get();
+
+        return $turnos->isEmpty() ? collect([$turno]) : $turnos;
+    }
+
+    // Parámetros de los mensajes de lote. confirmacion_lote (6 vars): [nombre,
+    // negocio, turnos, direccion, profesional, telefono]. reserva_sena_lote
+    // (8 vars): [nombre, negocio, turnos, direccion, monto, cuenta, profesional,
+    // telefono]. {{3}} es UNA línea ("20/08 15:30 hs: Mani · 22/08 10:00 hs: Pedi"):
+    // Meta no admite saltos de línea dentro de una variable. El monto es la seña
+    // por turno vigente.
+    private static function parametrosLote(string $tipo, Cliente $cliente, Turno $turno, User $user): array
+    {
+        $turnos = static::turnosDelLote($turno);
+        $linea = $turnos
+            ->map(fn (Turno $t) => $t->fecha_hora->format('d/m H:i').' hs: '.$t->servicios->pluck('nombre')->join(' + '))
+            ->join(' · ');
+        $nombres = $turnos->map(fn (Turno $t) => static::primerNombre($t))->filter()->unique()->values()->all();
+        $profesional = count($nombres) > 1 ? 'el equipo' : static::listaDeNombres($nombres);
+        $direccion = $user->direccion ?? '';
+        $telefono = static::formatearTelefono($user->telefono ?? '');
+
+        if ($tipo === 'confirmacion_lote') {
+            return [$cliente->nombre, $user->name, $linea, $direccion, $profesional, $telefono];
+        }
+
+        return [
+            $cliente->nombre,
+            $user->name,
+            $linea,
+            $direccion,
+            '$'.number_format((float) $user->sena_monto * $turnos->count(), 2, ',', '.'),
+            static::datosCuentaSena($user),
+            $profesional,
+            $telefono,
+        ];
+    }
+
     public static function parametrosCloudApi(
         string $tipo,
         Cliente $cliente,
         Turno $turno,
         User $user,
     ): array {
+        if (in_array($tipo, ['confirmacion_lote', 'reserva_sena_lote'], true)) {
+            return static::parametrosLote($tipo, $cliente, $turno, $user);
+        }
+
         // Turno de un grupo (varias profesionales): UN solo mensaje con los
         // servicios y las profesionales de todos los tramos vigentes.
         $tramos = static::tramosDelGrupo($turno);
@@ -270,6 +327,20 @@ final class WhatsappTemplate
         User $user,
     ): string {
         $params = static::parametrosCloudApi($tipo, $cliente, $turno, $user);
+
+        // Cuerpos de lote (aprobados en Meta, 2026-10-12): texto propio, se
+        // resuelven antes del destructuring de 8 de los individuales.
+        if ($tipo === 'confirmacion_lote') {
+            [$nombre, $negocio, $turnos, $direccion, $profesional, $telefono] = $params;
+
+            return "Hola {$nombre}, tus turnos en *{$negocio}* quedaron confirmados.\n\n🗓️ {$turnos}\n📍 {$direccion}\n\n⚠️ No responder a este mensaje: *{$profesional}* no lo recibe.\n\n📲 Para consultas o cambios, avisar al {$telefono} con 24 hs de anticipación.";
+        }
+
+        if ($tipo === 'reserva_sena_lote') {
+            [$nombre, $negocio, $turnos, $direccion, $monto, $cuenta, $profesional, $telefono] = $params;
+
+            return "Hola {$nombre}, tus turnos en *{$negocio}* quedan reservados.\n\n🗓️ {$turnos}\n📍 {$direccion}\n\n💳 Seña: *{$monto}*\n🏦 {$cuenta}\n\n⚠️ No responder a este mensaje: *{$profesional}* no lo recibe.\n📲 Enviar el comprobante al {$telefono}. Para cambios, avisar con 24 hs de anticipación.";
+        }
 
         // reserva_sena trae 10 valores (monto + cuenta en el medio) y un
         // cuerpo propio: se resuelve aparte antes del destructuring de 8.
