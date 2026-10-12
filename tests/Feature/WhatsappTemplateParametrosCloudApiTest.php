@@ -248,9 +248,9 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
             ✨ Manicura semipermanente
             📍 Av. Siempre Viva 742
 
-            ⚠️ Desde este número solo se envían avisos. Si respondés a este mensaje, *Fernanda no lo recibe y no puede contestarte.*
+            ⚠️ No responder a este mensaje: *Fernanda* no lo recibe.
 
-            Para consultas o cambios de turno, comunicate al +54 9 376 500-0000 con al menos 24 hs de anticipación.
+            📲 Para consultas o cambios, avisar al +54 9 376 500-0000 con 24 hs de anticipación.
             TXT;
 
         $this->assertSame($esperado, $resultado);
@@ -259,9 +259,9 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
     public function test_mensaje_legible_recordatorio_refleja_la_plantilla_aprobada(): void
     {
         // Snapshot 1:1 del cuerpo aprobado en Meta para recordatorio_turno.
-        // OJO: acá "🕒 {{4}}" NO lleva el sufijo "hs" (a diferencia de
-        // confirmacion) y el negocio va con el punto DENTRO de la negrita
-        // (*Nails Studio.*).
+        // Re-approved in Meta: "🕒 {{4}} hs" now carries the "hs" suffix, same
+        // as confirmacion. The business name keeps the period INSIDE the bold
+        // markers (*Nails Studio.*).
         $user = User::factory()->create(['name' => 'Nails Studio', 'is_exempt' => true, 'direccion' => 'Av. Siempre Viva 742', 'telefono' => '3765000000']);
         $turno = $this->crearTurnoDeMuestra($user);
 
@@ -270,13 +270,13 @@ class WhatsappTemplateParametrosCloudApiTest extends TestCase
         $esperado = <<<'TXT'
             Hola Martina, te recordamos tu turno de mañana en *Nails Studio.*
 
-            🗓️ 20/08 · 🕒 15:30
+            🗓️ 20/08 · 🕒 15:30 hs
             ✨ Manicura semipermanente
             📍 Av. Siempre Viva 742
 
-            ⚠️ Desde este número solo se envían avisos. Si respondés a este mensaje, *Fernanda no lo recibe y no puede contestarte.*
+            ⚠️ No responder a este mensaje: *Fernanda* no lo recibe.
 
-            Para consultas o cambios de turno, comunicate al +54 9 376 500-0000 con al menos 24 hs de anticipación.
+            📲 Para consultas o cambios, avisar al +54 9 376 500-0000 con 24 hs de anticipación.
             TXT;
 
         $this->assertSame($esperado, $resultado);
