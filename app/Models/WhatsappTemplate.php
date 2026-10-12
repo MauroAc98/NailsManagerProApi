@@ -354,14 +354,14 @@ final class WhatsappTemplate
 
         [$nombre, $negocio, $fecha, $hora, $servicios, $direccion, $profesional, $telefono] = $params;
 
-        $aviso = "⚠️ Desde este número solo se envían avisos. Si respondés a este mensaje, *{$profesional} no lo recibe y no puede contestarte.*";
-        $contacto = "Para consultas o cambios de turno, comunicate al {$telefono} con al menos 24 hs de anticipación.";
+        $aviso = "⚠️ No responder a este mensaje: *{$profesional}* no lo recibe.";
+        $contacto = "📲 Para consultas o cambios, avisar al {$telefono} con 24 hs de anticipación.";
 
         return match ($tipo) {
-            // OJO: en recordatorio "🕒 {$hora}" NO lleva "hs" (a diferencia
-            // de confirmacion) y el negocio va con el punto DENTRO de la
-            // negrita — así quedó aprobado en Meta.
-            'recordatorio' => "Hola {$nombre}, te recordamos tu turno de mañana en *{$negocio}.*\n\n🗓️ {$fecha} · 🕒 {$hora}\n✨ {$servicios}\n📍 {$direccion}\n\n{$aviso}\n\n{$contacto}",
+            // OJO: en recordatorio el negocio va con el punto DENTRO de la
+            // negrita (*{$negocio}.*) — así quedó aprobado en Meta. Ambos
+            // cuerpos llevan "hs" tras la hora.
+            'recordatorio' => "Hola {$nombre}, te recordamos tu turno de mañana en *{$negocio}.*\n\n🗓️ {$fecha} · 🕒 {$hora} hs\n✨ {$servicios}\n📍 {$direccion}\n\n{$aviso}\n\n{$contacto}",
             'confirmacion' => "Hola {$nombre}, tu turno en *{$negocio}* quedó confirmado.\n\n🗓️ {$fecha} · 🕒 {$hora} hs\n✨ {$servicios}\n📍 {$direccion}\n\n{$aviso}\n\n{$contacto}",
             default => '',
         };

@@ -63,7 +63,7 @@ class ConfirmacionServiciosPorProfesionalTest extends AdminContractTestCase
         $texto = WhatsappTemplate::mensajeLegible('confirmacion', $this->cliente, $this->combo($this->laura), $this->user->fresh());
 
         $this->assertStringContainsString('Mani con Ana · Pedicura con Laura', $texto);
-        $this->assertStringContainsString('*el equipo no lo recibe y no puede contestarte.*', $texto);
+        $this->assertStringContainsString('No responder a este mensaje: *el equipo* no lo recibe.', $texto);
     }
 
     public function test_combo_con_la_misma_profesional_queda_como_siempre(): void
