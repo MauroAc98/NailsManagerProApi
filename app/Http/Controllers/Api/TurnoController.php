@@ -138,12 +138,24 @@ class TurnoController extends Controller
             'hasta' => 'required|date|after_or_equal:desde',
             'profesional_id' => 'sometimes|nullable|integer|exists:profesionales,id',
             'categoria_id' => 'sometimes|nullable|integer',
+            'servicio_ids' => 'sometimes|array',
+            'servicio_ids.*' => 'integer',
         ]);
 
         $user = $request->user();
 
         if ($request->filled('categoria_id')) {
             return $this->disponibilidadPorCategoria($user, (int) $request->categoria_id, $request->desde, $request->hasta);
+        }
+
+        if ($request->filled('servicio_ids')) {
+            return $this->disponibilidadPorServicios(
+                $user,
+                array_map('intval', $request->servicio_ids),
+                $request->filled('profesional_id') ? (int) $request->profesional_id : null,
+                $request->desde,
+                $request->hasta,
+            );
         }
 
         $profesional = $this->resolverProfesional($user, $request->filled('profesional_id') ? (int) $request->profesional_id : null);
@@ -169,6 +181,29 @@ class TurnoController extends Controller
             ->whereHas('servicios', fn ($q) => $q->where('categoria_id', $categoriaId))
             ->get();
 
+        return response()->json($this->unirDisponibilidad($user, $profesionales, $desde, $hasta));
+    }
+
+    // Igual que por categoria, pero con los servicios elegidos a mano: profesionales
+    // activas que hacen al menos uno. Con profesional_id se limita a esa profesional
+    // (lista vacia si no hace ninguno). Un servicio ajeno -> 404.
+    private function disponibilidadPorServicios(User $user, array $servicioIds, ?int $profesionalId, string $desde, string $hasta): JsonResponse
+    {
+        $servicioIds = array_values(array_unique($servicioIds));
+        abort_if(Servicio::delUsuario($user)->whereIn('id', $servicioIds)->count() !== count($servicioIds), 404);
+
+        $profesionales = Profesional::delUsuario($user)
+            ->where('activo', true)
+            ->when($profesionalId, fn ($q) => $q->whereKey($profesionalId))
+            ->whereHas('servicios', fn ($q) => $q->whereIn('servicios.id', $servicioIds))
+            ->get();
+
+        return response()->json($this->unirDisponibilidad($user, $profesionales, $desde, $hasta));
+    }
+
+    // Union de horarios de varias profesionales: libre si lo esta para al menos una.
+    private function unirDisponibilidad(User $user, $profesionales, string $desde, string $hasta): array
+    {
         $porFecha = [];
         foreach ($profesionales as $profesional) {
             foreach ($this->disponibilidadDeProfesional($user, $profesional, $desde, $hasta) as $dia) {
@@ -191,7 +226,7 @@ class TurnoController extends Controller
             $resultado[] = ['fecha' => $fecha, 'slots' => $slots];
         }
 
-        return response()->json($resultado);
+        return $resultado;
     }
 
     // '9hs' | '9:30hs' -> minutos desde medianoche.
