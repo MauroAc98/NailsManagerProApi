@@ -177,7 +177,7 @@ final class WhatsappTemplate
 
         return match ($tipo) {
             'recordatorio', 'confirmacion' => [$cliente->nombre, $user->name, $fecha, $hora, $servicios, $direccion, $profesional, $telefono],
-            // reserva_turno_sena (10 vars): mete el monto de la seña y los
+            // reserva_turno_sena_v2 (10 vars): mete el monto de la seña y los
             // datos de la cuenta para el pago entre direccion y profesional.
             // monto: formato local con símbolo ("$5.000,00"); sena_monto
             // viene como string por el cast decimal:2, de ahí el (float).

@@ -261,7 +261,7 @@ class UpdatePerfilSenaRequeridaTest extends TestCase
 
     public function test_activar_sena_sin_direccion_cargada_es_rechazado(): void
     {
-        // direccion es el parámetro fijo {{6}} de reserva_turno_sena — si
+        // direccion es el parámetro fijo {{6}} de reserva_turno_sena_v2 — si
         // llega vacío Meta rechaza el envío completo.
         $user = User::factory()->create(['is_exempt' => true, 'direccion' => null, 'whatsapp_pide_sena' => false]);
 

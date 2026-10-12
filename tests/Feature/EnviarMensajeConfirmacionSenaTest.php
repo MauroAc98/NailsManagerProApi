@@ -104,7 +104,7 @@ class EnviarMensajeConfirmacionSenaTest extends TestCase
         Log::spy();
 
         // whatsapp_pide_sena quedó en true por una edición directa de DB,
-        // pero sin monto — reserva_turno_sena renderizaría "$0,00".
+        // pero sin monto — reserva_turno_sena_v2 renderizaría "$0,00".
         $user = User::factory()->create([
             'is_exempt' => true,
             'telefono' => '+543765111111',
