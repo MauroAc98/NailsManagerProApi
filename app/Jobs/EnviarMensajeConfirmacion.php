@@ -12,6 +12,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class EnviarMensajeConfirmacion implements ShouldQueue
@@ -39,6 +40,11 @@ class EnviarMensajeConfirmacion implements ShouldQueue
     // Máximo de caracteres del cuerpo de una plantilla de WhatsApp (Meta). Si el
     // texto combinado de un lote lo supera, no se manda: se confirma turno por turno.
     private const LIMITE_CUERPO = 1024;
+
+    // TTL del candado de envío. enviarPlantilla() no fija timeout propio, así
+    // que rige el default del cliente HTTP de Laravel (30 s): el TTL lo supera
+    // con margen para que el lock no expire a mitad de un envío.
+    private const LOCK_SEGUNDOS = 90;
 
     // true = confirmación individual de UN turno de un lote (fallback por longitud):
     // no usa el camino de lote y deduplica solo por turno, así las confirmaciones
@@ -109,6 +115,40 @@ class EnviarMensajeConfirmacion implements ShouldQueue
             return;
         }
 
+        // Candado atómico por unidad de envío: cubre desde el chequeo de dedup
+        // hasta DESPUÉS de crear el WhatsappMensaje. Sin él, dos jobs de la misma
+        // unidad corriendo a la vez (varios workers, reintento tras falla de cola,
+        // fallback de longitud) pasan ambos el chequeo y mandan un duplicado real.
+        // get(callback) libera el lock siempre, aunque el callback lance.
+        $esDeLote = $turno->lote_id !== null && $this->tipo === 'confirmacion' && ! $this->porTurno;
+        $lock = Cache::lock($this->claveLock($turno, $esDeLote), self::LOCK_SEGUNDOS);
+
+        if ($lock->get(fn () => $this->enviar($cloudApiService, $turno, $esDeLote)) === false) {
+            // Otro job de la misma unidad está enviando: se reintenta más tarde
+            // (el reintento verá el registro y deduplica solo). Sin job de cola
+            // (dispatchSync/tests directos) no hay a dónde liberar: se retorna.
+            if ($this->job) {
+                $this->release($this->backoff);
+            }
+        }
+    }
+
+    // Una clave por unidad de envío, con el mismo criterio que el dedup:
+    // lote (camino de lote), grupo (grupo_id sin porTurno) o turno + tipo.
+    private function claveLock(Turno $turno, bool $esDeLote): string
+    {
+        return match (true) {
+            $esDeLote => "wa-confirmacion:lote:{$turno->lote_id}:{$this->tipo}",
+            $turno->grupo_id !== null && ! $this->porTurno => "wa-confirmacion:grupo:{$turno->grupo_id}:{$this->tipo}",
+            default => "wa-confirmacion:turno:{$turno->id}:{$this->tipo}",
+        };
+    }
+
+    private function enviar(CloudApiService $cloudApiService, Turno $turno, bool $esDeLote): void
+    {
+        $user = $turno->user;
+        $cliente = $turno->cliente;
+
         // Evitar duplicar el mensaje si el job se reintenta (timeout de worker,
         // etc.) después de haber enviado y registrado exitosamente.
         // Turno de un grupo: la confirmacion es UNA por grupo, sea cual sea el
@@ -116,7 +156,6 @@ class EnviarMensajeConfirmacion implements ShouldQueue
         // Turno de un lote (confirmacion): también UNA por lote, y el mensaje
         // combinado cubre todos los turnos vigentes. Reprogramación y
         // recordatorios no usan este camino: siguen siendo por turno.
-        $esDeLote = $turno->lote_id !== null && $this->tipo === 'confirmacion' && ! $this->porTurno;
         $idsDelGrupo = match (true) {
             $esDeLote => Turno::where('lote_id', $turno->lote_id)->pluck('id')->all(),
             $turno->grupo_id === null || $this->porTurno => [$turno->id],
