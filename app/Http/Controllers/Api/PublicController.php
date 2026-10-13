@@ -16,10 +16,14 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class PublicController extends Controller
 {
+    // Cuanto dura en cache el calculo de `sin_turnos` por salon (los holds cambian seguido: corto a proposito).
+    private const CACHE_SIN_TURNOS_SEGUNDOS = 30;
+
     private const MAX_DIAS_RANGO = 45;
 
     // ─────────────────────────────────────────────
@@ -126,7 +130,7 @@ class PublicController extends Controller
     // GET /api/public/{slug}/servicios
     // Lista de servicios activos del estudio
     // ─────────────────────────────────────────────
-    public function servicios(Request $request, string $slug, DisponibilidadService $disponibilidad): JsonResponse
+    public function servicios(Request $request, string $slug, DisponibilidadService $disponibilidad, PromoComponentes $promoComponentes): JsonResponse
     {
         $user = $this->getProfesional($slug);
 
@@ -154,7 +158,7 @@ class PublicController extends Controller
         // no tiene como concretarse (nadie lo atiende).
         $conProfesional = DB::table('profesional_servicio')->whereIn('profesional_id', $activas)->pluck('servicio_id')->flip();
 
-        $servicios = $query
+        $visibles = $query
             ->with(['fotos', 'componentes.componenteServicio:id,nombre,duracion_minutos', 'componentes.profesional:id,nombre,avatar_path'])
             ->get(['id', 'nombre', 'duracion_minutos', 'precio', 'categoria_id', 'orden', 'es_promo', 'modo_promo'])
             ->filter(fn ($s) => $s->es_promo && $s->componentes->isNotEmpty()
@@ -172,7 +176,29 @@ class PublicController extends Controller
                 fn ($a, $b) => $a->orden <=> $b->orden,
                 fn ($a, $b) => $a->id <=> $b->id,
             ])
-            ->map(function ($s) use ($categorias) {
+            ;
+
+        // Con ?con_turnos=1 (y sin filtrar por profesional) cada servicio trae `sin_turnos`:
+        // true si no tiene ningun inicio libre en la ventana reservable. Es una foto: se
+        // cachea unos segundos y la autoridad final sigue siendo el hold al reservar.
+        $sinTurnos = null;
+        if ($request->boolean('con_turnos') && ! $request->filled('profesional_id')) {
+            $sinTurnos = Cache::remember(
+                "servicios_sin_turnos:{$user->id}",
+                self::CACHE_SIN_TURNOS_SEGUNDOS,
+                fn () => $disponibilidad->serviciosSinTurnos(
+                    $user,
+                    $visibles->values(),
+                    Carbon::now(),
+                    (int) config('reservas.anticipacion_minutos', 120),
+                    max(0, (int) config('reservas.ventana_dias', 30)),
+                    $promoComponentes,
+                ),
+            );
+        }
+
+        $servicios = $visibles
+            ->map(function ($s) use ($categorias, $sinTurnos) {
                 $componentizada = $s->es_promo && $s->componentes->isNotEmpty();
 
                 return [
@@ -189,7 +215,7 @@ class PublicController extends Controller
                     // Solo URLs planas, ordenadas — nunca el 'id' de la fila ni
                     // la 'path' relativa del disco (ver ServicioFoto::url).
                     'fotos' => $s->fotos->pluck('url')->values(),
-                ] + ($componentizada ? [
+                ] + ($sinTurnos === null ? [] : ['sin_turnos' => $sinTurnos[$s->id] ?? false]) + ($componentizada ? [
                     // Detalle para mostrar en la tarjeta: nombres, duracion y avatar (sin ids) y
                     // en orden de ejecucion. Sin modo guardado rige la secuencia.
                     'modo_promo' => $s->modo_promo,

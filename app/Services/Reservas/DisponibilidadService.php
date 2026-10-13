@@ -8,6 +8,7 @@ use App\Models\ReservaWeb;
 use App\Models\SlotDisponible;
 use App\Models\Turno;
 use App\Models\User;
+use App\Services\Servicios\PromoComponentes;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
@@ -100,9 +101,36 @@ class DisponibilidadService
         $holds = $this->holdsVigentes($user, $fecha, $fecha, $ahora)[$fecha] ?? [];
         $ocupacion = $this->turnosDelRango($user, $fecha, $fecha, $profesionalIds);
         $bloqueos = $this->bloqueosDelRango($user, $fecha, $fecha)[$fecha] ?? null;
+        $minimo = $ahora->copy()->addMinutes($anticipacionMinutos);
+
+        return $this->iniciosConPlanes($fecha, $planes, $profesionales, $slotsPorProfesional, $holds, $ocupacion, $bloqueos, $minimo);
+    }
+
+    /**
+     * Los inicios libres de UN dia para los planes dados, con los datos ya
+     * cargados (los de ese dia o los de un rango: se indexa por fecha afuera).
+     * Es la unica logica de "que planes caben": la usan calcularConPlanes() y
+     * serviciosSinTurnos(), asi la lista y la reserva no pueden contradecirse.
+     *
+     * @param  array<int, PlanReserva>  $planes
+     * @param  Collection<int, Profesional>  $profesionales  indexada por id
+     * @param  array<int, array<int, string>>  $slotsPorProfesional
+     * @param  array<int, array<int, array{0: Carbon, 1: Carbon}>>  $holds  profesional_id => intervalos de ESE dia
+     * @param  array<int, array<int, array{0: Carbon, 1: Carbon}>>  $ocupacion
+     * @return array<int, array{hora: string, fin: string, profesional_ids: array<int,int>, modo: string, tramos: array}>
+     */
+    private function iniciosConPlanes(
+        string $fecha,
+        array $planes,
+        Collection $profesionales,
+        array $slotsPorProfesional,
+        array $holds,
+        array $ocupacion,
+        ?array $bloqueos,
+        Carbon $minimo,
+    ): array {
         $diaCompleto = $bloqueos['diaCompleto'] ?? [];
         $parcial = $bloqueos['parcial'] ?? [];
-        $minimo = $ahora->copy()->addMinutes($anticipacionMinutos);
         $diaDeLaSemana = Carbon::parse($fecha);
         $alineacion = new AlineacionSlots();
 
@@ -135,6 +163,84 @@ class DisponibilidadService
         }
 
         return $resultado;
+    }
+
+    /**
+     * Servicios (de los ya listados) que NO tienen ningun inicio libre entre hoy
+     * y hoy + $ventanaDias, con la misma logica que la reserva (calcularDia /
+     * iniciosConPlanes). Carga profesionales, slots, holds, turnos y bloqueos UNA
+     * vez para todos; los servicios simples se agrupan por (profesionales que lo
+     * hacen, duracion) y cada grupo corta en el primer dia con lugar. Las promos
+     * con componentes se evaluan exactas con sus planes.
+     *
+     * @param  Collection<int, \App\Models\Servicio>  $servicios  activos del salon, con `componentes` cargados
+     * @return array<int, bool> servicio_id => true si no hay ningun inicio libre
+     */
+    public function serviciosSinTurnos(
+        User $user,
+        Collection $servicios,
+        Carbon $ahora,
+        int $anticipacionMinutos,
+        int $ventanaDias,
+        PromoComponentes $promoComponentes,
+    ): array {
+        if ($servicios->isEmpty()) {
+            return [];
+        }
+
+        $desde = $ahora->copy()->startOfDay();
+        $hasta = $desde->copy()->addDays(max(0, $ventanaDias));
+        $fechas = [];
+        for ($dia = $desde->copy(); $dia->lte($hasta); $dia->addDay()) {
+            $fechas[] = $dia->format('Y-m-d');
+        }
+
+        $todas = Profesional::where('user_id', $user->id)->with('servicios:id')->orderBy('id')->get();
+        $activas = $todas->where('activo', true)->values();
+        $porId = $todas->keyBy('id');
+        $slots = $this->slotsPorProfesional($user, $todas);
+        $holds = $this->holdsVigentes($user, $fechas[0], end($fechas), $ahora);
+        $ocupacion = $this->turnosDelRango($user, $fechas[0], end($fechas), $todas->pluck('id')->all());
+        $bloqueos = $this->bloqueosDelRango($user, $fechas[0], end($fechas));
+        $minimo = $ahora->copy()->addMinutes($anticipacionMinutos);
+        $paralelo = $promoComponentes->paraleloHabilitado($user);
+
+        $resultado = [];
+        $porGrupo = [];
+        foreach ($servicios as $servicio) {
+            if ($servicio->es_promo && $servicio->componentes->isNotEmpty()) {
+                $planes = (new TramosResolver())->planes($promoComponentes->promoInput($servicio, $servicio->componentes), [], $paralelo);
+                $resultado[$servicio->id] = $planes === [] || ! $this->hayLugar(
+                    $fechas,
+                    fn (string $f) => $this->iniciosConPlanes($f, $planes, $porId, $slots, $holds[$f] ?? [], $ocupacion, $bloqueos[$f] ?? null, $minimo),
+                );
+
+                continue;
+            }
+
+            $candidatas = $activas->filter(fn (Profesional $p) => $p->servicios->contains('id', $servicio->id))->values();
+            $duracion = (int) $servicio->duracion_minutos;
+            $clave = $candidatas->pluck('id')->implode(',').'|'.$duracion;
+            $porGrupo[$clave] ??= $candidatas->isEmpty() || ! $this->hayLugar(
+                $fechas,
+                fn (string $f) => $this->calcularDia($f, $duracion, $candidatas, $slots, $holds[$f] ?? [], $ocupacion, $minimo, $bloqueos[$f] ?? null),
+            );
+            $resultado[$servicio->id] = $porGrupo[$clave];
+        }
+
+        return $resultado;
+    }
+
+    /** @param  array<int, string>  $fechas  @param  callable(string): array  $iniciosDelDia */
+    private function hayLugar(array $fechas, callable $iniciosDelDia): bool
+    {
+        foreach ($fechas as $fecha) {
+            if ($iniciosDelDia($fecha) !== []) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
