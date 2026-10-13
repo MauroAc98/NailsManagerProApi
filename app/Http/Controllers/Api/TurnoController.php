@@ -50,7 +50,7 @@ class TurnoController extends Controller
         } elseif ($request->filled('desde') && $request->filled('hasta')) {
             $query->delRango($request->desde, $request->hasta);
         } elseif ($request->filled('mes')) {
-            $query->whereRaw("TO_CHAR(fecha_hora, 'YYYY-MM') = ?", [$request->mes]);
+            $query->delMes($request->mes);
         }
 
         if ($request->filled('buscar')) {
@@ -125,7 +125,7 @@ class TurnoController extends Controller
         $user = $request->user();
         $turnos = Turno::delUsuario($user)
             ->whereIn('estado', ['confirmado', 'completado']) // todo menos cancelado
-            ->whereRaw("TO_CHAR(fecha_hora, 'YYYY-MM') = ?", [$request->mes])
+            ->delMes($request->mes)
             ->when(
                 $request->filled('profesional_id'),
                 fn ($q) => $q->where('profesional_id', $request->integer('profesional_id')),

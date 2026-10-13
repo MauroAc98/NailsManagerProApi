@@ -65,6 +65,26 @@ class Turno extends Model
     }
 
     /**
+     * Turnos de un mes "YYYY-MM", como rango [día 1 00:00, día 1 del mes
+     * siguiente 00:00). Reemplaza TO_CHAR(fecha_hora, 'YYYY-MM') = ?, que
+     * Postgres no puede resolver con el índice de fecha_hora y que SQLite ni
+     * siquiera tiene. Los límites son hora de pared, igual que lo guardado
+     * (ver serializeDate): no hay conversión de zona horaria. Un mes mal
+     * formado no trae nada (mismo resultado que tenía la comparación de texto).
+     */
+    public function scopeDelMes($query, string $mes)
+    {
+        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $mes)) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        $inicio = Carbon::createFromFormat('!Y-m-d', $mes.'-01');
+
+        return $query->where('fecha_hora', '>=', $inicio->toDateTimeString())
+            ->where('fecha_hora', '<', $inicio->copy()->addMonth()->toDateTimeString());
+    }
+
+    /**
      * Turnos cuyo intervalo [fecha_hora, fecha_hora + duracion) se solapa con
      * [$inicio, $fin) (semi-abierto: los intervalos adyacentes NO se solapan).
      * Componer con confirmados() / where('profesional_id', ...) segun el caso.
