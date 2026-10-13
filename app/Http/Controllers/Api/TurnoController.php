@@ -64,6 +64,14 @@ class TurnoController extends Controller
             );
         }
 
+        // Filtro exacto por clienta (a diferencia de `buscar`, que matchea por
+        // texto y mezcla homónimas). AND-eado con el resto; ya viene scopeado a
+        // la cuenta por Turno::delUsuario($user), así que un cliente_id ajeno
+        // devuelve vacío sin necesidad de validar tenencia acá.
+        if ($request->filled('cliente_id')) {
+            $query->where('cliente_id', $request->integer('cliente_id'));
+        }
+
         if ($request->filled('servicio_id')) {
             $query->whereHas(
                 'servicios',
