@@ -31,13 +31,21 @@ class ClienteController extends Controller
             $query->where('activo', $request->boolean('activo'));
         }
 
+        // Cada palabra tiene que aparecer en nombre, apellido o teléfono
+        // (AND entre palabras): "marta rios" encuentra a Marta Rios aunque
+        // ninguna columna contenga el texto completo. LOWER(..) LIKE en vez de
+        // ILIKE: mismo resultado en Postgres, pero también corre en SQLite y
+        // por eso el filtro se puede testear.
         if ($request->filled('buscar')) {
-            $buscar = $request->buscar;
-            $query->where(function ($q) use ($buscar) {
-                $q->where('nombre', 'ILIKE', "%{$buscar}%")
-                  ->orWhere('apellido', 'ILIKE', "%{$buscar}%")
-                  ->orWhere('telefono', 'LIKE', "%{$buscar}%");
-            });
+            $terminos = preg_split('/\s+/', trim($request->buscar), -1, PREG_SPLIT_NO_EMPTY);
+            foreach ($terminos as $termino) {
+                $like = '%'.mb_strtolower($termino).'%';
+                $query->where(function ($q) use ($like) {
+                    $q->whereRaw('LOWER(nombre) LIKE ?', [$like])
+                      ->orWhereRaw('LOWER(apellido) LIKE ?', [$like])
+                      ->orWhere('telefono', 'LIKE', $like);
+                });
+            }
         }
 
         $query->orderBy('apellido')->orderBy('nombre');
