@@ -53,15 +53,40 @@ class Turno extends Model
         return $query->where('estado', 'confirmado');
     }
 
+    /**
+     * Turnos de un día, como rango [día 00:00, día siguiente 00:00). Reemplaza
+     * whereDate('fecha_hora', ...), que en Postgres compila a fecha_hora::date = ?
+     * y no puede usar el índice (user_id, fecha_hora, estado): era el filtro de
+     * cada carga de la agenda. Mismo resultado: la columna es timestamp sin zona
+     * y los límites son hora de pared (ver serializeDate), sin conversión.
+     */
     public function scopeDelaFecha($query, string $fecha)
     {
-        return $query->whereDate('fecha_hora', $fecha);
+        $inicio = self::inicioDelDia($fecha);
+
+        return $query->where('fecha_hora', '>=', $inicio->toDateTimeString())
+            ->where('fecha_hora', '<', $inicio->copy()->addDay()->toDateTimeString());
     }
 
+    /** Turnos entre dos días, ambos inclusive: [desde 00:00, día siguiente a hasta 00:00). */
     public function scopeDelRango($query, string $desde, string $hasta)
     {
-        return $query->whereDate('fecha_hora', '>=', $desde)
-            ->whereDate('fecha_hora', '<=', $hasta);
+        return $query->where('fecha_hora', '>=', self::inicioDelDia($desde)->toDateTimeString())
+            ->where('fecha_hora', '<', self::inicioDelDia($hasta)->addDay()->toDateTimeString());
+    }
+
+    /**
+     * Medianoche del día que nombra $valor. Se queda con la parte "YYYY-MM-DD"
+     * tal cual (como el cast a date de Postgres, que ignora hora y zona del
+     * texto); cualquier otro formato que acepte la regla `date` va por Carbon.
+     */
+    private static function inicioDelDia(string $valor): Carbon
+    {
+        if (preg_match('/^\d{4}-\d{2}-\d{2}/', $valor, $m)) {
+            return Carbon::createFromFormat('!Y-m-d', $m[0]);
+        }
+
+        return Carbon::parse($valor)->startOfDay();
     }
 
     /**
