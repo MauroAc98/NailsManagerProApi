@@ -149,9 +149,10 @@ class MercadoPagoService
     }
 
     /**
-     * Seña exacta que paga el cliente por un precio dado. Fijo: min(sena_monto,
-     * precio). Porcentaje: precio * pct / 100 redondeado hacia arriba a un multiplo
-     * (paso segun el monto, ver pasoSenaPorcentaje), tope el precio. 0 si la config es invalida o el precio es <= 0. `null` = precio
+     * Seña que paga el cliente por un precio dado. Fijo: min(sena_monto, precio).
+     * Porcentaje: el pct del precio, mas lo necesario para cubrir la comision de MP y la
+     * retencion, redondeado hacia arriba (paso segun el monto, ver pasoSenaPorcentaje),
+     * tope el precio. 0 si la config es invalida o el precio es <= 0. `null` = precio
      * desconocido (p. ej. /terminos): el fijo va sin tope y el porcentaje da 0.
      */
     public function senaParaPrecio(User $user, int|float|null $precio): float
@@ -169,11 +170,22 @@ class MercadoPagoService
                 return 0.0;
             }
 
-            // Redondeada hacia arriba a un multiplo (ver pasoSenaPorcentaje) para que la
-            // clienta pueda completar la diferencia en el local con billetes redondos.
-            $bruta = round($precio * $pct / 100, 2);
-            $paso = $this->pasoSenaPorcentaje($bruta);
-            $redonda = ceil($bruta / $paso) * $paso;
+            // El porcentaje se calcula sobre el precio final del turno (la suma de sus servicios).
+            // La seña cubre la comision de MP y la retencion: a la profesional le llega, como
+            // minimo, ese porcentaje. Se redondea hacia arriba (ver pasoSenaPorcentaje) para que la
+            // clienta complete la diferencia en el local con billetes redondos.
+            $exacta = round($precio * $pct / 100, 2);
+            $retencion = (float) $user->retencion_iibb_porcentaje;
+            $tasa = min($this->comisionVigente() + $retencion, 95.0) / 100;
+            $minimo = ceil($exacta / (1 - $tasa) - 1e-9);
+            $paso = $this->pasoSenaPorcentaje($minimo);
+            $redonda = ceil($minimo / $paso) * $paso;
+
+            // El cargo y la retencion se redondean a pesos enteros por separado: se verifica
+            // que lo que llega alcance y, si no, se sube de a un paso.
+            for ($i = 0; $i < 200 && $this->netoDeSena($redonda, $retencion) < $exacta; $i++) {
+                $redonda += $paso;
+            }
 
             return min((float) $redonda, (float) $precio);
         }
@@ -261,6 +273,12 @@ class MercadoPagoService
         }
 
         return $senaExacta >= self::PASO_SENA_MEDIANO ? self::PASO_SENA_MEDIANO : self::PASO_SENA_CHICO;
+    }
+
+    /** Lo que le llega a la profesional de una seña: menos la comision de MP y la retencion, cada una a pesos enteros. */
+    private function netoDeSena(float $sena, float $retencionPorcentaje): float
+    {
+        return $sena - round($sena * $this->comisionVigente() / 100) - round($sena * $retencionPorcentaje / 100);
     }
 
     /** Comision efectiva de MP (con IVA), en %: Setting global o la constante, por 1,21. */
