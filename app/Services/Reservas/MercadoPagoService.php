@@ -150,8 +150,8 @@ class MercadoPagoService
 
     /**
      * Seña exacta que paga el cliente por un precio dado. Fijo: min(sena_monto,
-     * precio). Porcentaje: round(precio * pct / 100) en pesos enteros, tope el
-     * precio. 0 si la config es invalida o el precio es <= 0. `null` = precio
+     * precio). Porcentaje: precio * pct / 100 redondeado hacia arriba a un multiplo
+     * de PASO_SENA_PORCENTAJE, tope el precio. 0 si la config es invalida o el precio es <= 0. `null` = precio
      * desconocido (p. ej. /terminos): el fijo va sin tope y el porcentaje da 0.
      */
     public function senaParaPrecio(User $user, int|float|null $precio): float
@@ -169,7 +169,12 @@ class MercadoPagoService
                 return 0.0;
             }
 
-            return min((float) round($precio * $pct / 100), (float) $precio);
+            // Redondeada hacia arriba a un multiplo de PASO_SENA_PORCENTAJE para que la
+            // clienta pueda completar la diferencia en el local con billetes redondos.
+            $bruta = round($precio * $pct / 100, 2);
+            $redonda = ceil($bruta / self::PASO_SENA_PORCENTAJE) * self::PASO_SENA_PORCENTAJE;
+
+            return min((float) $redonda, (float) $precio);
         }
 
         $monto = round((float) $user->sena_monto, 2);
@@ -239,6 +244,10 @@ class MercadoPagoService
     // confirmado contra un cobro real: comision nominal 6,29%, cargo
     // efectivo 7,59% (6,29 * 1,21).
     private const IVA_PORCENTAJE = 21;
+
+    // La seña por porcentaje se redondea hacia arriba a este multiplo (en pesos).
+    // El frontend lo espeja en lib/senaPreview.ts (PASO_SENA_PORCENTAJE).
+    private const PASO_SENA_PORCENTAJE = 500;
 
     /** Comision efectiva de MP (con IVA), en %: Setting global o la constante, por 1,21. */
     public function comisionVigente(): float
