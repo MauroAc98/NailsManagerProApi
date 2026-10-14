@@ -164,7 +164,7 @@ class MercadoPagoServiceTest extends TestCase
         $svc = app(MercadoPagoService::class);
         $user = User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 30]);
 
-        $this->assertSame(500.0, $svc->senaParaPrecio($user, 1115));    // 334.5 -> 500
+        $this->assertSame(400.0, $svc->senaParaPrecio($user, 1115));    // 334.5 -> paso 100 -> 400
         $this->assertSame(1000.0, $svc->senaParaPrecio($user, 3000));   // 900 -> 1000
         $this->assertSame(1500.0, $svc->senaParaPrecio($user, 4000));   // 1200 -> 1500
         $this->assertSame(4000.0, $svc->senaParaPrecio($user, 12000));  // 3600 -> 4000
@@ -175,12 +175,27 @@ class MercadoPagoServiceTest extends TestCase
         $this->assertSame(0.0, $svc->senaParaPrecio($user, 0));
     }
 
+    public function test_sena_para_precio_porcentaje_usa_un_paso_menor_cuando_la_sena_es_chica(): void
+    {
+        $svc = app(MercadoPagoService::class);
+        $user = User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 30]);
+
+        // Seña exacta < 100 -> paso 10; < 500 -> paso 100; desde 500 -> paso 500.
+        $this->assertSame(30.0, $svc->senaParaPrecio($user, 100));      // 30 exactos: no salta a 100
+        $this->assertSame(40.0, $svc->senaParaPrecio($user, 111));      // 33.3 -> 40
+        $this->assertSame(300.0, $svc->senaParaPrecio($user, 1000));    // 300 exactos
+        $this->assertSame(500.0, $svc->senaParaPrecio($user, 1500));    // 450 -> 500
+        $this->assertSame(500.0, $svc->senaParaPrecio($user, 1666));    // 499.8 -> paso 100 -> 500
+        $this->assertSame(1000.0, $svc->senaParaPrecio($user, 1700));   // 510 -> paso 500 -> 1000
+    }
+
     public function test_sena_para_precio_porcentaje_redondeada_nunca_supera_el_precio(): void
     {
         $svc = app(MercadoPagoService::class);
 
         $this->assertSame(1000.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 100]), 1000));
-        $this->assertSame(300.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 50]), 300));
+        $this->assertSame(200.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 50]), 333)); // 166.5 -> 200
+        $this->assertSame(100.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 100]), 100));
         $this->assertSame(1250.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 100]), 1250));
     }
 

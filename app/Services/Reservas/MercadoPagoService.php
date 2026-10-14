@@ -151,7 +151,7 @@ class MercadoPagoService
     /**
      * Seña exacta que paga el cliente por un precio dado. Fijo: min(sena_monto,
      * precio). Porcentaje: precio * pct / 100 redondeado hacia arriba a un multiplo
-     * de PASO_SENA_PORCENTAJE, tope el precio. 0 si la config es invalida o el precio es <= 0. `null` = precio
+     * (paso segun el monto, ver pasoSenaPorcentaje), tope el precio. 0 si la config es invalida o el precio es <= 0. `null` = precio
      * desconocido (p. ej. /terminos): el fijo va sin tope y el porcentaje da 0.
      */
     public function senaParaPrecio(User $user, int|float|null $precio): float
@@ -169,10 +169,11 @@ class MercadoPagoService
                 return 0.0;
             }
 
-            // Redondeada hacia arriba a un multiplo de PASO_SENA_PORCENTAJE para que la
+            // Redondeada hacia arriba a un multiplo (ver pasoSenaPorcentaje) para que la
             // clienta pueda completar la diferencia en el local con billetes redondos.
             $bruta = round($precio * $pct / 100, 2);
-            $redonda = ceil($bruta / self::PASO_SENA_PORCENTAJE) * self::PASO_SENA_PORCENTAJE;
+            $paso = $this->pasoSenaPorcentaje($bruta);
+            $redonda = ceil($bruta / $paso) * $paso;
 
             return min((float) $redonda, (float) $precio);
         }
@@ -245,9 +246,22 @@ class MercadoPagoService
     // efectivo 7,59% (6,29 * 1,21).
     private const IVA_PORCENTAJE = 21;
 
-    // La seña por porcentaje se redondea hacia arriba a este multiplo (en pesos).
-    // El frontend lo espeja en lib/senaPreview.ts (PASO_SENA_PORCENTAJE).
-    private const PASO_SENA_PORCENTAJE = 500;
+    // La seña por porcentaje se redondea hacia arriba a un multiplo que depende de su
+    // monto exacto (en pesos): < 100 -> 10, < 500 -> 100, desde 500 -> 500. Asi una seña
+    // chica no salta a otra enorme (precio de 100 al 30% -> 30, no 100).
+    // El frontend lo espeja en lib/senaPreview.ts (pasoSenaPorcentaje).
+    private const PASO_SENA_GRANDE = 500;
+    private const PASO_SENA_MEDIANO = 100;
+    private const PASO_SENA_CHICO = 10;
+
+    private function pasoSenaPorcentaje(float $senaExacta): int
+    {
+        if ($senaExacta >= self::PASO_SENA_GRANDE) {
+            return self::PASO_SENA_GRANDE;
+        }
+
+        return $senaExacta >= self::PASO_SENA_MEDIANO ? self::PASO_SENA_MEDIANO : self::PASO_SENA_CHICO;
+    }
 
     /** Comision efectiva de MP (con IVA), en %: Setting global o la constante, por 1,21. */
     public function comisionVigente(): float
