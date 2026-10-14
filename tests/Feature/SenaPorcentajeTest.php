@@ -82,7 +82,7 @@ class SenaPorcentajeTest extends TestCase
         $this->assertEquals(4000, $pago->monto);
     }
 
-    public function test_la_sena_se_redondea_hacia_arriba_a_multiplos_de_500(): void
+    public function test_la_sena_se_redondea_hacia_arriba_con_un_paso_segun_su_monto(): void
     {
         $user = $this->salonPct(['sena_porcentaje' => 33.33]);
         $s = $this->servicioConPrecio($user, 1001);
@@ -91,8 +91,8 @@ class SenaPorcentajeTest extends TestCase
 
         $pago = $svc->crearOReusarPreferencia($user, $this->reserva($user, [$s->id]));
 
-        // 1001 * 33.33 / 100 = 333.633 -> 500
-        $this->assertEquals(500, $pago->monto);
+        // 1001 * 33.33 / 100 = 333.633 -> seña de 100 a 499: paso 100 -> 400
+        $this->assertEquals(400, $pago->monto);
     }
 
     public function test_sin_total_no_cobra_y_no_crea_pago_ni_llama_a_mp(): void
@@ -121,7 +121,7 @@ class SenaPorcentajeTest extends TestCase
 
         $pago = app(MercadoPagoService::class)->crearOReusarPreferencia($user, $this->reserva($user, [$s->id]));
 
-        // 1% de 10 = 0.1 -> 500 por el redondeo, con tope en el precio.
+        // 1% de 10 = 0.1 -> paso 10 -> 10, que es el precio entero (tope).
         $this->assertEquals(10, $pago->monto);
     }
 
