@@ -159,16 +159,29 @@ class MercadoPagoServiceTest extends TestCase
         $this->assertSame(0.0, $svc->senaParaPrecio($user, 0));
     }
 
-    public function test_sena_para_precio_porcentaje_redondea_a_pesos_enteros_y_se_topea_al_precio(): void
+    public function test_sena_para_precio_porcentaje_redondea_hacia_arriba_a_multiplos_de_500_y_se_topea_al_precio(): void
     {
         $svc = app(MercadoPagoService::class);
         $user = User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 30]);
 
-        $this->assertSame(3600.0, $svc->senaParaPrecio($user, 12000));
-        $this->assertSame(335.0, $svc->senaParaPrecio($user, 1115));   // 334.5 rounds half up
+        $this->assertSame(500.0, $svc->senaParaPrecio($user, 1115));    // 334.5 -> 500
+        $this->assertSame(1000.0, $svc->senaParaPrecio($user, 3000));   // 900 -> 1000
+        $this->assertSame(1500.0, $svc->senaParaPrecio($user, 4000));   // 1200 -> 1500
+        $this->assertSame(4000.0, $svc->senaParaPrecio($user, 12000));  // 3600 -> 4000
+        $this->assertSame(7000.0, $svc->senaParaPrecio($user, 22000));  // 6600 -> 7000
+        $this->assertSame(7500.0, $svc->senaParaPrecio($user, 25000));  // ya es multiplo: no sube
+        $this->assertSame(14500.0, $svc->senaParaPrecio($user, 48000)); // 14400 -> 14500
         $this->assertSame(0.0, $svc->senaParaPrecio($user, null));
         $this->assertSame(0.0, $svc->senaParaPrecio($user, 0));
+    }
+
+    public function test_sena_para_precio_porcentaje_redondeada_nunca_supera_el_precio(): void
+    {
+        $svc = app(MercadoPagoService::class);
+
         $this->assertSame(1000.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 100]), 1000));
+        $this->assertSame(300.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 50]), 300));
+        $this->assertSame(1250.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 100]), 1250));
     }
 
     public function test_sena_para_precio_es_cero_con_config_invalida(): void
