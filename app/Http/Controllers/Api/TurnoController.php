@@ -1173,7 +1173,8 @@ class TurnoController extends Controller
     // mensajes posteriores a users.notificaciones_vistas_at — ver
     // marcarNotificacionesVistas(). La lista `mensajes` siempre trae TODOS
     // los de hoy, vistos o no; el frontend no distingue visualmente entre
-    // ellos, solo el número del badge cambia.
+    // ellos, solo el número del badge cambia. Además trae los que fallaron en
+    // los 2 días previos (no cuentan en `no_vistos`).
     // `reservas_pagadas`: reservas online cuya seña se aprobó HOY y ya son
     // turno (evento informativo, no requiere acción). También suman a
     // `no_vistos` si son posteriores a notificaciones_vistas_at.
@@ -1184,16 +1185,28 @@ class TurnoController extends Controller
         $manana = Carbon::tomorrow()->toDateString();
         $vistasDesde = $user->notificaciones_vistas_at;
 
+        $hoy = now()->toDateString();
+
+        // Besides today's messages, also list messages that FAILED in the last
+        // 2 days: Meta can report a failure long after the send, and the push
+        // deep link / the bell must be able to open that late failure.
         $mensajes = WhatsappMensaje::where('user_id', $user->id)
-            ->whereDate('created_at', now()->toDateString())
+            ->where(function ($q) use ($hoy) {
+                $q->whereDate('created_at', $hoy)
+                    ->orWhere(fn ($q) => $q->where('status', 'failed')
+                        ->whereDate('created_at', '>=', now()->subDays(2)->toDateString()));
+            })
             ->with('turno.cliente')
             ->orderByDesc('created_at')
             ->limit(50)
             ->get();
 
+        // The badge keeps counting today's messages only: the old failures
+        // listed above must not make it jump back up.
+        $mensajesDeHoy = $mensajes->filter(fn (WhatsappMensaje $m) => $m->created_at->toDateString() === $hoy);
         $noVistos = $vistasDesde
-            ? $mensajes->where('created_at', '>', $vistasDesde)->count()
-            : $mensajes->count();
+            ? $mensajesDeHoy->where('created_at', '>', $vistasDesde)->count()
+            : $mensajesDeHoy->count();
 
         $reservasPagadas = $this->reservasPagadasHoy($user);
         $noVistos += $vistasDesde

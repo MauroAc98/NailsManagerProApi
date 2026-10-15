@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\EnviarPushFalloWhatsapp;
 use App\Models\WhatsappConnection;
 use App\Models\WhatsappMensaje;
 use App\Services\AutorespuestaEntrante;
@@ -250,7 +251,24 @@ class CloudApiWebhookController extends Controller
             $datos += $this->extraerCamposError($status);
         }
 
+        // Meta puede reenviar el mismo evento: el push de fallo solo sale en la
+        // transicion real hacia 'failed', no en un 'failed' repetido.
+        $statusAnterior = $registro->status;
+
         $registro->update($datos);
+
+        if ($nuevoStatus === 'failed' && $statusAnterior !== 'failed') {
+            // Best-effort: un problema de cola nunca debe tumbar el 200 (Meta
+            // reintentaria todo el payload).
+            try {
+                EnviarPushFalloWhatsapp::dispatch($registro->id);
+            } catch (\Throwable $e) {
+                Log::warning('whatsapp.webhook.push_fallo_no_encolado', [
+                    'whatsapp_mensaje_id' => $registro->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
 
         // Un fallo al escribir el log no debe tumbar la respuesta 200 que ya
         // se va a devolver — el estado ya quedó persistido arriba.
