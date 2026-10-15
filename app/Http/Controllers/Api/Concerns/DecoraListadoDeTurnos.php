@@ -21,6 +21,7 @@ trait DecoraListadoDeTurnos
             'servicios',
             'reservaWeb',
             'whatsappMensajes' => fn ($q) => $q->where('tipo', 'confirmacion')->latest()->limit(1)->select(['id', 'turno_id', 'status']),
+            'ultimoWhatsappMensaje' => fn ($q) => $q->select(['whatsapp_mensajes.id', 'whatsapp_mensajes.turno_id', 'whatsapp_mensajes.status']),
         ];
     }
 
@@ -35,7 +36,10 @@ trait DecoraListadoDeTurnos
             // whatsapp_mensajes trae respuesta_api/message_id/numero — datos internos
             // que no deben llegar al frontend, así que solo exponemos el status derivado.
             $turno->confirmacion_whatsapp_status = optional($turno->whatsappMensajes->first())->status;
-            $turno->makeHidden('whatsappMensajes');
+            // Latest message of ANY tipo: shows the real delivery state even
+            // after a reminder/reschedule superseded the confirmation.
+            $turno->whatsapp_ultimo_status = $turno->ultimoWhatsappMensaje?->status;
+            $turno->makeHidden(['whatsappMensajes', 'ultimoWhatsappMensaje']);
         });
         $this->adjuntarGrupos($turnos);
         Turno::adjuntarSena($turnos);

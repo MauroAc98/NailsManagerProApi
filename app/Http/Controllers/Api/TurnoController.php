@@ -103,12 +103,14 @@ class TurnoController extends Controller
                 'cliente',
                 'servicios',
                 'whatsappMensajes' => fn ($q) => $q->where('tipo', 'confirmacion')->latest()->limit(1)->select(['id', 'turno_id', 'status']),
+                'ultimoWhatsappMensaje' => fn ($q) => $q->select(['whatsapp_mensajes.id', 'whatsapp_mensajes.turno_id', 'whatsapp_mensajes.status']),
             ])
             ->findOrFail($id);
 
         $turno->estado_visual = $this->calcularEstadoVisual($turno);
         $turno->confirmacion_whatsapp_status = optional($turno->whatsappMensajes->first())->status;
-        $turno->makeHidden('whatsappMensajes');
+        $turno->whatsapp_ultimo_status = $turno->ultimoWhatsappMensaje?->status;
+        $turno->makeHidden(['whatsappMensajes', 'ultimoWhatsappMensaje']);
         $this->adjuntarGrupos(collect([$turno]));
         Turno::adjuntarSena([$turno]);
 
@@ -1226,6 +1228,10 @@ class TurnoController extends Controller
                 // no hace falta reconstruirlo. Útil para diagnosticar un
                 // fallo (ver exactamente qué se intentó mandar).
                 'mensaje' => $m->mensaje,
+                // Meta failure info; error_detalle/respuesta_api stay internal.
+                'error_code' => $m->error_code,
+                'error_titulo' => $m->error_titulo,
+                'status_event_at' => $m->status_event_at,
                 // Para el reenvío manual por wa.me desde el detalle.
                 'cliente_telefono' => $m->turno?->cliente?->telefono,
                 'reenviable' => $m->esReenviableManual(),
