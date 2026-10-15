@@ -4,13 +4,16 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\EnviarPushFalloWhatsapp;
+use App\Jobs\EnviarPushResumenWhatsapp;
 use App\Models\WhatsappConnection;
 use App\Models\WhatsappMensaje;
 use App\Services\AutorespuestaEntrante;
 use App\Services\CloudApiService;
+use App\Services\Push\ResumenWhatsappPayload;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class CloudApiWebhookController extends Controller
@@ -270,6 +273,11 @@ class CloudApiWebhookController extends Controller
             }
         }
 
+        if (in_array($nuevoStatus, ['delivered', 'read'], true)
+            && ! in_array($statusAnterior, ['delivered', 'read'], true)) {
+            $this->solicitarPushResumen($registro);
+        }
+
         // Un fallo al escribir el log no debe tumbar la respuesta 200 que ya
         // se va a devolver — el estado ya quedó persistido arriba.
         try {
@@ -287,6 +295,36 @@ class CloudApiWebhookController extends Controller
             }
         } catch (\Throwable $e) {
             // no-op: el estado ya se guardó, el log es best-effort
+        }
+    }
+
+    /**
+     * Pide el push-resumen "N entregados" tras una transicion real a
+     * 'delivered'/'read'. Meta manda rafagas de eventos: el Cache::add() deja
+     * pasar uno solo por usuario + categoria + dia cada 30 s, y el job (con
+     * ese mismo retraso) cuenta al correr, asi que ve la rafaga completa.
+     * Best-effort: nunca debe tumbar el 200.
+     */
+    private function solicitarPushResumen(WhatsappMensaje $registro): void
+    {
+        try {
+            $categoria = ResumenWhatsappPayload::categoriaDeTipo($registro->tipo);
+
+            if (! $categoria) {
+                return;
+            }
+
+            $clave = 'resumen-push:' . $registro->user_id . ':' . $categoria . ':' . now()->toDateString();
+
+            if (Cache::add($clave, true, 30)) {
+                EnviarPushResumenWhatsapp::dispatch($registro->user_id, $categoria)
+                    ->delay(now()->addSeconds(30));
+            }
+        } catch (\Throwable $e) {
+            Log::warning('whatsapp.webhook.push_resumen_no_encolado', [
+                'whatsapp_mensaje_id' => $registro->id,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 
