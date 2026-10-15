@@ -46,7 +46,14 @@ class EnviarPushResumenWhatsapp implements ShouldQueue
                 ->whereIn('tipo', $tipos)
                 ->whereDate('created_at', now()->toDateString());
 
-            $entregados = (clone $deHoy)->whereIn('status', ['delivered', 'read'])->count();
+            $mensajesEntregados = (clone $deHoy)
+                ->whereIn('status', ['delivered', 'read'])
+                ->with(['turno.cliente', 'turno.servicios'])
+                ->orderByDesc('updated_at')
+                ->orderByDesc('id')
+                ->get();
+
+            $entregados = $mensajesEntregados->count();
 
             if ($entregados === 0) {
                 return;
@@ -55,7 +62,7 @@ class EnviarPushResumenWhatsapp implements ShouldQueue
             $fallaron = (clone $deHoy)->where('status', 'failed')->count();
 
             $user->notify(new ResumenMensajesWhatsapp(
-                ResumenWhatsappPayload::para($this->categoria, $entregados, $fallaron),
+                ResumenWhatsappPayload::para($this->categoria, $entregados, $fallaron, $mensajesEntregados),
             ));
         } catch (\Throwable $e) {
             Log::warning('EnviarPushResumenWhatsapp: fallo al enviar el push', [
