@@ -1109,6 +1109,10 @@ class TurnoController extends Controller
     // no tienen un recordatorio gestionado (ni automático ni manual) — ver
     // marcarRecordatorioManual() y EnviarRecordatorios, que son las dos
     // formas en que un WhatsappMensaje tipo='recordatorio' puede existir.
+    // Un recordatorio automático que Meta aceptó y luego no pudo entregar
+    // (failed con message_id, ver WhatsappMensaje::esReenviableManual) sigue
+    // pendiente: hay que mandarlo a mano. Un failed sin message_id es un error
+    // nuestro al enviar y no se tapa con un reenvío manual.
     // ─────────────────────────────────────────────
     public function recordatoriosPendientes(Request $request): JsonResponse
     {
@@ -1118,7 +1122,8 @@ class TurnoController extends Controller
         $turnos = Turno::delUsuario($user)
             ->confirmados()
             ->delaFecha($manana)
-            ->whereDoesntHave('whatsappMensajes', fn ($q) => $q->where('tipo', 'recordatorio'))
+            ->whereDoesntHave('whatsappMensajes', fn ($q) => $q->where('tipo', 'recordatorio')
+                ->where(fn ($w) => $w->where('status', '!=', 'failed')->orWhereNull('message_id')))
             ->with(['cliente', 'servicios'])
             ->orderBy('fecha_hora')
             ->get()
@@ -1326,11 +1331,18 @@ class TurnoController extends Controller
         $user = $request->user();
         $turno = Turno::delUsuario($user)->with('cliente')->findOrFail($id);
 
-        $yaExiste = WhatsappMensaje::where('turno_id', $turno->id)
+        $existente = WhatsappMensaje::where('turno_id', $turno->id)
             ->where('tipo', 'recordatorio')
-            ->exists();
+            ->first();
 
-        if (! $yaExiste) {
+        // Un recordatorio automático que falló en la entrega y se reenvió a mano
+        // pasa a 'manual' (la misma fila: unique turno_id + tipo), igual que en
+        // reenvioManualMensaje(). Cualquier otro estado existente no se toca.
+        if ($existente?->esReenviableManual()) {
+            $existente->update(['status' => 'manual']);
+        }
+
+        if (! $existente) {
             try {
                 WhatsappMensaje::create([
                     'user_id' => $user->id,
