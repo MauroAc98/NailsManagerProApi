@@ -2,6 +2,7 @@
 
 namespace App\Services\Push;
 
+use App\Models\Turno;
 use App\Models\WhatsappMensaje;
 use Illuminate\Support\Carbon;
 
@@ -43,20 +44,24 @@ class FalloWhatsappPayload
             return self::CUERPO_SIN_TURNO;
         }
 
+        $servicios = $turno->servicios->pluck('nombre')->unique()->values()->all();
+
+        return ReservaOnlinePayload::cliente($turno) . ' · ' . ReservaOnlinePayload::conMas($servicios, ' + ') . "\n" . self::cuando($turno);
+    }
+
+    /** Appointment date and time like "Mié 21 oct · 15:00", from the raw stored wall-clock value. */
+    public static function cuando(Turno $turno): string
+    {
         // Raw stored wall-clock value, NOT the datetime cast: app.timezone is not
         // UTC and the cast round-trip shifts the instant (~3h).
         $inicio = Carbon::createFromFormat('Y-m-d H:i:s', substr((string) $turno->getRawOriginal('fecha_hora'), 0, 19));
 
-        $servicios = $turno->servicios->pluck('nombre')->unique()->values()->all();
-
-        $cuando = sprintf(
+        return sprintf(
             '%s %d %s · %s',
             ReservaOnlinePayload::DIAS[$inicio->dayOfWeek],
             $inicio->day,
             ReservaOnlinePayload::MESES[$inicio->month - 1],
             $inicio->format('H:i'),
         );
-
-        return ReservaOnlinePayload::cliente($turno) . ' · ' . ReservaOnlinePayload::conMas($servicios, ' + ') . "\n" . $cuando;
     }
 }
