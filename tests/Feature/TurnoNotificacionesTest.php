@@ -156,6 +156,71 @@ class TurnoNotificacionesTest extends TestCase
         $response->assertJsonCount(0, 'mensajes');
     }
 
+    private function mensajeDeAyer(User $user, Turno $turno, string $status, string $messageId, int $diasAtras = 1): WhatsappMensaje
+    {
+        $m = WhatsappMensaje::create([
+            'user_id' => $user->id, 'turno_id' => $turno->id, 'numero' => '3765123456',
+            'provider' => 'cloud_api', 'mensaje' => 'x', 'tipo' => 'confirmacion',
+            'message_id' => $messageId, 'status' => $status,
+        ]);
+        $m->created_at = now()->subDays($diasAtras);
+        $m->save();
+
+        return $m;
+    }
+
+    public function test_incluye_un_mensaje_fallido_de_ayer(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $turno = $this->crearTurno($user);
+        $fallido = $this->mensajeDeAyer($user, $turno, 'failed', 'wamid.late-fail');
+
+        $res = $this->actingAs($user, 'sanctum')->getJson('/api/turnos/notificaciones')->assertOk();
+
+        $res->assertJsonCount(1, 'mensajes');
+        $res->assertJsonPath('mensajes.0.id', $fallido->id);
+        $res->assertJsonPath('mensajes.0.status', 'failed');
+    }
+
+    public function test_excluye_un_mensaje_entregado_de_ayer(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $turno = $this->crearTurno($user);
+        $this->mensajeDeAyer($user, $turno, 'delivered', 'wamid.old-ok');
+
+        $this->actingAs($user, 'sanctum')->getJson('/api/turnos/notificaciones')
+            ->assertOk()
+            ->assertJsonCount(0, 'mensajes');
+    }
+
+    public function test_excluye_un_mensaje_fallido_de_hace_mas_de_dos_dias(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $turno = $this->crearTurno($user);
+        $this->mensajeDeAyer($user, $turno, 'failed', 'wamid.too-old', 3);
+
+        $this->actingAs($user, 'sanctum')->getJson('/api/turnos/notificaciones')
+            ->assertOk()
+            ->assertJsonCount(0, 'mensajes');
+    }
+
+    public function test_no_vistos_no_cuenta_un_fallo_viejo_pero_si_los_de_hoy(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $turno = $this->crearTurno($user);
+        $this->mensajeDeAyer($user, $turno, 'failed', 'wamid.old-fail');
+        WhatsappMensaje::create([
+            'user_id' => $user->id, 'turno_id' => $turno->id, 'numero' => '3765123456',
+            'provider' => 'cloud_api', 'mensaje' => 'x', 'tipo' => 'recordatorio', // unique (turno_id, tipo)
+            'message_id' => 'wamid.today', 'status' => 'delivered',
+        ]);
+
+        $res = $this->actingAs($user, 'sanctum')->getJson('/api/turnos/notificaciones')->assertOk();
+
+        $res->assertJsonCount(2, 'mensajes');
+        $res->assertJsonPath('no_vistos', 1);
+    }
+
     public function test_no_devuelve_mensajes_de_otro_usuario(): void
     {
         $user = User::factory()->create(['is_exempt' => true]);

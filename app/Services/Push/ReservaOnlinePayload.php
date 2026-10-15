@@ -71,7 +71,7 @@ class ReservaOnlinePayload
     }
 
     /** "Camila R." (first name + last initial); first name only when there is no last name. */
-    private static function cliente(Turno $turno): string
+    public static function cliente(Turno $turno): string
     {
         $cliente = $turno->cliente;
         $nombre = self::primerNombre((string) $cliente?->nombre);
@@ -86,7 +86,7 @@ class ReservaOnlinePayload
     }
 
     /** "A", or "A + 1 más" / "A y 1 más" for several items. */
-    private static function conMas(array $items, string $separador = ' y '): string
+    public static function conMas(array $items, string $separador = ' y '): string
     {
         $extra = count($items) - 1;
 
