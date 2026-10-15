@@ -443,4 +443,67 @@ class TurnoNotificacionesTest extends TestCase
         $res->assertJsonPath('reservas_pagadas.0.cliente_nombre', 'Nueva');
         $res->assertJsonPath('no_vistos', 1);
     }
+
+    public function test_expone_error_code_error_titulo_y_status_event_at_de_un_fallo(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $turno = $this->crearTurno($user);
+        $m = WhatsappMensaje::create([
+            'user_id' => $user->id, 'turno_id' => $turno->id, 'numero' => '3765123456',
+            'provider' => 'cloud_api', 'mensaje' => 'x', 'tipo' => 'confirmacion',
+            'message_id' => 'wamid.err', 'status' => 'failed',
+            'status_event_at' => 1790000000,
+            'error_code' => 131026,
+            'error_titulo' => 'Message undeliverable',
+            'error_detalle' => 'internal detail',
+            'respuesta_api' => ['secret' => 'internal'],
+        ]);
+
+        $res = $this->actingAs($user, 'sanctum')->getJson('/api/turnos/notificaciones')->assertOk();
+
+        $res->assertJsonPath('mensajes.0.id', $m->id);
+        $res->assertJsonPath('mensajes.0.error_code', 131026);
+        $res->assertJsonPath('mensajes.0.error_titulo', 'Message undeliverable');
+        $res->assertJsonPath('mensajes.0.status_event_at', 1790000000);
+    }
+
+    public function test_los_campos_de_error_son_null_cuando_no_hay_fallo(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $turno = $this->crearTurno($user);
+        WhatsappMensaje::create([
+            'user_id' => $user->id, 'turno_id' => $turno->id, 'numero' => '3765123456',
+            'provider' => 'cloud_api', 'mensaje' => 'x', 'tipo' => 'confirmacion',
+            'message_id' => 'wamid.ok', 'status' => 'pending',
+        ]);
+
+        $res = $this->actingAs($user, 'sanctum')->getJson('/api/turnos/notificaciones')->assertOk();
+
+        $mensaje = $res->json('mensajes.0');
+        $this->assertArrayHasKey('error_code', $mensaje);
+        $this->assertArrayHasKey('error_titulo', $mensaje);
+        $this->assertArrayHasKey('status_event_at', $mensaje);
+        $this->assertNull($mensaje['error_code']);
+        $this->assertNull($mensaje['error_titulo']);
+        $this->assertNull($mensaje['status_event_at']);
+    }
+
+    public function test_no_expone_datos_internos_del_mensaje(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $turno = $this->crearTurno($user);
+        WhatsappMensaje::create([
+            'user_id' => $user->id, 'turno_id' => $turno->id, 'numero' => '3765123456',
+            'provider' => 'cloud_api', 'mensaje' => 'x', 'tipo' => 'confirmacion',
+            'message_id' => 'wamid.hidden', 'status' => 'failed',
+            'error_code' => 131026, 'error_titulo' => 'T', 'error_detalle' => 'D',
+            'respuesta_api' => ['k' => 'v'],
+        ]);
+
+        $mensaje = $this->actingAs($user, 'sanctum')->getJson('/api/turnos/notificaciones')->assertOk()->json('mensajes.0');
+
+        foreach (['error_detalle', 'respuesta_api', 'message_id', 'numero'] as $clave) {
+            $this->assertArrayNotHasKey($clave, $mensaje);
+        }
+    }
 }

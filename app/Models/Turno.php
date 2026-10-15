@@ -220,4 +220,17 @@ class Turno extends Model
     {
         return $this->hasMany(WhatsappMensaje::class);
     }
+
+    /**
+     * Latest WhatsApp message of ANY tipo (confirmacion, recordatorio,
+     * reprogramacion). ofMany resolves "latest" per turno in a single
+     * subquery, so it stays correct when eager loading many turnos.
+     */
+    public function ultimoWhatsappMensaje()
+    {
+        return $this->hasOne(WhatsappMensaje::class)->ofMany([
+            'created_at' => 'max',
+            'id' => 'max',
+        ]);
+    }
 }
