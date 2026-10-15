@@ -159,20 +159,49 @@ class MercadoPagoServiceTest extends TestCase
         $this->assertSame(0.0, $svc->senaParaPrecio($user, 0));
     }
 
-    public function test_sena_para_precio_porcentaje_redondea_hacia_arriba_a_multiplos_de_500_y_se_topea_al_precio(): void
+    // La seña por porcentaje cubre la comision de MP (con IVA) y la retencion: el cliente deja un poco
+    // mas que el porcentaje y a la profesional le llega, como minimo, el porcentaje del precio.
+    // Se redondea hacia arriba con un paso que depende del monto (ver pasoSenaPorcentaje).
+    public function test_sena_para_precio_porcentaje_cubre_la_comision_y_se_redondea_hacia_arriba(): void
     {
         $svc = app(MercadoPagoService::class);
         $user = User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 30]);
 
-        $this->assertSame(400.0, $svc->senaParaPrecio($user, 1115));    // 334.5 -> paso 100 -> 400
-        $this->assertSame(1000.0, $svc->senaParaPrecio($user, 3000));   // 900 -> 1000
-        $this->assertSame(1500.0, $svc->senaParaPrecio($user, 4000));   // 1200 -> 1500
-        $this->assertSame(4000.0, $svc->senaParaPrecio($user, 12000));  // 3600 -> 4000
-        $this->assertSame(7000.0, $svc->senaParaPrecio($user, 22000));  // 6600 -> 7000
-        $this->assertSame(7500.0, $svc->senaParaPrecio($user, 25000));  // ya es multiplo: no sube
-        $this->assertSame(14500.0, $svc->senaParaPrecio($user, 48000)); // 14400 -> 14500
+        $this->assertSame(1000.0, $svc->senaParaPrecio($user, 3000));   // 900 -> cubre 975 -> 1000
+        $this->assertSame(1500.0, $svc->senaParaPrecio($user, 4000));   // 1200 -> 1299 -> 1500
+        $this->assertSame(4000.0, $svc->senaParaPrecio($user, 12000));  // 3600 -> 3897 -> 4000
+        $this->assertSame(7500.0, $svc->senaParaPrecio($user, 22000));  // 6600 -> 7144 -> 7500
+        $this->assertSame(8500.0, $svc->senaParaPrecio($user, 25000));  // 7500 -> 8118 -> 8500
+        $this->assertSame(16000.0, $svc->senaParaPrecio($user, 48000)); // 14400 -> 15587 -> 16000
+        $this->assertSame(20500.0, $svc->senaParaPrecio($user, 62000)); // 18600 -> 20133 -> 20500
         $this->assertSame(0.0, $svc->senaParaPrecio($user, null));
         $this->assertSame(0.0, $svc->senaParaPrecio($user, 0));
+    }
+
+    public function test_sena_para_precio_porcentaje_siempre_deja_al_menos_el_porcentaje_despues_de_la_comision(): void
+    {
+        $svc = app(MercadoPagoService::class);
+        $comision = $svc->comisionVigente();
+
+        foreach ([20, 30, 50] as $pct) {
+            foreach ([3000, 4000, 12000, 22000, 25000, 28000, 40000, 62000] as $precio) {
+                $user = User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => $pct]);
+                $sena = $svc->senaParaPrecio($user, $precio);
+                $neto = $sena - round($sena * $comision / 100);
+
+                $this->assertGreaterThanOrEqual($precio * $pct / 100, $neto, "{$pct}% de {$precio}");
+                $this->assertLessThanOrEqual($precio, $sena, "{$pct}% de {$precio}");
+            }
+        }
+    }
+
+    public function test_sena_para_precio_porcentaje_tambien_cubre_la_retencion_de_impuestos(): void
+    {
+        $svc = app(MercadoPagoService::class);
+        $user = User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 50, 'retencion_iibb_porcentaje' => 4]);
+
+        // 9000 -> 9000 / (1 - 0.116109) = 10183 -> 10500
+        $this->assertSame(10500.0, $svc->senaParaPrecio($user, 18000));
     }
 
     public function test_sena_para_precio_porcentaje_usa_un_paso_menor_cuando_la_sena_es_chica(): void
@@ -180,23 +209,24 @@ class MercadoPagoServiceTest extends TestCase
         $svc = app(MercadoPagoService::class);
         $user = User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 30]);
 
-        // Seña exacta < 100 -> paso 10; < 500 -> paso 100; desde 500 -> paso 500.
-        $this->assertSame(30.0, $svc->senaParaPrecio($user, 100));      // 30 exactos: no salta a 100
-        $this->assertSame(40.0, $svc->senaParaPrecio($user, 111));      // 33.3 -> 40
-        $this->assertSame(300.0, $svc->senaParaPrecio($user, 1000));    // 300 exactos
-        $this->assertSame(500.0, $svc->senaParaPrecio($user, 1500));    // 450 -> 500
-        $this->assertSame(500.0, $svc->senaParaPrecio($user, 1666));    // 499.8 -> paso 100 -> 500
-        $this->assertSame(1000.0, $svc->senaParaPrecio($user, 1700));   // 510 -> paso 500 -> 1000
+        // Paso segun el monto que cubre la comision: < 100 -> 10; < 500 -> 100; desde 500 -> 500.
+        $this->assertSame(40.0, $svc->senaParaPrecio($user, 100));      // 30 -> 33 -> 40
+        $this->assertSame(40.0, $svc->senaParaPrecio($user, 111));      // 33.3 -> 37 -> 40
+        $this->assertSame(400.0, $svc->senaParaPrecio($user, 1000));    // 300 -> 325 -> 400
+        $this->assertSame(500.0, $svc->senaParaPrecio($user, 1500));    // 450 -> 488 -> 500
+        $this->assertSame(1000.0, $svc->senaParaPrecio($user, 1666));   // 499.8 -> 541 -> paso 500 -> 1000
+        $this->assertSame(400.0, $svc->senaParaPrecio($user, 1115));    // 334.5 -> 363 -> 400
     }
 
-    public function test_sena_para_precio_porcentaje_redondeada_nunca_supera_el_precio(): void
+    public function test_sena_para_precio_porcentaje_nunca_supera_el_precio(): void
     {
         $svc = app(MercadoPagoService::class);
 
+        // Con 100% (o un precio chico) la seña es el precio entero: no hay de donde cubrir la comision.
         $this->assertSame(1000.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 100]), 1000));
-        $this->assertSame(200.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 50]), 333)); // 166.5 -> 200
         $this->assertSame(100.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 100]), 100));
         $this->assertSame(1250.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 100]), 1250));
+        $this->assertSame(200.0, $svc->senaParaPrecio(User::factory()->make(['sena_tipo' => 'porcentaje', 'sena_porcentaje' => 50]), 333)); // 166.5 -> 185 -> 200
     }
 
     public function test_sena_para_precio_es_cero_con_config_invalida(): void
