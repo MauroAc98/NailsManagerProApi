@@ -32,6 +32,19 @@ class RecordatoriosPendientesEndpointTest extends TestCase
         ]);
     }
 
+    private function crearRecordatorio(User $user, Turno $turno, string $status, ?string $messageId): WhatsappMensaje
+    {
+        return WhatsappMensaje::create([
+            'user_id' => $user->id,
+            'turno_id' => $turno->id,
+            'numero' => '3765252395',
+            'mensaje' => 'Hola',
+            'tipo' => 'recordatorio',
+            'message_id' => $messageId,
+            'status' => $status,
+        ]);
+    }
+
     // ── GET /api/turnos/recordatorios-pendientes ──────────────────
 
     public function test_turno_de_manana_sin_recordatorio_aparece_en_el_listado(): void
@@ -80,7 +93,83 @@ class RecordatoriosPendientesEndpointTest extends TestCase
         $response->assertJsonCount(0);
     }
 
+    public function test_recordatorio_fallido_con_message_id_sigue_pendiente_para_mandarlo_a_mano(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $turno = $this->crearTurnoDeManana($user);
+        $this->crearRecordatorio($user, $turno, 'failed', 'wamid.ABC');
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson('/api/turnos/recordatorios-pendientes')
+            ->assertOk()
+            ->assertJsonFragment(['id' => $turno->id]);
+    }
+
+    public function test_recordatorio_fallido_sin_message_id_no_aparece_porque_es_un_error_nuestro(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $turno = $this->crearTurnoDeManana($user);
+        $this->crearRecordatorio($user, $turno, 'failed', null);
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson('/api/turnos/recordatorios-pendientes')
+            ->assertOk()
+            ->assertJsonCount(0);
+    }
+
+    public function test_recordatorio_entregado_leido_o_manual_no_aparece(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $entregado = $this->crearTurnoDeManana($user, '3765000001');
+        $leido = $this->crearTurnoDeManana($user, '3765000002');
+        $manual = $this->crearTurnoDeManana($user, '3765000003');
+        $this->crearRecordatorio($user, $entregado, 'delivered', 'wamid.1');
+        $this->crearRecordatorio($user, $leido, 'read', 'wamid.2');
+        $this->crearRecordatorio($user, $manual, 'manual', null);
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson('/api/turnos/recordatorios-pendientes')
+            ->assertOk()
+            ->assertJsonCount(0);
+    }
+
     // ── POST /api/turnos/{id}/recordatorio-manual ─────────────────
+
+    public function test_marcar_manual_un_recordatorio_fallido_reenviable_lo_pasa_a_manual_sin_duplicar(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $turno = $this->crearTurnoDeManana($user);
+        $this->crearRecordatorio($user, $turno, 'failed', 'wamid.ABC');
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson("/api/turnos/{$turno->id}/recordatorio-manual")
+            ->assertOk();
+
+        $this->assertDatabaseHas('whatsapp_mensajes', ['turno_id' => $turno->id, 'tipo' => 'recordatorio', 'status' => 'manual']);
+        $this->assertSame(1, WhatsappMensaje::where('turno_id', $turno->id)->where('tipo', 'recordatorio')->count());
+
+        // Ya gestionado: deja de estar pendiente.
+        $this->actingAs($user, 'sanctum')
+            ->getJson('/api/turnos/recordatorios-pendientes')
+            ->assertOk()
+            ->assertJsonCount(0);
+    }
+
+    public function test_marcar_manual_no_toca_un_fallo_sin_message_id_ni_un_mensaje_entregado(): void
+    {
+        $user = User::factory()->create(['is_exempt' => true]);
+        $nuestro = $this->crearTurnoDeManana($user, '3765000001');
+        $entregado = $this->crearTurnoDeManana($user, '3765000002');
+        $this->crearRecordatorio($user, $nuestro, 'failed', null);
+        $this->crearRecordatorio($user, $entregado, 'delivered', 'wamid.1');
+
+        foreach ([$nuestro, $entregado] as $t) {
+            $this->actingAs($user, 'sanctum')->postJson("/api/turnos/{$t->id}/recordatorio-manual")->assertOk();
+        }
+
+        $this->assertDatabaseHas('whatsapp_mensajes', ['turno_id' => $nuestro->id, 'tipo' => 'recordatorio', 'status' => 'failed']);
+        $this->assertDatabaseHas('whatsapp_mensajes', ['turno_id' => $entregado->id, 'tipo' => 'recordatorio', 'status' => 'delivered']);
+    }
 
     public function test_marca_recordatorio_manual_crea_whatsapp_mensaje(): void
     {
