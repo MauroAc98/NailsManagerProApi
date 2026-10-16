@@ -81,6 +81,11 @@ class ProGuardAislamientoTest extends TestCase
             // Empty body: an allowed caller gets past auth and stops at 422.
             'pro_cambiar_password' => ['POST', '/api/pro/cambiar-password'],
             'push_public_key' => ['GET', '/api/push/public-key'],
+            // Agenda routes. The pro one is called without X-Vinculo-Id on purpose:
+            // an allowed caller gets past auth and abilities and stops at 422.
+            'tenant_turnos' => ['GET', '/api/turnos'],
+            'pro_turnos' => ['GET', '/api/pro/turnos'],
+            'pro_turno' => ['GET', '/api/pro/turnos/1'],
         ];
     }
 
@@ -114,6 +119,19 @@ class ProGuardAislamientoTest extends TestCase
             'pro full -> pro/cambiar-password' => [self::PRO_FULL, 'pro_cambiar_password', 403],
             'tenant -> pro/cambiar-password' => [self::TENANT, 'pro_cambiar_password', 401],
             'admin -> pro/cambiar-password' => [self::ADMIN, 'pro_cambiar_password', 401],
+            // Agenda (B4a): the tenant list and the portal list never cross.
+            'tenant -> turnos' => [self::TENANT, 'tenant_turnos', 200],
+            'admin -> turnos' => [self::ADMIN, 'tenant_turnos', 401],
+            'pro full -> turnos' => [self::PRO_FULL, 'tenant_turnos', 401],
+            'pro restringido -> turnos' => [self::PRO_RESTRINGIDO, 'tenant_turnos', 401],
+            'tenant -> pro/turnos' => [self::TENANT, 'pro_turnos', 401],
+            'admin -> pro/turnos' => [self::ADMIN, 'pro_turnos', 401],
+            'pro restringido -> pro/turnos' => [self::PRO_RESTRINGIDO, 'pro_turnos', 403],
+            'pro full -> pro/turnos' => [self::PRO_FULL, 'pro_turnos', 422],
+            'tenant -> pro/turnos/{id}' => [self::TENANT, 'pro_turno', 401],
+            'admin -> pro/turnos/{id}' => [self::ADMIN, 'pro_turno', 401],
+            'pro restringido -> pro/turnos/{id}' => [self::PRO_RESTRINGIDO, 'pro_turno', 403],
+            'pro full -> pro/turnos/{id}' => [self::PRO_FULL, 'pro_turno', 422],
         ];
     }
 
