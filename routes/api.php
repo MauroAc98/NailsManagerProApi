@@ -142,6 +142,11 @@ Route::prefix('pro')->middleware('portal.pro')->group(function () {
     Route::post('logout', [ProAuthController::class, 'logout'])
         ->middleware(['auth:profesional', 'throttle:pro', 'pro.vigente:cuenta']);
 
+    // The one route the restricted token (`pro:cambiar-password`) can reach;
+    // full tokens get 403 here. Authenticated by design: never a public route.
+    Route::post('cambiar-password', [ProAuthController::class, 'cambiarPassword'])
+        ->middleware(['auth:profesional', 'abilities:pro:cambiar-password', 'throttle:pro', 'pro.vigente:cuenta']);
+
     // `throttle:pro` goes before `pro.vigente` so rejected requests count too.
     Route::middleware(['auth:profesional', 'abilities:pro:acceso', 'throttle:pro', 'pro.vigente:cuenta'])->group(function () {
         Route::get('me', [ProAuthController::class, 'me']);

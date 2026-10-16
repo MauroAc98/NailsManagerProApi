@@ -10,8 +10,10 @@ use App\Support\BloqueoLogin;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 
 class ProAuthController extends Controller
 {
@@ -141,6 +143,72 @@ class ProAuthController extends Controller
                     'motivo' => $motivo,
                 ];
             })->all(),
+        ]);
+    }
+
+    // ─────────────────────────────────────────────
+    // POST /api/pro/cambiar-password
+    // The forced change after a provisional password. Reachable ONLY with the
+    // restricted token (route ability `pro:cambiar-password`), which login
+    // hands out after a correct password: there is no unauthenticated variant
+    // and no "current password" field to brute-force, because the token IS the
+    // proof of knowing it. On success every token of the account is revoked
+    // (the restricted one included) and one fresh full token is issued the same
+    // way login does, device cap included.
+    // ─────────────────────────────────────────────
+    public function cambiarPassword(Request $request, EmisorTokenProfesional $emisor): JsonResponse
+    {
+        $data = $request->validate([
+            'password' => 'required|string|min:10|max:255|confirmed',
+        ], [
+            'password.required' => 'Ingresá la nueva contraseña.',
+            'password.string' => 'La contraseña no es válida.',
+            'password.min' => 'La contraseña debe tener al menos 10 caracteres.',
+            'password.max' => 'La contraseña es demasiado larga.',
+            'password.confirmed' => 'Las contraseñas no coinciden.',
+        ]);
+
+        $cuenta = $request->user('profesional');
+
+        // The stored hash is the provisional password at this point.
+        if (Hash::check($data['password'], $cuenta->password)) {
+            throw ValidationException::withMessages([
+                'password' => ['La nueva contraseña tiene que ser distinta de la provisoria.'],
+            ]);
+        }
+
+        $emitido = DB::transaction(function () use ($cuenta, $data, $emisor) {
+            // Re-read under lock: two requests with the same restricted token
+            // cannot both rewrite the password, and a flag cleared after the
+            // token was issued is honoured.
+            $bloqueada = ProfesionalCuenta::whereKey($cuenta->id)->lockForUpdate()->first();
+
+            if (! $bloqueada->debe_cambiar_password) {
+                return null;
+            }
+
+            $bloqueada->forceFill([
+                'password' => $data['password'],
+                'debe_cambiar_password' => false,
+            ])->save();
+            $bloqueada->tokens()->delete();
+
+            return $emisor->completo($bloqueada);
+        });
+
+        if ($emitido === null) {
+            return response()->json([
+                'message' => 'Esta cuenta no necesita cambiar la contraseña.',
+                'code' => 'PASSWORD_CAMBIO_NO_REQUERIDO',
+            ], 403);
+        }
+
+        Log::info('ProAuthController: forced password change done', ['cuenta_id' => $cuenta->id]);
+
+        return response()->json([
+            'token' => $emitido['token'],
+            'expires_at' => $emitido['expires_at'],
+            'debe_cambiar_password' => false,
         ]);
     }
 
