@@ -17,6 +17,13 @@ class PortalProfesionalesHabilitado
     {
         abort_unless(config('portal_profesionales.habilitado'), 404);
 
-        return $next($request);
+        $response = $next($request);
+
+        // Sessions, tokens and agenda data must never sit in a shared or
+        // browser cache. Outermost middleware of the group, so it also covers
+        // the 401/403/429 answers produced further in.
+        $response->headers->set('Cache-Control', 'no-store, private');
+
+        return $response;
     }
 }

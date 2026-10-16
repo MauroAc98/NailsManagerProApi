@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Pro;
 
 use App\Http\Controllers\Controller;
 use App\Models\ProfesionalCuenta;
+use App\Models\ProfesionalVinculo;
 use App\Services\Portal\EmisorTokenProfesional;
 use App\Support\BloqueoLogin;
 use Illuminate\Http\JsonResponse;
@@ -101,13 +102,45 @@ class ProAuthController extends Controller
 
     // ─────────────────────────────────────────────
     // GET /api/pro/me
-    // Stub for now: just the account. The chooser payload (links, negocio,
-    // professional) arrives with the per-request validity slice.
+    // The negocio chooser: the account plus its ACTIVE links to ACTIVE
+    // professionals, by link id. A link whose negocio subscription lapsed is
+    // still listed, as `disponible:false` with the same code the tenant gate
+    // uses, so the app can explain it instead of silently hiding a negocio.
+    // Explicit arrays only: no model is serialized, so nothing else can leak.
     // ─────────────────────────────────────────────
     public function me(Request $request): JsonResponse
     {
+        $cuenta = $request->user('profesional');
+
+        $vinculos = $cuenta->vinculos()
+            ->activos()
+            ->whereHas('profesional', fn ($q) => $q->where('activo', true))
+            ->with([
+                'profesional:id,user_id,nombre,apellido,avatar_path',
+                'profesional.user:id,name,is_exempt',
+                'profesional.user.subscription',
+            ])
+            ->orderBy('id')
+            ->get();
+
         return response()->json([
-            'cuenta' => ['email' => $request->user('profesional')->email],
+            'cuenta' => ['email' => $cuenta->email],
+            'vinculos' => $vinculos->map(function (ProfesionalVinculo $vinculo) {
+                $profesional = $vinculo->profesional;
+                $motivo = $profesional->user->codigoDeBloqueoPorSuscripcion();
+
+                return [
+                    'id' => $vinculo->id,
+                    'negocio' => ['nombre' => $profesional->user->name],
+                    'profesional' => [
+                        'nombre' => $profesional->nombre,
+                        'apellido' => $profesional->apellido,
+                        'avatar_url' => $profesional->avatar_url,
+                    ],
+                    'disponible' => $motivo === null,
+                    'motivo' => $motivo,
+                ];
+            })->all(),
         ]);
     }
 

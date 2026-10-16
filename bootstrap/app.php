@@ -19,6 +19,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'reservas.device' => \App\Http\Middleware\ExigeDeviceToken::class,
             'admin.activo' => \App\Http\Middleware\RequiereAdminActivo::class,
             'portal.pro' => \App\Http\Middleware\PortalProfesionalesHabilitado::class,
+            'pro.vigente' => \App\Http\Middleware\RequiereProfesionalVigente::class,
             // Sanctum ability checks (none were registered before the portal).
             'abilities' => \Laravel\Sanctum\Http\Middleware\CheckAbilities::class,
             'ability' => \Laravel\Sanctum\Http\Middleware\CheckForAnyAbility::class,

@@ -233,19 +233,36 @@ class User extends Authenticatable
     // hay que seguir mandándolos si la cuenta no pagó.
     public function suscripcionVencida(): bool
     {
+        return $this->codigoDeBloqueoPorSuscripcion() !== null;
+    }
+
+    // Causa por la que la suscripción corta el acceso, o null si no lo corta.
+    // Fuente única del criterio: la usan el gate tenant (CheckSubscription),
+    // suscripcionVencida() y el portal de profesionales (pro.vigente).
+    // Orden: causa más específica primero — sin-fila, luego SUSPENDIDO (único
+    // status no derivable de ends_at: una cuenta suspendida por el admin queda
+    // cortada aunque le queden días), luego ends_at pasado. Exenta => null.
+    public function codigoDeBloqueoPorSuscripcion(): ?string
+    {
         if ($this->is_exempt) {
-            return false;
+            return null;
         }
 
         $subscription = $this->subscription;
 
         if (! $subscription) {
-            return true;
+            return 'NO_SUBSCRIPTION';
         }
 
-        // SUSPENDIDO es el único status no derivable de ends_at: una cuenta
-        // suspendida por el admin queda cortada aunque le queden días.
-        return $subscription->status === 'SUSPENDIDO' || $subscription->ends_at < now();
+        if ($subscription->status === 'SUSPENDIDO') {
+            return 'SUBSCRIPTION_SUSPENDED';
+        }
+
+        if ($subscription->ends_at < now()) {
+            return 'SUBSCRIPTION_EXPIRED';
+        }
+
+        return null;
     }
 
     /**
