@@ -167,11 +167,13 @@ class CloudApiWebhookController extends Controller
 
     // Avance de cada estado, para desempatar eventos de Meta con el mismo
     // timestamp. 'failed' es terminal: ningún evento del mismo segundo lo pisa.
+    // 'manual' (la dueña reenvió a mano) es el más alto: ver procesarStatus().
     private const RANGO_STATUS = [
         'pending' => 1,
         'delivered' => 2,
         'read' => 3,
         'failed' => 4,
+        'manual' => 5,
     ];
 
     private function procesarStatus(array $status): void
@@ -198,6 +200,19 @@ class CloudApiWebhookController extends Controller
         };
 
         if (! $nuevoStatus) {
+            return;
+        }
+
+        // 'manual' es terminal para el webhook: la dueña ya reenvió el mensaje
+        // a mano por wa.me. Si Meta reentrega un 'failed' (mismo timestamp, nada
+        // lo marca como más viejo), pisaba 'manual' con 'failed', volvía a
+        // disparar el push de fallo y el recordatorio reaparecía como pendiente.
+        if ($registro->status === 'manual') {
+            Log::info('WhatsApp Cloud API: status descartado, el mensaje ya se reenvió a mano', [
+                'message_id' => $messageId,
+                'status_descartado' => $nuevoStatus,
+            ]);
+
             return;
         }
 

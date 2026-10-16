@@ -131,6 +131,38 @@ class CloudApiWebhookPushFalloTest extends TestCase
         Queue::assertNotPushed(EnviarPushFalloWhatsapp::class);
     }
 
+    public function test_a_replayed_failed_event_does_not_revert_a_manual_message_nor_push_again(): void
+    {
+        Queue::fake();
+        $this->crearMensaje('wamid.M1');
+        $ts = now()->timestamp;
+
+        $this->postStatus('wamid.M1', 'failed', $ts)->assertOk();
+        Queue::assertPushed(EnviarPushFalloWhatsapp::class, 1);
+
+        // La dueña toca "Reenviar": la fila pasa a 'manual'.
+        $m = WhatsappMensaje::where('message_id', 'wamid.M1')->first();
+        $m->update(['status' => 'manual']);
+
+        // Meta reentrega el mismo evento 'failed' (mismo timestamp).
+        $this->postStatus('wamid.M1', 'failed', $ts)->assertOk();
+
+        $this->assertSame('manual', $m->fresh()->status);
+        Queue::assertPushed(EnviarPushFalloWhatsapp::class, 1);
+    }
+
+    public function test_a_manual_message_ignores_any_later_meta_status(): void
+    {
+        Queue::fake();
+        $m = $this->crearMensaje('wamid.M2', 'manual');
+
+        $this->postStatus('wamid.M2', 'failed', now()->addMinute()->timestamp)->assertOk();
+        $this->postStatus('wamid.M2', 'delivered', now()->addMinutes(2)->timestamp)->assertOk();
+
+        $this->assertSame('manual', $m->fresh()->status);
+        Queue::assertNotPushed(EnviarPushFalloWhatsapp::class);
+    }
+
     public function test_a_dispatch_exception_does_not_change_the_200_nor_the_persisted_status(): void
     {
         $this->mock(Dispatcher::class, function ($mock) {
