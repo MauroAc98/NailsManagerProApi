@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
 
@@ -140,6 +141,13 @@ class Profesional extends Model
     public function servicios()
     {
         return $this->belongsToMany(Servicio::class, 'profesional_servicio');
+    }
+
+    // Acceso al portal de profesionales: a lo sumo un vinculo por profesional
+    // (unique en profesional_vinculos.profesional_id).
+    public function vinculo(): HasOne
+    {
+        return $this->hasOne(ProfesionalVinculo::class);
     }
 
     public function slotsDisponibles()
