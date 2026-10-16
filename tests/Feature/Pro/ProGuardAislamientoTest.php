@@ -78,6 +78,8 @@ class ProGuardAislamientoTest extends TestCase
             'auth_me' => ['GET', '/api/auth/me'],
             'admin_me' => ['GET', '/api/admin/me'],
             'pro_me' => ['GET', '/api/pro/me'],
+            // Empty body: an allowed caller gets past auth and stops at 422.
+            'pro_cambiar_password' => ['POST', '/api/pro/cambiar-password'],
             'push_public_key' => ['GET', '/api/push/public-key'],
         ];
     }
@@ -107,6 +109,11 @@ class ProGuardAislamientoTest extends TestCase
             'pro restringido -> auth/me' => [self::PRO_RESTRINGIDO, 'auth_me', 401],
             'pro restringido -> admin/me' => [self::PRO_RESTRINGIDO, 'admin_me', 401],
             'pro restringido -> push/public-key' => [self::PRO_RESTRINGIDO, 'push_public_key', 401],
+            // cambiar-password: only the restricted token gets in (422 = past auth, empty body).
+            'pro restringido -> pro/cambiar-password' => [self::PRO_RESTRINGIDO, 'pro_cambiar_password', 422],
+            'pro full -> pro/cambiar-password' => [self::PRO_FULL, 'pro_cambiar_password', 403],
+            'tenant -> pro/cambiar-password' => [self::TENANT, 'pro_cambiar_password', 401],
+            'admin -> pro/cambiar-password' => [self::ADMIN, 'pro_cambiar_password', 401],
         ];
     }
 
