@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\AdminUser;
+use App\Models\ProfesionalCuenta;
 use App\Models\User;
 
 return [
@@ -59,6 +60,14 @@ return [
             'driver' => 'sanctum',
             'provider' => 'admin_users',
         ],
+
+        // Portal de profesionales: provider pineado a profesional_cuentas por
+        // la misma razón que arriba (Guard::hasValidProvider). Sin esto, un
+        // token de cualquier otra familia autenticaría en /api/pro/*.
+        'profesional' => [
+            'driver' => 'sanctum',
+            'provider' => 'profesional_cuentas',
+        ],
     ],
 
     /*
@@ -92,6 +101,11 @@ return [
         'admin_users' => [
             'driver' => 'eloquent',
             'model' => AdminUser::class,
+        ],
+
+        'profesional_cuentas' => [
+            'driver' => 'eloquent',
+            'model' => ProfesionalCuenta::class,
         ],
     ],
 
