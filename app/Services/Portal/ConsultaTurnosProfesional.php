@@ -41,15 +41,30 @@ class ConsultaTurnosProfesional
     }
 
     /**
-     * Turnos of one day (default: today in the application timezone), ordered
-     * by time and id, at most LIMITE of them.
+     * Turnos from $desde to $hasta, both days inclusive (default: today in the
+     * application timezone), ordered by time and id, at most LIMITE of them.
+     * $palabras (lowercased) narrow it to clients whose nombre/apellido match,
+     * $servicioId to turnos that include that service. The caller has already
+     * checked that the service is hers.
      *
+     * @param  list<string>  $palabras
      * @return array{turnos: Collection<int, Turno>, truncated: bool}
      */
-    public function listar(ProfesionalVinculo $vinculo, ?string $fecha): array
+    public function listar(ProfesionalVinculo $vinculo, ?string $desde = null, ?string $hasta = null, array $palabras = [], ?int $servicioId = null): array
     {
-        $turnos = $this->baseQuery($vinculo)
-            ->delaFecha($fecha ?? now(config('app.timezone'))->toDateString())
+        $hoy = now(config('app.timezone'))->toDateString();
+
+        $consulta = $this->baseQuery($vinculo)->delRango($desde ?? $hoy, $hasta ?? $desde ?? $hoy);
+
+        if ($palabras !== []) {
+            $this->filtrarPorCliente($consulta, $palabras);
+        }
+
+        if ($servicioId !== null) {
+            $consulta->whereHas('servicios', fn (Builder $servicio) => $servicio->where('servicios.id', $servicioId));
+        }
+
+        $turnos = $consulta
             ->with($this->relaciones())
             ->orderBy('fecha_hora')
             ->orderBy('id')
@@ -71,6 +86,31 @@ class ConsultaTurnosProfesional
             ->with($this->relaciones())
             ->whereKey($id)
             ->first();
+    }
+
+    /**
+     * Every word must be contained in the client's nombre or apellido, ignoring
+     * case. Deliberately nothing else is searched (phone, notes, services): a
+     * search over fields the professional cannot see would let her read them
+     * one probe at a time. LIKE metacharacters in the word are escaped with '!'
+     * so '%' and '_' are literal; the explicit ESCAPE works on sqlite and on
+     * Postgres alike (no ILIKE). LOWER() folds only ASCII on sqlite; Postgres
+     * folds per locale.
+     *
+     * @param  Builder<Turno>  $consulta
+     * @param  list<string>  $palabras
+     */
+    private function filtrarPorCliente(Builder $consulta, array $palabras): void
+    {
+        $consulta->whereHas('cliente', function (Builder $cliente) use ($palabras) {
+            foreach ($palabras as $palabra) {
+                $patron = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $palabra).'%';
+
+                $cliente->where(fn (Builder $coincide) => $coincide
+                    ->whereRaw("LOWER(COALESCE(clientes.nombre, '')) LIKE ? ESCAPE '!'", [$patron])
+                    ->orWhereRaw("LOWER(COALESCE(clientes.apellido, '')) LIKE ? ESCAPE '!'", [$patron]));
+            }
+        });
     }
 
     /**

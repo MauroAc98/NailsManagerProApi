@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Pro;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Pro\ListarTurnosProfesionalRequest;
 use App\Models\ProfesionalVinculo;
 use App\Services\Portal\ConsultaTurnosProfesional;
 use App\Services\Portal\TurnoPortalMapper;
@@ -21,15 +22,12 @@ class ProTurnoController extends Controller
         private readonly TurnoPortalMapper $mapper,
     ) {}
 
-    // GET /api/pro/turnos?fecha=YYYY-MM-DD (default: today)
-    public function index(Request $request): JsonResponse
+    // GET /api/pro/turnos?fecha=YYYY-MM-DD | desde=...&hasta=... (default: today)
+    public function index(ListarTurnosProfesionalRequest $request): JsonResponse
     {
-        $datos = $request->validate(
-            ['fecha' => ['nullable', 'date_format:Y-m-d']],
-            ['fecha.date_format' => 'La fecha tiene que tener el formato AAAA-MM-DD.'],
-        );
+        [$desde, $hasta] = $request->rango();
 
-        $resultado = $this->consulta->listar($this->vinculo($request), $datos['fecha'] ?? null);
+        $resultado = $this->consulta->listar($this->vinculo($request), $desde, $hasta, $request->palabras(), $request->servicioId());
 
         return response()->json([
             'data' => $resultado['turnos']->map(fn ($turno) => $this->mapper->mapear($turno))->values()->all(),
