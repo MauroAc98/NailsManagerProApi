@@ -10,8 +10,13 @@ Artisan::command('inspire', function () {
 
 Schedule::command('turnos:completar-vencidos')->everyFifteenMinutes();
 
+// withoutOverlapping: una corrida lenta (muchos salones, Meta lento) no se
+// pisa con la siguiente. Si una hora se saltea, el latido de EnviarRecordatorios
+// la recupera en la corrida que sí corra. Expira a los 50 min para que un
+// candado huérfano de una corrida caída no tape la hora siguiente.
 Schedule::command('recordatorios:enviar')
     ->hourly()
+    ->withoutOverlapping(50)
     ->appendOutputTo(storage_path('logs/recordatorios.log'));
 
 Schedule::command('suscripciones:marcar-vencidas')->daily();

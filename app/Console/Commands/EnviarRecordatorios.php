@@ -11,6 +11,7 @@ use App\Models\WhatsappTemplate;
 use App\Services\CloudApiService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
@@ -30,19 +31,31 @@ class EnviarRecordatorios extends Command
         parent::__construct();
     }
 
+    // Latido de la última hora procesada ('Y-m-d H:00'). Si el scheduler estuvo
+    // caído (o un deploy cayó justo en el :00), la corrida siguiente recupera las
+    // horas salteadas en vez de dejar a esos salones sin recordatorios.
+    public const CACHE_ULTIMA_HORA = 'recordatorios:ultima_hora';
+
+    // Máximo de horas que una corrida procesa (la actual + las salteadas). Un
+    // latido más viejo que esto no se recupera: se procesa solo la hora actual.
+    private const MAX_HORAS_RECUPERADAS = 3;
+
     public function handle(): void
     {
-        $horaActual = Carbon::now()->format('H:00');
+        $ahora = Carbon::now()->startOfHour();
         $manana = Carbon::tomorrow()->toDateString();
+        $horas = $this->horasAProcesar($ahora);
 
-        $this->info("Hora actual: {$horaActual} — buscando recordatorios para {$manana}...");
+        $this->info('Hora actual: '.$ahora->format('H:00').' — horas a procesar: '.implode(', ', $horas)." — buscando recordatorios para {$manana}...");
 
         $usuarios = User::where('recordatorio_automatico', true)
-            ->where('hora_recordatorio', $horaActual)
+            ->whereIn('hora_recordatorio', $horas)
+            ->orderBy('hora_recordatorio')
             ->get();
 
         if ($usuarios->isEmpty()) {
             $this->info('No hay profesionales con recordatorio programado para esta hora.');
+            $this->registrarLatido($ahora);
 
             return;
         }
@@ -76,6 +89,71 @@ class EnviarRecordatorios extends Command
         $this->info("✓ Enviados: {$this->totalEnviados}");
         if ($this->totalFallidos > 0) {
             $this->error("✗ Fallidos: {$this->totalFallidos}");
+        }
+
+        $this->registrarLatido($ahora);
+    }
+
+    /**
+     * Horas ('H:00') que esta corrida debe atender: desde la hora siguiente al
+     * último latido hasta la actual, con tope de MAX_HORAS_RECUPERADAS en total
+     * y sin cruzar la medianoche (un recordatorio es "para mañana": ya cambió
+     * el día objetivo). Sin latido, o con uno más viejo que el tope: solo la
+     * hora actual, como siempre. No se usa una ventana "hora <= ahora": los
+     * turnos agendados DESPUÉS de la hora configurada recibirían un recordatorio
+     * a la hora de haberse confirmado; acá solo se recuperan horas realmente
+     * salteadas. El dedupe por turno (whereDoesntHave) evita repetidos.
+     *
+     * @return list<string>
+     */
+    private function horasAProcesar(Carbon $ahora): array
+    {
+        $horas = [$ahora->format('H:00')];
+
+        $ultima = $this->leerLatido();
+
+        if (! $ultima || $ultima->gte($ahora)) {
+            return $horas;
+        }
+
+        $horasDeDiferencia = (int) $ultima->diffInHours($ahora);
+
+        if ($horasDeDiferencia > self::MAX_HORAS_RECUPERADAS) {
+            return $horas;
+        }
+
+        $inicioDelDia = $ahora->copy()->startOfDay();
+        $cursor = $ultima->copy()->addHour();
+
+        $recuperadas = [];
+        while ($cursor->lt($ahora)) {
+            if ($cursor->gte($inicioDelDia)) {
+                $recuperadas[] = $cursor->format('H:00');
+            }
+            $cursor->addHour();
+        }
+
+        return array_merge($recuperadas, $horas);
+    }
+
+    private function leerLatido(): ?Carbon
+    {
+        try {
+            $valor = Cache::get(self::CACHE_ULTIMA_HORA);
+
+            return is_string($valor) ? Carbon::createFromFormat('Y-m-d H:i', $valor)->startOfHour() : null;
+        } catch (\Throwable $e) {
+            // Sin latido legible se comporta como siempre (solo la hora actual).
+            return null;
+        }
+    }
+
+    private function registrarLatido(Carbon $ahora): void
+    {
+        try {
+            Cache::put(self::CACHE_ULTIMA_HORA, $ahora->format('Y-m-d H:00'), now()->addDay());
+        } catch (\Throwable $e) {
+            // El latido es best-effort: perderlo solo significa no recuperar horas.
         }
     }
 
@@ -209,6 +287,10 @@ class EnviarRecordatorios extends Command
                 } else {
                     $this->error("    ✗ Fallo: {$cliente->nombre} {$cliente->apellido}");
                     $this->totalFallidos++;
+
+                    // Meta rechazó el envío: no llegará ningún webhook de status,
+                    // así que el push de fallo sale desde acá (best-effort).
+                    EnviarPushFalloWhatsapp::encolarSinRomper($registro->id);
                 }
             } catch (\Exception $e) {
                 $this->error("    ✗ Error: {$e->getMessage()}");
@@ -227,7 +309,3 @@ class EnviarRecordatorios extends Command
         }
     }
 }
-
-                    // Meta rechazó el envío: no llegará ningún webhook de status,
-                    // así que el push de fallo sale desde acá (best-effort).
-                    EnviarPushFalloWhatsapp::encolarSinRomper($registro->id);
