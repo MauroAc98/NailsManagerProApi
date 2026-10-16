@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Http\Controllers\Api\AdminAuthController;
 use App\Models\AdminUser;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Hash;
@@ -33,7 +34,9 @@ class CreateAdminUser extends Command
 
         // Con --password no se pide confirmación (uso no interactivo:
         // scripts de deploy, este test suite); interactivo sí confirma para
-        // evitar un typo en la única credencial que abre el panel.
+        // evitar un typo en la única credencial que abre el panel. Preferí
+        // el prompt oculto: --password queda en el historial del shell y en
+        // la lista de procesos.
         $password = $this->option('password');
         if ($password === null) {
             $password = $this->secret('Contraseña');
@@ -51,7 +54,7 @@ class CreateAdminUser extends Command
             [
                 'name' => 'required|string|max:255',
                 'email' => 'required|email',
-                'password' => 'required|string|min:8',
+                'password' => 'required|string|min:' . AdminAuthController::PASSWORD_MIN,
             ],
         );
 
@@ -63,10 +66,18 @@ class CreateAdminUser extends Command
             return self::FAILURE;
         }
 
+        $existia = AdminUser::where('email', $email)->exists();
+
         $admin = AdminUser::updateOrCreate(
             ['email' => $email],
             ['name' => $name, 'password' => Hash::make($password)],
         );
+
+        // Cambiar la contraseña de un admin existente es la respuesta típica a
+        // una credencial comprometida: las sesiones abiertas no pueden sobrevivir.
+        if ($existia) {
+            $admin->tokens()->delete();
+        }
 
         $this->info("Admin {$admin->email} listo.");
 

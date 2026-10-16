@@ -11,8 +11,10 @@ use Illuminate\Http\Request;
 // negocio y cuándo. Ver spec admin-api-boundary, Requirement "Audit Trail".
 class AdminAudit
 {
+    // $admin es null en eventos previos a autenticar (login fallido / bloqueado):
+    // admin_user_id ya es nullable en la tabla.
     public static function record(
-        AdminUser $admin,
+        ?AdminUser $admin,
         string $action,
         ?int $targetUserId = null,
         array $payload = [],
@@ -21,7 +23,7 @@ class AdminAudit
         $request ??= request();
 
         return AdminAuditLog::create([
-            'admin_user_id' => $admin->id,
+            'admin_user_id' => $admin?->id,
             'action' => $action,
             'target_user_id' => $targetUserId,
             'payload' => $payload,

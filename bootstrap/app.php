@@ -17,6 +17,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'reserva.online' => \App\Http\Middleware\RequiereReservaOnline::class,
             'reservas.creacion' => \App\Http\Middleware\RequiereCreacionHabilitada::class,
             'reservas.device' => \App\Http\Middleware\ExigeDeviceToken::class,
+            'admin.activo' => \App\Http\Middleware\RequiereAdminActivo::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

@@ -19,6 +19,12 @@ class AdminUser extends Authenticatable
         'password',
     ];
 
+    // Mismo default que la columna: un AdminUser recién creado en memoria
+    // (sin recargar de la DB) tiene que contar como activo.
+    protected $attributes = [
+        'activo' => true,
+    ];
+
     protected $hidden = [
         'password',
         'remember_token',
@@ -28,6 +34,7 @@ class AdminUser extends Authenticatable
     {
         return [
             'password' => 'hashed',
+            'activo' => 'boolean',
         ];
     }
 }

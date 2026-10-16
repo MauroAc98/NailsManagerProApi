@@ -88,9 +88,11 @@ Route::prefix('admin')->group(function () {
     // Limiter con nombre 'admin' (RateLimiter::for en AppServiceProvider,
     // 30/min por admin o IP) — admin/login queda afuera a propósito, ya
     // tiene su propio throttle:5,1 arriba.
-    Route::middleware(['auth:admin', 'throttle:admin'])->group(function () {
+    // admin.activo corta los tokens de un admin desactivado después de emitidos.
+    Route::middleware(['auth:admin', 'admin.activo', 'throttle:admin'])->group(function () {
         Route::post('logout', [AdminAuthController::class, 'logout']);
         Route::get('me', [AdminAuthController::class, 'me']);
+        Route::post('cambiar-password', [AdminAuthController::class, 'cambiarPassword']);
 
         Route::post('subscriptions/{user}/renew', [AdminController::class, 'renewSubscription']);
         Route::post('subscriptions/{user}/suspend', [AdminController::class, 'suspendSubscription']);
