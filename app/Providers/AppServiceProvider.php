@@ -46,6 +46,16 @@ class AppServiceProvider extends ServiceProvider
         });
 
         $this->registrarLimitadoresReservaOnline();
+        $this->registrarLimitadoresPortalProfesionales();
+    }
+
+    /**
+     * Throttles del portal de profesionales. El login se limita por IP (el
+     * bloqueo por par email+IP vive en el controlador, ver BloqueoLogin).
+     */
+    private function registrarLimitadoresPortalProfesionales(): void
+    {
+        RateLimiter::for('pro-login', fn (Request $r) => Limit::perMinute(20)->by('pro-login:' . $r->ip()));
     }
 
     /**

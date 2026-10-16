@@ -39,6 +39,14 @@ class BloqueoLogin
         return new self('admin', 3, maxPorIp: 10);
     }
 
+    // Portal de profesionales: sin bloqueo por cuenta a secas (mismo motivo que
+    // el admin) y con ambito propio, para que fallar en /auth/login o
+    // /admin/login nunca bloquee /pro/login con el mismo email.
+    public static function profesional(): self
+    {
+        return new self('profesional', 5, maxPorIp: 30);
+    }
+
     /** Segundos hasta poder reintentar, o null si no esta bloqueado. */
     public function segundosDeBloqueo(string $email, ?string $ip): ?int
     {
