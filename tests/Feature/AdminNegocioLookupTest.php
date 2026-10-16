@@ -30,6 +30,38 @@ class AdminNegocioLookupTest extends TestCase
             ->assertStatus(401);
     }
 
+    // % y _ tipeados por el admin son literales, no comodines del LIKE.
+    public function test_porcentaje_y_guion_bajo_se_buscan_como_texto_literal(): void
+    {
+        User::factory()->create(['name' => 'Alfa Uno', 'email' => 'alfa@estudio.com']);
+        User::factory()->create(['name' => 'Beta Dos', 'email' => 'beta@estudio.com']);
+
+        // Con "%" como comodín esto devolvería a todos los negocios.
+        $this->actingAs($this->admin, 'admin')
+            ->getJson('/api/admin/negocios/buscar?q=%25')
+            ->assertOk()
+            ->assertJsonCount(0);
+
+        // Con "_" como comodín "a_fa" matchearía el slug "alfa-uno".
+        $this->actingAs($this->admin, 'admin')
+            ->getJson('/api/admin/negocios/buscar?q=a_fa')
+            ->assertOk()
+            ->assertJsonCount(0);
+    }
+
+    public function test_un_slug_con_guion_bajo_literal_se_encuentra(): void
+    {
+        $user = User::factory()->create(['email' => 'x@estudio.com']);
+        $user->forceFill(['slug' => 'estudio_ana'])->save();
+        User::factory()->create(['email' => 'y@estudio.com'])->forceFill(['slug' => 'estudioxana'])->save();
+
+        $this->actingAs($this->admin, 'admin')
+            ->getJson('/api/admin/negocios/buscar?q=estudio_ana')
+            ->assertOk()
+            ->assertJsonCount(1)
+            ->assertJsonFragment(['id' => $user->id]);
+    }
+
     public function test_busca_por_email_exacto(): void
     {
         $user = User::factory()->create(['email' => 'match@estudio.com']);
