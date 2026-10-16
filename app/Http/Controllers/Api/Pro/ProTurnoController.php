@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Pro;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Pro\ListarTurnosProfesionalRequest;
+use App\Http\Requests\Pro\MarcasTurnosProfesionalRequest;
 use App\Models\ProfesionalVinculo;
 use App\Services\Portal\ConsultaTurnosProfesional;
 use App\Services\Portal\TurnoPortalMapper;
@@ -32,6 +33,18 @@ class ProTurnoController extends Controller
         return response()->json([
             'data' => $resultado['turnos']->map(fn ($turno) => $this->mapper->mapear($turno))->values()->all(),
             'truncated' => $resultado['truncated'],
+        ]);
+    }
+
+    // GET /api/pro/turnos/marcas?mes=YYYY-MM
+    // Registered above turnos/{id} in routes/api.php; keep it that way.
+    public function marcas(MarcasTurnosProfesionalRequest $request): JsonResponse
+    {
+        $mes = $request->mes();
+
+        return response()->json([
+            'mes' => $mes,
+            'dias' => $this->consulta->marcas($this->vinculo($request), $mes),
         ]);
     }
 

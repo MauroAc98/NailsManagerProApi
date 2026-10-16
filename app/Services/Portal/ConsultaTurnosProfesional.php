@@ -79,6 +79,36 @@ class ConsultaTurnosProfesional
         ];
     }
 
+    /**
+     * Days of the month "YYYY-MM" on which she has at least one visible turno,
+     * with how many, in ascending date order. One query, reading only
+     * fecha_hora: the stored wall-clock strings are used as they are (no
+     * Eloquent cast, no timezone conversion), so a turno at 23:59:59 stays on
+     * its local day. Counting is done here because one professional's month is
+     * small.
+     *
+     * @return list<array{fecha: string, cantidad: int}>
+     */
+    public function marcas(ProfesionalVinculo $vinculo, string $mes): array
+    {
+        $porDia = [];
+
+        // ORDER BY makes the days come out ascending: counting keeps first-seen order.
+        $fechas = $this->baseQuery($vinculo)->delMes($mes)->orderBy('fecha_hora')->toBase()->pluck('fecha_hora');
+
+        foreach ($fechas as $fechaHora) {
+            $dia = substr((string) $fechaHora, 0, 10);
+            $porDia[$dia] = ($porDia[$dia] ?? 0) + 1;
+        }
+
+        $marcas = [];
+        foreach ($porDia as $fecha => $cantidad) {
+            $marcas[] = ['fecha' => (string) $fecha, 'cantidad' => $cantidad];
+        }
+
+        return $marcas;
+    }
+
     /** One of HER visible turnos, or null (not hers, other negocio, cancelled, nonexistent). */
     public function buscar(ProfesionalVinculo $vinculo, int $id): ?Turno
     {
