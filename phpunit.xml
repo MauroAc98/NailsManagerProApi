@@ -32,6 +32,7 @@
              el equivocado tiene que poder notarlo. -->
         <env name="FRONTEND_URL" value="https://app.turnetto.test"/>
         <env name="RESERVAS_BASE_URL" value="https://reservar.turnetto.test"/>
+        <env name="PORTAL_PROFESIONALES_HABILITADO" value="true"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>

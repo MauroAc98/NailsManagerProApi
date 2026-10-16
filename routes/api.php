@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\GastoController;
 use App\Http\Controllers\Api\IngresoController;
 use App\Http\Controllers\Api\MercadoPagoAdminController;
 use App\Http\Controllers\Api\MercadoPagoWebhookController;
+use App\Http\Controllers\Api\Pro\ProAuthController;
 use App\Http\Controllers\Api\ProfesionalController;
 use App\Http\Controllers\Api\PublicController;
 use App\Http\Controllers\Api\PushSubscriptionController;
@@ -122,6 +123,18 @@ Route::prefix('admin')->group(function () {
 
         Route::get('settings', [AdminController::class, 'obtenerSettings']);
         Route::put('settings', [AdminController::class, 'actualizarSettings']);
+    });
+});
+
+// ─────────────────────────────────────────────
+// Portal de profesionales — identidad propia (guard `profesional`, provider
+// `profesional_cuentas`), desacoplada de la sesión tenant y de la de admin.
+// `portal.pro` (kill switch) va PRIMERO en todo el grupo: apagado => 404
+// también para quien no esté autenticado.
+// ─────────────────────────────────────────────
+Route::prefix('pro')->middleware('portal.pro')->group(function () {
+    Route::middleware(['auth:profesional', 'abilities:pro:acceso'])->group(function () {
+        Route::get('me', [ProAuthController::class, 'me']);
     });
 });
 
