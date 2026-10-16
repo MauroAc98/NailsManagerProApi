@@ -5,9 +5,11 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\UserMpCredential;
+use App\Services\AdminAudit;
 use App\Services\Reservas\MercadoPagoService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Fase 1: cada negocio tiene su PROPIA cuenta de Mercado Pago, cargada a
@@ -76,10 +78,21 @@ class MercadoPagoAdminController extends Controller
             }
         }
 
-        $credencial = UserMpCredential::updateOrCreate(
-            ['user_id' => $data['user_id']],
-            ['mp_access_token' => $data['mp_access_token'], 'mp_user_id' => (string) $mpUserId],
-        );
+        // Credencial + auditoría en una transacción. El payload lleva solo ids:
+        // NUNCA el access_token ni ningún secreto.
+        $credencial = DB::transaction(function () use ($data, $mpUserId, $request) {
+            $credencial = UserMpCredential::updateOrCreate(
+                ['user_id' => $data['user_id']],
+                ['mp_access_token' => $data['mp_access_token'], 'mp_user_id' => (string) $mpUserId],
+            );
+
+            AdminAudit::record($request->user('admin'), 'mercadopago.token_rotado', $credencial->user_id, [
+                'user_id' => $credencial->user_id,
+                'mp_user_id' => $credencial->mp_user_id,
+            ], $request);
+
+            return $credencial;
+        });
 
         return response()->json([
             'user_id' => $credencial->user_id,

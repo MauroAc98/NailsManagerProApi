@@ -2,11 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Mail\ProvisionalPasswordMail;
 use App\Models\AdminUser;
 use App\Models\Profesional;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Mockery;
 use Tests\TestCase;
 
 class AdminCrearNegocioTest extends TestCase
@@ -163,6 +166,78 @@ class AdminCrearNegocioTest extends TestCase
 
         $this->assertFalse($user->is_exempt);
         $this->assertNotNull($user->subscription);
+    }
+
+    public function test_mail_ok_informa_email_enviado_true(): void
+    {
+        $response = $this->actingAs($this->admin, 'admin')
+            ->postJson('/api/admin/negocios', $this->payloadValido())
+            ->assertCreated()
+            ->assertJsonPath('email_enviado', true);
+
+        $this->assertNotEmpty($response->json('password_provisoria'));
+        Mail::assertSent(ProvisionalPasswordMail::class);
+    }
+
+    // El negocio ya está creado y auditado: si el SMTP falla NO se revierte
+    // ni se responde 500 (el admin le pasa la contraseña a mano). El flag
+    // email_enviado=false se lo avisa a la UI.
+    public function test_si_el_mail_falla_el_negocio_queda_creado_y_avisa_email_enviado_false(): void
+    {
+        Log::spy();
+        $pendiente = Mockery::mock();
+        $pendiente->shouldReceive('send')->andThrow(new \RuntimeException('smtp caído'));
+        Mail::shouldReceive('to')->andReturn($pendiente);
+
+        $response = $this->actingAs($this->admin, 'admin')
+            ->postJson('/api/admin/negocios', $this->payloadValido())
+            ->assertCreated()
+            ->assertJsonPath('email_enviado', false);
+
+        $this->assertNotEmpty($response->json('password_provisoria'));
+        $response->assertJsonPath('user.email', 'nueva@estudio.com');
+
+        $user = User::where('email', 'nueva@estudio.com')->firstOrFail();
+        $this->assertNotNull($user->subscription);
+        $this->assertSame(1, Profesional::where('user_id', $user->id)->count());
+        $this->assertDatabaseHas('admin_audit_logs', [
+            'action' => 'negocio.creado',
+            'target_user_id' => $user->id,
+        ]);
+
+        // Se loguea el fallo, sin la contraseña provisoria.
+        Log::shouldHaveReceived('error')->once()->withArgs(
+            fn ($mensaje, $contexto = []) => ! str_contains(
+                $mensaje.json_encode($contexto),
+                $response->json('password_provisoria'),
+            ),
+        );
+    }
+
+    // Transacción: si falla un paso de la creación no queda un negocio a
+    // medias (y el reintento no choca con "email ya registrado").
+    public function test_si_falla_la_creacion_no_queda_un_negocio_a_medias(): void
+    {
+        Profesional::creating(fn () => throw new \RuntimeException('falla al crear el profesional'));
+
+        $this->actingAs($this->admin, 'admin')
+            ->postJson('/api/admin/negocios', $this->payloadValido())
+            ->assertStatus(500);
+
+        $this->assertDatabaseMissing('users', ['email' => 'nueva@estudio.com']);
+        $this->assertDatabaseCount('subscriptions', 0);
+        $this->assertDatabaseCount('profesionales', 0);
+        Mail::assertNothingSent();
+    }
+
+    private function payloadValido(): array
+    {
+        return [
+            'name' => 'Nails Studio',
+            'email' => 'nueva@estudio.com',
+            'profesional_nombre' => 'Fernanda',
+            'profesional_apellido' => 'Gómez',
+        ];
     }
 
     // Spec admin-api-boundary — Scenario "Creation is audited".

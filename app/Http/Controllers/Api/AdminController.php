@@ -17,8 +17,10 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class AdminController extends Controller
 {
@@ -50,15 +52,19 @@ class AdminController extends Controller
             ], 409);
         }
 
-        $subscription->update([
-            'ends_at' => now()->max($subscription->ends_at)->copy()->addMonthsNoOverflow(),
-            'status'  => 'ACTIVO',
-            'renewed_at' => now(),
-        ]);
+        // Escritura + auditoría en una sola transacción: si el insert de
+        // auditoría falla, el cambio no queda aplicado sin registrar.
+        DB::transaction(function () use ($subscription, $request, $user) {
+            $subscription->update([
+                'ends_at' => now()->max($subscription->ends_at)->copy()->addMonthsNoOverflow(),
+                'status'  => 'ACTIVO',
+                'renewed_at' => now(),
+            ]);
 
-        AdminAudit::record($request->user('admin'), 'suscripcion.renovada', $user->id, [
-            'ends_at' => $subscription->fresh()->ends_at,
-        ], $request);
+            AdminAudit::record($request->user('admin'), 'suscripcion.renovada', $user->id, [
+                'ends_at' => $subscription->fresh()->ends_at,
+            ], $request);
+        });
 
         return response()->json([
             'message' => 'Suscripción renovada correctamente',
@@ -88,12 +94,14 @@ class AdminController extends Controller
 
         $statusPrevio = $subscription->status;
 
-        $subscription->update(['status' => 'SUSPENDIDO']);
+        DB::transaction(function () use ($subscription, $request, $user, $statusPrevio) {
+            $subscription->update(['status' => 'SUSPENDIDO']);
 
-        AdminAudit::record($request->user('admin'), 'suscripcion.suspendida', $user->id, [
-            'ends_at' => $subscription->fresh()->ends_at,
-            'previous_status' => $statusPrevio,
-        ], $request);
+            AdminAudit::record($request->user('admin'), 'suscripcion.suspendida', $user->id, [
+                'ends_at' => $subscription->fresh()->ends_at,
+                'previous_status' => $statusPrevio,
+            ], $request);
+        });
 
         return response()->json([
             'message' => 'Suscripción suspendida',
@@ -122,12 +130,14 @@ class AdminController extends Controller
 
         $nuevoStatus = $subscription->ends_at > now() ? 'ACTIVO' : 'VENCIDO';
 
-        $subscription->update(['status' => $nuevoStatus]);
+        DB::transaction(function () use ($subscription, $request, $user, $nuevoStatus) {
+            $subscription->update(['status' => $nuevoStatus]);
 
-        AdminAudit::record($request->user('admin'), 'suscripcion.reactivada', $user->id, [
-            'ends_at' => $subscription->fresh()->ends_at,
-            'new_status' => $nuevoStatus,
-        ], $request);
+            AdminAudit::record($request->user('admin'), 'suscripcion.reactivada', $user->id, [
+                'ends_at' => $subscription->fresh()->ends_at,
+                'new_status' => $nuevoStatus,
+            ], $request);
+        });
 
         return response()->json([
             'message' => 'Suscripción reactivada',
@@ -171,18 +181,20 @@ class AdminController extends Controller
             ? 'SUSPENDIDO'
             : ($nuevoEndsAt->isFuture() ? 'ACTIVO' : 'VENCIDO');
 
-        DB::table('subscriptions')
-            ->where('user_id', $user->id)
-            ->update([
-                'ends_at' => $nuevoEndsAtString,
-                'status' => $nuevoStatus,
-                'updated_at' => now(),
-            ]);
+        DB::transaction(function () use ($request, $user, $nuevoEndsAtString, $nuevoStatus, $endsAtAnterior) {
+            DB::table('subscriptions')
+                ->where('user_id', $user->id)
+                ->update([
+                    'ends_at' => $nuevoEndsAtString,
+                    'status' => $nuevoStatus,
+                    'updated_at' => now(),
+                ]);
 
-        AdminAudit::record($request->user('admin'), 'suscripcion.expiracion_ajustada', $user->id, [
-            'ends_at_anterior' => $endsAtAnterior,
-            'ends_at_nuevo' => $nuevoEndsAtString,
-        ], $request);
+            AdminAudit::record($request->user('admin'), 'suscripcion.expiracion_ajustada', $user->id, [
+                'ends_at_anterior' => $endsAtAnterior,
+                'ends_at_nuevo' => $nuevoEndsAtString,
+            ], $request);
+        });
 
         return response()->json([
             'message' => 'Vencimiento ajustado',
@@ -215,47 +227,70 @@ class AdminController extends Controller
 
         $passwordProvisoria = Str::password(10, symbols: false);
 
-        $user = User::create([
-            'name' => $data['name'],
-            'email' => $data['email'],
-            'password' => $passwordProvisoria,
-            'debe_cambiar_password' => true,
-            'is_exempt' => $isExempt,
-        ]);
+        // Usuario + suscripción + profesional + auditoría en una transacción:
+        // si algo falla no queda un negocio a medias (y el reintento no choca
+        // con "el email ya está registrado").
+        $user = DB::transaction(function () use ($request, $data, $isExempt, $passwordProvisoria) {
+            $user = User::create([
+                'name' => $data['name'],
+                'email' => $data['email'],
+                'password' => $passwordProvisoria,
+                'debe_cambiar_password' => true,
+                'is_exempt' => $isExempt,
+            ]);
 
-        if (!$isExempt) {
-            $diasPrueba = (int) (Setting::get('dias_prueba_default') ?? 10);
+            if (!$isExempt) {
+                $diasPrueba = (int) (Setting::get('dias_prueba_default') ?? 10);
 
-            Subscription::create([
+                Subscription::create([
+                    'user_id' => $user->id,
+                    'ends_at' => now()->addDays($diasPrueba),
+                    'status' => 'ACTIVO',
+                ]);
+            }
+
+            // Ver AuthController (register original, movido acá) sobre por
+            // qué 'nombre' del profesional no puede ser una copia de 'name'
+            // del negocio.
+            Profesional::create([
                 'user_id' => $user->id,
-                'ends_at' => now()->addDays($diasPrueba),
-                'status' => 'ACTIVO',
+                'nombre' => $data['profesional_nombre'],
+                'apellido' => $data['profesional_apellido'],
+                'activo' => true,
+            ]);
+
+            AdminAudit::record($request->user('admin'), 'negocio.creado', $user->id, [
+                'name' => $user->name,
+                'slug' => $user->slug,
+            ], $request);
+
+            return $user;
+        });
+
+        // El mail va DESPUÉS del commit: si el SMTP falla, el negocio ya
+        // existe y no se revierte ni se responde 500 — se avisa con
+        // email_enviado=false para que el admin pase la contraseña a mano.
+        $emailEnviado = true;
+        try {
+            Mail::to($user->email)->send(
+                new ProvisionalPasswordMail($user->name, $user->email, $passwordProvisoria),
+            );
+        } catch (\Throwable $e) {
+            $emailEnviado = false;
+            // Nunca loguear la contraseña provisoria.
+            Log::error('No se pudo enviar el mail de contraseña provisoria', [
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
             ]);
         }
 
-        // Ver AuthController (register original, movido acá) sobre por qué
-        // 'nombre' del profesional no puede ser una copia de 'name' del
-        // negocio.
-        Profesional::create([
-            'user_id' => $user->id,
-            'nombre' => $data['profesional_nombre'],
-            'apellido' => $data['profesional_apellido'],
-            'activo' => true,
-        ]);
-
-        Mail::to($user->email)->send(
-            new ProvisionalPasswordMail($user->name, $user->email, $passwordProvisoria),
-        );
-
-        AdminAudit::record($request->user('admin'), 'negocio.creado', $user->id, [
-            'name' => $user->name,
-            'slug' => $user->slug,
-        ], $request);
-
         return response()->json([
-            'message' => 'Negocio creado. Se envió la contraseña provisoria por email.',
+            'message' => $emailEnviado
+                ? 'Negocio creado. Se envió la contraseña provisoria por email.'
+                : 'Negocio creado, pero no se pudo enviar el email. Pasale la contraseña provisoria manualmente.',
             'user' => $user,
             'password_provisoria' => $passwordProvisoria,
+            'email_enviado' => $emailEnviado,
         ], 201);
     }
 
@@ -336,9 +371,15 @@ class AdminController extends Controller
             return response()->json([]);
         }
 
-        $negocios = User::where(function ($query) use ($q) {
+        // % y _ tipeados por el admin se buscan como texto literal: se
+        // escapan con '!' y el ESCAPE explícito funciona igual en SQLite
+        // (tests) y PostgreSQL (prod). La búsqueda ya está acotada por
+        // limit(5), no hace falta otro tope.
+        $patron = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $q).'%';
+
+        $negocios = User::where(function ($query) use ($q, $patron) {
             $query->where('email', $q)
-                ->orWhere('slug', 'like', "%{$q}%");
+                ->orWhereRaw("slug LIKE ? ESCAPE '!'", [$patron]);
         })
             ->with('subscription')
             ->limit(5)
@@ -375,12 +416,7 @@ class AdminController extends Controller
      */
     public function usoWhatsappPorSalon(Request $request): JsonResponse
     {
-        $desde = $request->filled('desde')
-            ? Carbon::parse($request->query('desde'))->startOfDay()
-            : now()->startOfMonth();
-        $hasta = $request->filled('hasta')
-            ? Carbon::parse($request->query('hasta'))->endOfDay()
-            : now()->endOfDay();
+        [$desde, $hasta] = $this->resolverRangoFechas($request, now()->startOfMonth());
 
         // 'cloud_api' = número compartido de todo el SaaS; 'cloud_api_tenant'
         // = número propio de cada negocio conectado (ver
@@ -507,12 +543,46 @@ class AdminController extends Controller
     // período de facturación.
     private function resolverRangoUso(Request $request): array
     {
+        return $this->resolverRangoFechas($request, now()->subDays(29)->startOfDay());
+    }
+
+    // Tope del rango desde/hasta de los endpoints de uso (en días).
+    private const MAX_DIAS_RANGO_USO = 366;
+
+    /**
+     * Valida y resuelve desde/hasta (YYYY-MM-DD, ambos opcionales). Sin
+     * parámetros devuelve el default del endpoint. 422 si el formato es
+     * inválido, el rango efectivo está invertido o supera
+     * MAX_DIAS_RANGO_USO días (sin tope, usoDetalleNegocio recorría día por
+     * día un rango arbitrario: desde=1900-01-01 agotaba memoria/CPU).
+     *
+     * @return array{0: Carbon, 1: Carbon}
+     */
+    private function resolverRangoFechas(Request $request, Carbon $desdeDefault): array
+    {
+        $request->validate([
+            'desde' => ['nullable', 'date_format:Y-m-d'],
+            'hasta' => ['nullable', 'date_format:Y-m-d'],
+        ]);
+
         $desde = $request->filled('desde')
             ? Carbon::parse($request->query('desde'))->startOfDay()
-            : now()->subDays(29)->startOfDay();
+            : $desdeDefault;
         $hasta = $request->filled('hasta')
             ? Carbon::parse($request->query('hasta'))->endOfDay()
             : now()->endOfDay();
+
+        if ($desde->gt($hasta)) {
+            throw ValidationException::withMessages([
+                'hasta' => ['La fecha "hasta" no puede ser anterior a "desde".'],
+            ]);
+        }
+
+        if ($desde->copy()->startOfDay()->addDays(self::MAX_DIAS_RANGO_USO)->lt($hasta->copy()->startOfDay())) {
+            throw ValidationException::withMessages([
+                'hasta' => ['El rango no puede superar '.self::MAX_DIAS_RANGO_USO.' días.'],
+            ]);
+        }
 
         return [$desde, $hasta];
     }
