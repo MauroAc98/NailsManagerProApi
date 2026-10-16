@@ -6,10 +6,17 @@ use Illuminate\Support\Facades\RateLimiter;
 
 /**
  * Bloqueo temporal de login por cuenta, ademas del throttle por IP de la ruta
- * (que un atacante evita rotando IPs). Cuenta solo intentos FALLIDOS, con dos
- * limites: por (cuenta, IP) y por cuenta a secas (mayor, para no dejar afuera
- * a la duena por unos pocos intentos ajenos y aun asi frenar una botnet).
- * Un login correcto limpia ambos contadores.
+ * (que un atacante evita rotando IPs). Cuenta solo intentos FALLIDOS, con hasta
+ * tres limites:
+ *  - por (cuenta, IP), siempre;
+ *  - por cuenta a secas (mayor, para no dejar afuera a la duena por unos pocos
+ *    intentos ajenos y aun asi frenar una botnet) — opcional;
+ *  - por IP contra cualquier cuenta (frena el spray de emails desde una IP) — opcional.
+ * Un login correcto limpia los contadores del par y de la cuenta.
+ *
+ * El admin NO usa el limite por cuenta a secas: seria un DoS trivial (cualquiera
+ * tira fallos desde cualquier IP y deja afuera al unico admin). El tope por IP no
+ * se limpia con un login correcto: no es un contador de la cuenta.
  */
 class BloqueoLogin
 {
@@ -18,7 +25,8 @@ class BloqueoLogin
     public function __construct(
         private readonly string $ambito,
         private readonly int $maxPorCuentaEIp,
-        private readonly int $maxPorCuenta,
+        private readonly ?int $maxPorCuenta = null,
+        private readonly ?int $maxPorIp = null,
     ) {}
 
     public static function negocio(): self
@@ -28,13 +36,22 @@ class BloqueoLogin
 
     public static function admin(): self
     {
-        return new self('admin', 3, 6);
+        return new self('admin', 3, maxPorIp: 10);
     }
 
     /** Segundos hasta poder reintentar, o null si no esta bloqueado. */
     public function segundosDeBloqueo(string $email, ?string $ip): ?int
     {
-        foreach ([[$this->clavePar($email, $ip), $this->maxPorCuentaEIp], [$this->claveCuenta($email), $this->maxPorCuenta]] as [$clave, $max]) {
+        $limites = [[$this->clavePar($email, $ip), $this->maxPorCuentaEIp]];
+
+        if ($this->maxPorCuenta !== null) {
+            $limites[] = [$this->claveCuenta($email), $this->maxPorCuenta];
+        }
+        if ($this->maxPorIp !== null) {
+            $limites[] = [$this->claveIp($ip), $this->maxPorIp];
+        }
+
+        foreach ($limites as [$clave, $max]) {
             if (RateLimiter::tooManyAttempts($clave, $max)) {
                 return RateLimiter::availableIn($clave);
             }
@@ -46,13 +63,22 @@ class BloqueoLogin
     public function registrarFallo(string $email, ?string $ip): void
     {
         RateLimiter::hit($this->clavePar($email, $ip), self::VENTANA_SEGUNDOS);
-        RateLimiter::hit($this->claveCuenta($email), self::VENTANA_SEGUNDOS);
+
+        if ($this->maxPorCuenta !== null) {
+            RateLimiter::hit($this->claveCuenta($email), self::VENTANA_SEGUNDOS);
+        }
+        if ($this->maxPorIp !== null) {
+            RateLimiter::hit($this->claveIp($ip), self::VENTANA_SEGUNDOS);
+        }
     }
 
     public function limpiar(string $email, ?string $ip): void
     {
         RateLimiter::clear($this->clavePar($email, $ip));
-        RateLimiter::clear($this->claveCuenta($email));
+
+        if ($this->maxPorCuenta !== null) {
+            RateLimiter::clear($this->claveCuenta($email));
+        }
     }
 
     private function claveCuenta(string $email): string
@@ -63,5 +89,10 @@ class BloqueoLogin
     private function clavePar(string $email, ?string $ip): string
     {
         return $this->claveCuenta($email) . ':' . sha1((string) $ip);
+    }
+
+    private function claveIp(?string $ip): string
+    {
+        return "login-fallos:{$this->ambito}:ip:" . sha1((string) $ip);
     }
 }

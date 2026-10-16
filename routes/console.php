@@ -19,3 +19,7 @@ Schedule::command('suscripciones:marcar-vencidas')->daily();
 Schedule::command('reservas:expirar-holds')->everyMinute()->withoutOverlapping(10);
 
 Schedule::command('pagos:reconciliar')->everyMinute()->withoutOverlapping(10);
+
+// Los tokens Sanctum vencidos (admin y tenant) no se borran solos: sin esto
+// personal_access_tokens crece sin límite.
+Schedule::command('sanctum:prune-expired --hours=24')->daily();
