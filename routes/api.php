@@ -133,6 +133,10 @@ Route::prefix('admin')->group(function () {
 // también para quien no esté autenticado.
 // ─────────────────────────────────────────────
 Route::prefix('pro')->middleware('portal.pro')->group(function () {
+    // Public: throttled by IP (named limiter in AppServiceProvider); the
+    // per-(email, IP) lockout lives in the controller.
+    Route::post('login', [ProAuthController::class, 'login'])->middleware('throttle:pro-login');
+
     Route::middleware(['auth:profesional', 'abilities:pro:acceso'])->group(function () {
         Route::get('me', [ProAuthController::class, 'me']);
     });
