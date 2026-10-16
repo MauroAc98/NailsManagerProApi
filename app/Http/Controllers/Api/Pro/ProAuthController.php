@@ -8,6 +8,7 @@ use App\Services\Portal\EmisorTokenProfesional;
 use App\Support\BloqueoLogin;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 
@@ -84,6 +85,18 @@ class ProAuthController extends Controller
             'expires_at' => $emitido['expires_at'],
             'debe_cambiar_password' => $debeCambiar,
         ]);
+    }
+
+    // ─────────────────────────────────────────────
+    // POST /api/pro/logout
+    // Revokes only the presented token; the account's other devices keep
+    // working.
+    // ─────────────────────────────────────────────
+    public function logout(Request $request): Response
+    {
+        $request->user('profesional')->currentAccessToken()->delete();
+
+        return response()->noContent();
     }
 
     // ─────────────────────────────────────────────

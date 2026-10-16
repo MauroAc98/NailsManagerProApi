@@ -137,6 +137,10 @@ Route::prefix('pro')->middleware('portal.pro')->group(function () {
     // per-(email, IP) lockout lives in the controller.
     Route::post('login', [ProAuthController::class, 'login'])->middleware('throttle:pro-login');
 
+    // No ability check: a session with a provisional password (restricted
+    // token) must be able to end itself too.
+    Route::post('logout', [ProAuthController::class, 'logout'])->middleware('auth:profesional');
+
     Route::middleware(['auth:profesional', 'abilities:pro:acceso'])->group(function () {
         Route::get('me', [ProAuthController::class, 'me']);
     });
