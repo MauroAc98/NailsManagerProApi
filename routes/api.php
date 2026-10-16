@@ -139,9 +139,11 @@ Route::prefix('pro')->middleware('portal.pro')->group(function () {
 
     // No ability check: a session with a provisional password (restricted
     // token) must be able to end itself too.
-    Route::post('logout', [ProAuthController::class, 'logout'])->middleware('auth:profesional');
+    Route::post('logout', [ProAuthController::class, 'logout'])
+        ->middleware(['auth:profesional', 'throttle:pro', 'pro.vigente:cuenta']);
 
-    Route::middleware(['auth:profesional', 'abilities:pro:acceso'])->group(function () {
+    // `throttle:pro` goes before `pro.vigente` so rejected requests count too.
+    Route::middleware(['auth:profesional', 'abilities:pro:acceso', 'throttle:pro', 'pro.vigente:cuenta'])->group(function () {
         Route::get('me', [ProAuthController::class, 'me']);
     });
 });
