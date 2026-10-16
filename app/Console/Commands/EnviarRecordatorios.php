@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\EnviarPushFalloWhatsapp;
 use App\Mail\RecordatoriosPendientesMail;
 use App\Models\Turno;
 use App\Models\User;
@@ -189,7 +190,7 @@ class EnviarRecordatorios extends Command
                 $messageId = $resultado->messageId;
 
                 // ── Guardar registro para tracking ──
-                WhatsappMensaje::create([
+                $registro = WhatsappMensaje::create([
                     'user_id' => $user->id,
                     'turno_id' => $turno->id,
                     'numero' => $numero,
@@ -226,3 +227,7 @@ class EnviarRecordatorios extends Command
         }
     }
 }
+
+                    // Meta rechazó el envío: no llegará ningún webhook de status,
+                    // así que el push de fallo sale desde acá (best-effort).
+                    EnviarPushFalloWhatsapp::encolarSinRomper($registro->id);

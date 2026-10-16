@@ -23,6 +23,9 @@ class EnviarMensajeConfirmacion implements ShouldQueue
 
     public int $backoff = 15;
 
+    // Si TODOS los reintentos lanzan (timeout, 5xx, red caída) no se escribió
+    // ningún WhatsappMensaje: ver failed(), que deja el rastro y avisa.
+
     // Mismo regex que valida el teléfono al cargar el cliente
     // (ClienteController@store/update) — una verificación extra acá antes
     // de gastar un llamado a la API, para datos que puedan haber quedado
@@ -41,9 +44,9 @@ class EnviarMensajeConfirmacion implements ShouldQueue
     // texto combinado de un lote lo supera, no se manda: se confirma turno por turno.
     private const LIMITE_CUERPO = 1024;
 
-    // TTL del candado de envío. enviarPlantilla() no fija timeout propio, así
-    // que rige el default del cliente HTTP de Laravel (30 s): el TTL lo supera
-    // con margen para que el lock no expire a mitad de un envío.
+    // TTL del candado de envío. enviarPlantilla() fija un timeout de 15 s
+    // (CloudApiService::TIMEOUT_PLANTILLA_SEGUNDOS): el TTL lo supera con
+    // margen para que el lock no expire a mitad de un envío.
     private const LOCK_SEGUNDOS = 90;
 
     // true = confirmación individual de UN turno de un lote (fallback por longitud):
@@ -133,6 +136,86 @@ class EnviarMensajeConfirmacion implements ShouldQueue
         }
     }
 
+    // ¿Ya hay un WhatsappMensaje de este tipo para la unidad de envío? (turno,
+    // grupo o lote, con el mismo criterio que el candado). Lo usan el dedup de
+    // enviar() y failed().
+    private function yaTieneRegistro(Turno $turno, bool $esDeLote): bool
+    {
+        $idsDelGrupo = match (true) {
+            $esDeLote => Turno::where('lote_id', $turno->lote_id)->pluck('id')->all(),
+            $turno->grupo_id === null || $this->porTurno => [$turno->id],
+            default => Turno::where('grupo_id', $turno->grupo_id)->pluck('id')->all(),
+        };
+
+        return WhatsappMensaje::whereIn('turno_id', $idsDelGrupo)
+            ->where('tipo', $this->tipo)
+            ->exists();
+    }
+
+    /**
+     * Se agotaron los reintentos (timeout, 5xx, red caída...): nunca se llegó
+     * a escribir un WhatsappMensaje y nadie se enteraba. Deja una fila
+     * 'failed' como rastro y avisa a la dueña con el push de fallo. No duplica
+     * si ya hay registro y no registra nada si el envío estaba omitido por
+     * regla (opt-out, suscripción vencida...). Best-effort: nunca lanza.
+     */
+    public function failed(\Throwable $e): void
+    {
+        try {
+            $turno = Turno::with(['cliente', 'servicios', 'user', 'profesional'])->find($this->turnoId);
+
+            if (! $turno || self::motivoOmision($turno) !== null) {
+                return;
+            }
+
+            $esDeLote = $turno->lote_id !== null && $this->tipo === 'confirmacion' && ! $this->porTurno;
+
+            if ($this->yaTieneRegistro($turno, $esDeLote)) {
+                return;
+            }
+
+            $user = $turno->user;
+            $cliente = $turno->cliente;
+
+            try {
+                $mensaje = WhatsappTemplate::mensajeLegible('confirmacion', $cliente, $turno, $user);
+            } catch (\Throwable) {
+                $mensaje = '';
+            }
+
+            $registro = WhatsappMensaje::create([
+                'user_id' => $user->id,
+                'turno_id' => $turno->id,
+                'numero' => app(CloudApiService::class)->normalizarNumero($cliente->telefono),
+                'provider' => $user->credencialesWhatsapp()['provider'],
+                'mensaje' => $mensaje,
+                'tipo' => $this->tipo,
+                'message_id' => null,
+                'status' => 'failed',
+                'error_titulo' => 'No se pudo enviar el mensaje por un error de conexión',
+                'error_detalle' => mb_substr($e->getMessage(), 0, 500),
+            ]);
+
+            Log::error('EnviarMensajeConfirmacion: reintentos agotados, queda registro fallido', [
+                'turno_id' => $this->turnoId,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            EnviarPushFalloWhatsapp::encolarSinRomper($registro->id);
+        } catch (\Throwable $errorAlRegistrar) {
+            try {
+                Log::error('EnviarMensajeConfirmacion: reintentos agotados y no se pudo dejar registro', [
+                    'turno_id' => $this->turnoId,
+                    'error' => $e->getMessage(),
+                    'error_al_registrar' => $errorAlRegistrar->getMessage(),
+                ]);
+            } catch (\Throwable) {
+                // no-op: failed() es best-effort
+            }
+        }
+    }
+
     // Una clave por unidad de envío, con el mismo criterio que el dedup:
     // lote (camino de lote), grupo (grupo_id sin porTurno) o turno + tipo.
     private function claveLock(Turno $turno, bool $esDeLote): string
@@ -156,16 +239,7 @@ class EnviarMensajeConfirmacion implements ShouldQueue
         // Turno de un lote (confirmacion): también UNA por lote, y el mensaje
         // combinado cubre todos los turnos vigentes. Reprogramación y
         // recordatorios no usan este camino: siguen siendo por turno.
-        $idsDelGrupo = match (true) {
-            $esDeLote => Turno::where('lote_id', $turno->lote_id)->pluck('id')->all(),
-            $turno->grupo_id === null || $this->porTurno => [$turno->id],
-            default => Turno::where('grupo_id', $turno->grupo_id)->pluck('id')->all(),
-        };
-        $yaEnviado = WhatsappMensaje::whereIn('turno_id', $idsDelGrupo)
-            ->where('tipo', $this->tipo)
-            ->exists();
-
-        if ($yaEnviado) {
+        if ($this->yaTieneRegistro($turno, $esDeLote)) {
             return;
         }
 
@@ -262,7 +336,7 @@ class EnviarMensajeConfirmacion implements ShouldQueue
 
         // ── Guardar registro para tracking ──
         try {
-            WhatsappMensaje::create([
+            $registro = WhatsappMensaje::create([
                 'user_id' => $user->id,
                 'turno_id' => $turno->id,
                 'numero' => $numero,
@@ -303,6 +377,11 @@ class EnviarMensajeConfirmacion implements ShouldQueue
             } catch (\Throwable $logError) {
                 // no-op: el estado ya se guardó, el log es best-effort
             }
+
+            // Meta rechazó el envío (token vencido, plantilla rechazada...): no
+            // va a llegar ningún webhook de status, así que el push de fallo
+            // sale desde acá. Best-effort: nunca rompe el job.
+            EnviarPushFalloWhatsapp::encolarSinRomper($registro->id);
         }
     }
 

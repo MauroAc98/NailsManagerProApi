@@ -29,6 +29,23 @@ class EnviarPushFalloWhatsapp implements ShouldQueue
     {
     }
 
+    /**
+     * Encola el push de fallo sin que un problema de cola rompa al llamador
+     * (el job de confirmación o el comando de recordatorios). Lo usan los
+     * fallos de NUESTRO lado, que no pasan por el webhook de Meta.
+     */
+    public static function encolarSinRomper(int $mensajeId): void
+    {
+        try {
+            self::dispatch($mensajeId);
+        } catch (\Throwable $e) {
+            Log::warning('whatsapp.push_fallo_no_encolado', [
+                'whatsapp_mensaje_id' => $mensajeId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
     public function handle(): void
     {
         try {

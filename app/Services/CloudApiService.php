@@ -10,6 +10,11 @@ class CloudApiService
 {
     public const CACHE_KEY_SALUD = 'whatsapp_cloud:salud_numero';
 
+    // Timeout explícito del envío de plantilla. Sin él regía el default de
+    // Laravel (30 s): un Meta lento retenía el worker y el candado de
+    // EnviarMensajeConfirmacion (LOCK_SEGUNDOS, 90 s) mucho más de lo necesario.
+    public const TIMEOUT_PLANTILLA_SEGUNDOS = 15;
+
     /**
      * Clave de cache del veredicto de salud, derivada del phone_number_id.
      *
@@ -114,6 +119,7 @@ class CloudApiService
         ];
 
         $response = Http::withHeaders($this->headersCon($tokenEfectivo))
+            ->timeout(self::TIMEOUT_PLANTILLA_SEGUNDOS)
             ->post("https://graph.facebook.com/{$this->apiVersion}/{$numeroEfectivo}/messages", [
                 'messaging_product' => 'whatsapp',
                 'to' => $numero,
