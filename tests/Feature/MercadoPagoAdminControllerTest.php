@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\AdminAuditLog;
 use App\Models\AdminUser;
 use App\Models\User;
 use App\Models\UserMpCredential;
@@ -191,6 +192,65 @@ class MercadoPagoAdminControllerTest extends TestCase
                 'mp_access_token' => 'APP_USR-token-invalido',
             ])
             ->assertStatus(422);
+
+        $this->assertNull(UserMpCredential::where('user_id', $salon->id)->first());
+    }
+
+    // Rotar el token de MP es una escritura sensible: deja rastro de quién y
+    // sobre qué negocio, pero JAMÁS del token ni de ningún secreto.
+    public function test_store_audita_la_carga_del_token_sin_guardar_secretos(): void
+    {
+        $salon = User::factory()->create();
+
+        $this->actingAs($this->admin, 'admin')
+            ->postJson('/api/admin/mercadopago/connections', [
+                'user_id' => $salon->id,
+                'mp_access_token' => 'APP_USR-secreto-de-auditoria',
+                'mp_user_id' => 'MP-77',
+            ])
+            ->assertStatus(201);
+
+        $this->assertDatabaseHas('admin_audit_logs', [
+            'admin_user_id' => $this->admin->id,
+            'action' => 'mercadopago.token_rotado',
+            'target_user_id' => $salon->id,
+        ]);
+
+        $log = AdminAuditLog::where('action', 'mercadopago.token_rotado')->firstOrFail();
+        $this->assertSame($salon->id, $log->payload['user_id']);
+        $this->assertStringNotContainsString(
+            'APP_USR-secreto-de-auditoria',
+            json_encode($log->getAttributes()),
+        );
+    }
+
+    public function test_store_con_token_invalido_no_deja_registro_de_auditoria(): void
+    {
+        $salon = User::factory()->create();
+        Http::fake(['api.mercadopago.com/users/me' => Http::response(['message' => 'invalid token'], 401)]);
+
+        $this->actingAs($this->admin, 'admin')
+            ->postJson('/api/admin/mercadopago/connections', [
+                'user_id' => $salon->id,
+                'mp_access_token' => 'APP_USR-token-invalido',
+            ])
+            ->assertStatus(422);
+
+        $this->assertDatabaseMissing('admin_audit_logs', ['action' => 'mercadopago.token_rotado']);
+    }
+
+    public function test_store_si_falla_la_auditoria_no_queda_guardada_la_credencial(): void
+    {
+        $salon = User::factory()->create();
+        AdminAuditLog::creating(fn () => throw new \RuntimeException('auditoría caída'));
+
+        $this->actingAs($this->admin, 'admin')
+            ->postJson('/api/admin/mercadopago/connections', [
+                'user_id' => $salon->id,
+                'mp_access_token' => 'APP_USR-token-nuevo',
+                'mp_user_id' => 'MP-1',
+            ])
+            ->assertStatus(500);
 
         $this->assertNull(UserMpCredential::where('user_id', $salon->id)->first());
     }
