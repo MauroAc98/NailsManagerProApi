@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\IngresoController;
 use App\Http\Controllers\Api\MercadoPagoAdminController;
 use App\Http\Controllers\Api\MercadoPagoWebhookController;
 use App\Http\Controllers\Api\Pro\ProAuthController;
+use App\Http\Controllers\Api\Pro\ProTurnoController;
 use App\Http\Controllers\Api\ProfesionalController;
 use App\Http\Controllers\Api\PublicController;
 use App\Http\Controllers\Api\PushSubscriptionController;
@@ -150,6 +151,13 @@ Route::prefix('pro')->middleware('portal.pro')->group(function () {
     // `throttle:pro` goes before `pro.vigente` so rejected requests count too.
     Route::middleware(['auth:profesional', 'abilities:pro:acceso', 'throttle:pro', 'pro.vigente:cuenta'])->group(function () {
         Route::get('me', [ProAuthController::class, 'me']);
+    });
+
+    // Link-scoped routes: pro.vigente (full mode) validates X-Vinculo-Id and
+    // derives the professional and the negocio from it. Read-only.
+    Route::middleware(['auth:profesional', 'abilities:pro:acceso', 'throttle:pro', 'pro.vigente'])->group(function () {
+        Route::get('turnos', [ProTurnoController::class, 'index']);
+        Route::get('turnos/{id}', [ProTurnoController::class, 'show']);
     });
 });
 

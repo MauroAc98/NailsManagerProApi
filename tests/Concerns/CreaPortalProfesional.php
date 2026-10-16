@@ -2,9 +2,12 @@
 
 namespace Tests\Concerns;
 
+use App\Models\Cliente;
 use App\Models\Profesional;
 use App\Models\ProfesionalCuenta;
 use App\Models\ProfesionalVinculo;
+use App\Models\Servicio;
+use App\Models\Turno;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
 
@@ -61,6 +64,40 @@ trait CreaPortalProfesional
             'activo'               => $activo,
             'invitado_por_user_id' => $invitadoPor?->id,
         ]);
+    }
+
+    /** A turno of $profesional (confirmado, 60 min, no client) unless $attrs say otherwise. */
+    protected function crearTurnoPortal(Profesional $profesional, string $fechaHora = '2026-10-17 10:00:00', array $attrs = []): Turno
+    {
+        return Turno::create(array_merge([
+            'user_id'                => $profesional->user_id,
+            'profesional_id'         => $profesional->id,
+            'fecha_hora'             => $fechaHora,
+            'duracion_total_minutos' => 60,
+            'estado'                 => 'confirmado',
+            'origen'                 => 'app',
+        ], $attrs));
+    }
+
+    protected function crearClientePortal(User $user, string $nombre = 'Maria', ?string $apellido = 'Lopez', string $telefono = '+5491155550001'): Cliente
+    {
+        return Cliente::create([
+            'user_id'  => $user->id,
+            'nombre'   => $nombre,
+            'apellido' => $apellido,
+            'telefono' => $telefono,
+        ]);
+    }
+
+    protected function crearServicioPortal(User $user, string $nombre = 'Capping', array $attrs = []): Servicio
+    {
+        return Servicio::create(array_merge([
+            'user_id'          => $user->id,
+            'nombre'           => $nombre,
+            'duracion_minutos' => 30,
+            'precio'           => 10000,
+            'activo'           => true,
+        ], $attrs));
     }
 
     /**
