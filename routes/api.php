@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\IngresoController;
 use App\Http\Controllers\Api\MercadoPagoAdminController;
 use App\Http\Controllers\Api\MercadoPagoWebhookController;
 use App\Http\Controllers\Api\Pro\ProAuthController;
+use App\Http\Controllers\Api\Pro\ProServicioController;
 use App\Http\Controllers\Api\Pro\ProTurnoController;
 use App\Http\Controllers\Api\ProfesionalController;
 use App\Http\Controllers\Api\PublicController;
@@ -157,7 +158,12 @@ Route::prefix('pro')->middleware('portal.pro')->group(function () {
     // derives the professional and the negocio from it. Read-only.
     Route::middleware(['auth:profesional', 'abilities:pro:acceso', 'throttle:pro', 'pro.vigente'])->group(function () {
         Route::get('turnos', [ProTurnoController::class, 'index']);
+        // Must stay ABOVE turnos/{id}: the detail route has no constraint on {id}
+        // (it answers every non-matching id with its own 404 body), so it would
+        // swallow "marcas".
+        Route::get('turnos/marcas', [ProTurnoController::class, 'marcas']);
         Route::get('turnos/{id}', [ProTurnoController::class, 'show']);
+        Route::get('servicios', [ProServicioController::class, 'index']);
     });
 });
 

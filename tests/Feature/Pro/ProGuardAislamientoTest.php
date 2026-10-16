@@ -86,6 +86,10 @@ class ProGuardAislamientoTest extends TestCase
             'tenant_turnos' => ['GET', '/api/turnos'],
             'pro_turnos' => ['GET', '/api/pro/turnos'],
             'pro_turno' => ['GET', '/api/pro/turnos/1'],
+            // Marks and services (B5): called without X-Vinculo-Id and without `mes`
+            // on purpose, so an allowed caller stops at 422 (link header) before any query.
+            'pro_marcas' => ['GET', '/api/pro/turnos/marcas'],
+            'pro_servicios' => ['GET', '/api/pro/servicios'],
         ];
     }
 
@@ -132,6 +136,16 @@ class ProGuardAislamientoTest extends TestCase
             'admin -> pro/turnos/{id}' => [self::ADMIN, 'pro_turno', 401],
             'pro restringido -> pro/turnos/{id}' => [self::PRO_RESTRINGIDO, 'pro_turno', 403],
             'pro full -> pro/turnos/{id}' => [self::PRO_FULL, 'pro_turno', 422],
+            // Marks (B5).
+            'tenant -> pro/turnos/marcas' => [self::TENANT, 'pro_marcas', 401],
+            'admin -> pro/turnos/marcas' => [self::ADMIN, 'pro_marcas', 401],
+            'pro restringido -> pro/turnos/marcas' => [self::PRO_RESTRINGIDO, 'pro_marcas', 403],
+            'pro full -> pro/turnos/marcas' => [self::PRO_FULL, 'pro_marcas', 422],
+            // Services (B5).
+            'tenant -> pro/servicios' => [self::TENANT, 'pro_servicios', 401],
+            'admin -> pro/servicios' => [self::ADMIN, 'pro_servicios', 401],
+            'pro restringido -> pro/servicios' => [self::PRO_RESTRINGIDO, 'pro_servicios', 403],
+            'pro full -> pro/servicios' => [self::PRO_FULL, 'pro_servicios', 422],
         ];
     }
 
