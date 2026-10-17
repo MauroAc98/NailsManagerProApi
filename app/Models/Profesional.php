@@ -132,6 +132,20 @@ class Profesional extends Model
         return $query->oldest('id')->first();
     }
 
+    // The persona titular's own profile is, by construction, the FIRST
+    // professional of the negocio (lowest id for its user_id): it is created by
+    // AdminController::crearNegocio and BackfillProfesionalesDefault, and
+    // resolverParaUsuario already treats it as the account default. There is
+    // no column: if a flag ever exists, only the body of this method changes.
+    // Deactivated professionals count too (the titular may deactivate her
+    // profile, but it stays her profile). Queried every time: no caching.
+    public function esPerfilTitular(): bool
+    {
+        $primerId = static::where('user_id', $this->user_id)->min('id');
+
+        return $primerId !== null && (int) $primerId === (int) $this->id;
+    }
+
     // ── Relaciones ───────────────────────────────────────────────
     public function user()
     {

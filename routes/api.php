@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\MercadoPagoWebhookController;
 use App\Http\Controllers\Api\Pro\ProAuthController;
 use App\Http\Controllers\Api\Pro\ProServicioController;
 use App\Http\Controllers\Api\Pro\ProTurnoController;
+use App\Http\Controllers\Api\ProfesionalAccesoController;
 use App\Http\Controllers\Api\ProfesionalController;
 use App\Http\Controllers\Api\PublicController;
 use App\Http\Controllers\Api\PushSubscriptionController;
@@ -231,6 +232,13 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
     Route::post('profesionales/{id}/historia-precios-fotos', [ProfesionalController::class, 'subirHistoriaPreciosFoto']);
     Route::delete('profesionales/{id}/historia-precios-fotos/{fotoId}', [ProfesionalController::class, 'borrarHistoriaPreciosFoto']);
     Route::patch('profesionales/{id}/historia-precios-fotos/reordenar', [ProfesionalController::class, 'reordenarHistoriaPreciosFotos']);
+
+    // Professionals' portal, persona titular side. `portal.pro` (kill switch)
+    // runs before authentication: off => 404 and no mail is ever sent.
+    Route::middleware('portal.pro')->group(function () {
+        Route::post('profesionales/{id}/acceso', [ProfesionalAccesoController::class, 'invitar'])
+            ->middleware('throttle:pro-invitaciones');
+    });
 
     // Estadísticas
     Route::get('stats/dashboard', [StatsController::class, 'dashboard']);
