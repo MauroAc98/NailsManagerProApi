@@ -57,4 +57,14 @@ class ProfesionalCuenta extends Authenticatable
     {
         return $this->hasMany(ProfesionalVinculo::class, 'cuenta_id');
     }
+
+    // The account can sign in only while at least one link is active AND points
+    // to an active professional (login and password recovery share this rule).
+    public function tieneVinculoActivo(): bool
+    {
+        return $this->vinculos()
+            ->activos()
+            ->whereHas('profesional', fn ($q) => $q->where('activo', true))
+            ->exists();
+    }
 }

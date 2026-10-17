@@ -61,7 +61,9 @@ class ProAuthController extends Controller
         // The hash check always runs, whether the account exists or not.
         $passwordOk = Hash::check($data['password'], $cuenta?->password ?? self::HASH_FICTICIO);
 
-        if (! $cuenta || ! $passwordOk || ! $cuenta->activo || ! $this->tieneVinculoActivo($cuenta)) {
+        // Short-circuit order matters: the link query only runs once the
+        // password matched and the account is active.
+        if (! $cuenta || ! $passwordOk || ! $cuenta->activo || ! $cuenta->tieneVinculoActivo()) {
             $bloqueo->registrarFallo($email, $ip);
             // Never the typed email or password: only whether the account existed.
             Log::warning('ProAuthController: failed login attempt', [
@@ -210,15 +212,5 @@ class ProAuthController extends Controller
             'expires_at' => $emitido['expires_at'],
             'debe_cambiar_password' => false,
         ]);
-    }
-
-    // Short-circuit order matters: this query only runs once the password
-    // matched and the account is active (see login()).
-    private function tieneVinculoActivo(ProfesionalCuenta $cuenta): bool
-    {
-        return $cuenta->vinculos()
-            ->activos()
-            ->whereHas('profesional', fn ($q) => $q->where('activo', true))
-            ->exists();
     }
 }
