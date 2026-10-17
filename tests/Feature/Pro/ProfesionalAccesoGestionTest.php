@@ -59,6 +59,8 @@ class ProfesionalAccesoGestionTest extends TestCase
     private function owner(string $metodo, string $ruta, array $cuerpo = [], ?string $token = null)
     {
         $this->app['auth']->forgetGuards();
+        // The mails leave after the response; drop the earlier requests' replayed tasks.
+        $this->reiniciarTareasPostRespuesta();
 
         return $this->withToken($token ?? $this->tokenTitular)->json($metodo, $ruta, $cuerpo);
     }
@@ -507,6 +509,8 @@ class ProfesionalAccesoGestionTest extends TestCase
     private function loginPro(string $email, string $password)
     {
         $this->app['auth']->forgetGuards();
+        // A reset before this login left its mail task behind: do not replay it here.
+        $this->reiniciarTareasPostRespuesta();
 
         return $this->postJson('/api/pro/login', ['email' => $email, 'password' => $password]);
     }

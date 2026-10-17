@@ -160,6 +160,33 @@ trait CreaPortalProfesional
     }
 
     /**
+     * Sends ONE request through the HTTP kernel and stops before `terminate()`:
+     * the response exists but the after-response tasks have not run yet. The
+     * caller asserts what has (not) happened by now and then calls
+     * `$kernel->terminate($request, $response)` exactly once (a second call
+     * would replay the tasks, see reiniciarTareasPostRespuesta).
+     *
+     * @param  array<string, mixed>  $cuerpo
+     * @return array{0: \Illuminate\Http\Request, 1: \Symfony\Component\HttpFoundation\Response, 2: \Illuminate\Contracts\Http\Kernel}
+     */
+    protected function manejarSinTerminar(string $metodo, string $ruta, array $cuerpo = [], ?string $token = null): array
+    {
+        // Sanctum's guard caches the first resolved user per app instance.
+        $this->app['auth']->forgetGuards();
+        $this->reiniciarTareasPostRespuesta();
+
+        $servidor = ['HTTP_ACCEPT' => 'application/json', 'REMOTE_ADDR' => '10.9.9.9'];
+        if ($token !== null) {
+            $servidor['HTTP_AUTHORIZATION'] = 'Bearer '.$token;
+        }
+
+        $kernel = $this->app->make(\Illuminate\Contracts\Http\Kernel::class);
+        $request = \Illuminate\Http\Request::create($ruta, $metodo, $cuerpo, [], [], $servidor);
+
+        return [$request, $kernel->handle($request), $kernel];
+    }
+
+    /**
      * Runs $competidor once, right after the first SELECT on $tabla: the
      * moment another request could slip in between our lookup and our insert.
      * The row it writes lives outside our savepoint, like a committed row would.

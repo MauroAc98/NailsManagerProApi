@@ -28,3 +28,8 @@ Schedule::command('pagos:reconciliar')->everyMinute()->withoutOverlapping(10);
 // Los tokens Sanctum vencidos (admin y tenant) no se borran solos: sin esto
 // personal_access_tokens crece sin límite.
 Schedule::command('sanctum:prune-expired --hours=24')->daily();
+
+// Códigos de recuperación de contraseña del portal de profesionales: sin esto
+// profesional_cuenta_reset_codes conserva las filas para siempre. Solo borra
+// las que ya vencieron Y cuya espera de reenvío terminó (ver el comando).
+Schedule::command('profesionales:purgar-codigos-reset')->daily();

@@ -56,6 +56,8 @@ class ProfesionalAccesoInvitacionTest extends TestCase
     {
         // Sanctum's guard caches the first resolved user per app instance.
         $this->app['auth']->forgetGuards();
+        // The mails leave after the response; drop the earlier requests' replayed tasks.
+        $this->reiniciarTareasPostRespuesta();
 
         $cuerpo = $conEmail ? ['email' => $email] : [];
 
