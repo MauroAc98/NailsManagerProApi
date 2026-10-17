@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\IngresoController;
 use App\Http\Controllers\Api\MercadoPagoAdminController;
 use App\Http\Controllers\Api\MercadoPagoWebhookController;
 use App\Http\Controllers\Api\Pro\ProAuthController;
+use App\Http\Controllers\Api\Pro\ProPasswordResetController;
 use App\Http\Controllers\Api\Pro\ProServicioController;
 use App\Http\Controllers\Api\Pro\ProTurnoController;
 use App\Http\Controllers\Api\ProfesionalAccesoController;
@@ -139,6 +140,11 @@ Route::prefix('pro')->middleware('portal.pro')->group(function () {
     // Public: throttled by IP (named limiter in AppServiceProvider); the
     // per-(email, IP) lockout lives in the controller.
     Route::post('login', [ProAuthController::class, 'login'])->middleware('throttle:pro-login');
+
+    // Password recovery: public by nature, throttled by IP; the per-email
+    // cooldown and the attempt counter live in the database (see the services).
+    Route::post('forgot-password', [ProPasswordResetController::class, 'forgot'])->middleware('throttle:pro-forgot');
+    Route::post('reset-password', [ProPasswordResetController::class, 'reset'])->middleware('throttle:pro-reset');
 
     // No ability check: a session with a provisional password (restricted
     // token) must be able to end itself too.

@@ -56,6 +56,10 @@ class AppServiceProvider extends ServiceProvider
     private function registrarLimitadoresPortalProfesionales(): void
     {
         RateLimiter::for('pro-login', fn (Request $r) => Limit::perMinute(20)->by('pro-login:' . $r->ip()));
+        // Password recovery, by IP only: the answer must not depend on the
+        // email. The per-email cooldown and attempt cap are in the database.
+        RateLimiter::for('pro-forgot', fn (Request $r) => Limit::perMinute(5)->by('pro-forgot:' . $r->ip()));
+        RateLimiter::for('pro-reset', fn (Request $r) => Limit::perMinute(10)->by('pro-reset:' . $r->ip()));
         // Authenticated portal traffic: 60/min per account (IP only if the
         // request is somehow unauthenticated).
         RateLimiter::for('pro', fn (Request $r) => Limit::perMinute(60)->by(

@@ -23,6 +23,9 @@ use Illuminate\Support\Facades\Mail;
  */
 trait CreaPortalProfesional
 {
+    /** @var list<callable>|null terminating callbacks of the freshly booted app (see reiniciarTareasPostRespuesta) */
+    private ?array $callbacksBase = null;
+
     /**
      * Negocio exento de suscripcion con su perfil titular (primera profesional)
      * y dos profesionales mas.
@@ -112,12 +115,14 @@ trait CreaPortalProfesional
         return $cuenta->createToken('pro-portal', $abilities)->plainTextToken;
     }
 
-    /** Swaps the hash manager for one that counts make() calls and delegates. */
+    /** Swaps the hash manager for one that counts make() and check() calls and delegates. */
     protected function contarHashes(): HashManager
     {
         $contador = new class($this->app) extends HashManager
         {
             public int $llamadas = 0;
+
+            public int $comprobaciones = 0;
 
             public function make($value, array $options = [])
             {
@@ -125,11 +130,33 @@ trait CreaPortalProfesional
 
                 return parent::make($value, $options);
             }
+
+            public function check($value, $hashedValue, array $options = [])
+            {
+                $this->comprobaciones++;
+
+                return parent::check($value, $hashedValue, $options);
+            }
         };
         $this->app->instance('hash', $contador);
         Hash::clearResolvedInstance('hash');
 
         return $contador;
+    }
+
+    /**
+     * `dispatch(...)->afterResponse()` registers an app "terminating" callback,
+     * and the test app (one instance for the whole test) never drops the ones
+     * that already ran: every later request would run the earlier requests'
+     * closures again. Production has one request per process, so this is purely
+     * a test artifact. Call this right BEFORE each request: the first call
+     * snapshots the callbacks of a freshly booted app, later calls restore it.
+     */
+    protected function reiniciarTareasPostRespuesta(): void
+    {
+        $propiedad = new \ReflectionProperty($this->app, 'terminatingCallbacks');
+        $this->callbacksBase ??= $propiedad->getValue($this->app);
+        $propiedad->setValue($this->app, $this->callbacksBase);
     }
 
     /**
