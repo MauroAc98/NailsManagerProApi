@@ -73,23 +73,29 @@ class ResetearPasswordProvisoria
             return;
         }
 
-        // After the commit, like the invitation: an SMTP failure must not undo
-        // the reset or turn into a 500 (the titular can simply reset again).
-        try {
-            Mail::to($cuenta->email)->send(new ProfesionalInvitacionMail(
-                $titular->name,
-                $profesional->nombre,
-                $cuenta->email,
-                $passwordProvisoria,
-                (string) config('portal_profesionales.url'),
-            ));
-        } catch (\Throwable $e) {
-            Log::error('No se pudo enviar el mail de contraseña provisoria del portal de profesionales', [
-                'user_id' => $titular->id,
-                'profesional_id' => $profesional->id,
-                'email_hash' => sha1($cuenta->email),
-                'excepcion' => $e::class,
-            ]);
-        }
+        // After the response (so after the commit), like the invitation: the
+        // no-op paths above send nothing, and a reset that mailed before
+        // answering would take one SMTP round trip longer than they do. An SMTP
+        // failure must not undo the reset or turn into a 500 (the titular can
+        // simply reset again). Static closure with scalars only.
+        $negocio = (string) $titular->name;
+        $nombreProfesional = (string) $profesional->nombre;
+        $email = $cuenta->email;
+        $titularId = $titular->id;
+        $profesionalId = $profesional->id;
+        $url = (string) config('portal_profesionales.url');
+
+        dispatch(static function () use ($negocio, $nombreProfesional, $email, $passwordProvisoria, $url, $titularId, $profesionalId) {
+            try {
+                Mail::to($email)->send(new ProfesionalInvitacionMail($negocio, $nombreProfesional, $email, $passwordProvisoria, $url));
+            } catch (\Throwable $e) {
+                Log::error('No se pudo enviar el mail de contraseña provisoria del portal de profesionales', [
+                    'user_id' => $titularId,
+                    'profesional_id' => $profesionalId,
+                    'email_hash' => sha1($email),
+                    'excepcion' => $e::class,
+                ]);
+            }
+        })->afterResponse();
     }
 }

@@ -13,8 +13,10 @@ use Illuminate\Queue\SerializesModels;
  * First access to the professionals' portal: a NEW account was created for the
  * invited email, so the mail carries its provisional password. This is the
  * only place that password ever travels; it is not stored in plain text, not
- * returned by the API and not logged. Sent synchronously (never queued), so the
- * password is never written to a queue payload either.
+ * returned by the API and not logged. The mailable is never queued: callers
+ * send it right after the response from an in-process task (the synchronous
+ * queue, whose payload lives only in memory), so the password is never written
+ * to a queue table or a job store.
  */
 class ProfesionalInvitacionMail extends Mailable
 {

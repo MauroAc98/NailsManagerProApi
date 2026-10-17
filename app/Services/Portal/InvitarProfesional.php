@@ -123,23 +123,36 @@ class InvitarProfesional
      * hears that it was linked, with no password at all. Failures are logged
      * WITHOUT the password and without the address (an SMTP error message may
      * echo it): only the exception class and a hash of the email.
+     *
+     * The mail leaves AFTER the response (and so after the commit): otherwise a
+     * new email would take one SMTP round trip longer than an already linked
+     * one, which sends nothing, and that difference would tell them apart. The
+     * closure is static and carries only scalars, so no model and no service
+     * ends up inside the (in-memory, synchronous) queue payload.
      */
     private function enviarCorreo(User $titular, Profesional $profesional, ProfesionalCuenta $cuenta, bool $esNueva, string $passwordProvisoria): void
     {
         $url = (string) config('portal_profesionales.url');
+        $negocio = (string) $titular->name;
+        $nombreProfesional = (string) $profesional->nombre;
+        $email = $cuenta->email;
+        $titularId = $titular->id;
+        $profesionalId = $profesional->id;
 
-        try {
-            Mail::to($cuenta->email)->send($esNueva
-                ? new ProfesionalInvitacionMail($titular->name, $profesional->nombre, $cuenta->email, $passwordProvisoria, $url)
-                : new ProfesionalVinculadaMail($titular->name, $profesional->nombre, $url));
-        } catch (\Throwable $e) {
-            Log::error('No se pudo enviar el mail de acceso al portal de profesionales', [
-                'user_id' => $titular->id,
-                'profesional_id' => $profesional->id,
-                'cuenta_nueva' => $esNueva,
-                'email_hash' => sha1($cuenta->email),
-                'excepcion' => $e::class,
-            ]);
-        }
+        dispatch(static function () use ($negocio, $nombreProfesional, $email, $passwordProvisoria, $url, $esNueva, $titularId, $profesionalId) {
+            try {
+                Mail::to($email)->send($esNueva
+                    ? new ProfesionalInvitacionMail($negocio, $nombreProfesional, $email, $passwordProvisoria, $url)
+                    : new ProfesionalVinculadaMail($negocio, $nombreProfesional, $url));
+            } catch (\Throwable $e) {
+                Log::error('No se pudo enviar el mail de acceso al portal de profesionales', [
+                    'user_id' => $titularId,
+                    'profesional_id' => $profesionalId,
+                    'cuenta_nueva' => $esNueva,
+                    'email_hash' => sha1($email),
+                    'excepcion' => $e::class,
+                ]);
+            }
+        })->afterResponse();
     }
 }
