@@ -61,6 +61,16 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('pro', fn (Request $r) => Limit::perMinute(60)->by(
             'pro:' . ($r->user('profesional')?->id ?? 'ip-' . $r->ip())
         ));
+        // Owner side: invitations create accounts and send mail, so they are
+        // capped per persona titular (her user id, never the IP: several
+        // negocios can share one). Every attempt counts, whatever its outcome
+        // and whether or not the invited email already has an account.
+        RateLimiter::for('pro-invitaciones', fn (Request $r) => Limit::perHour(10)
+            ->by('pro-invitaciones:' . ($r->user()?->id ?? 'ip-' . $r->ip()))
+            ->response(fn (Request $request, array $headers) => response()->json([
+                'message' => 'Se alcanzó el máximo de invitaciones por hora. Prueba de nuevo más tarde.',
+                'code' => 'INVITACIONES_LIMITE',
+            ], 429, $headers)));
     }
 
     /**
