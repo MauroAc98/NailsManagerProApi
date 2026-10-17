@@ -7,6 +7,7 @@ use App\Models\ProfesionalVinculo;
 use App\Models\User;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Tests\Concerns\CreaPortalProfesional;
@@ -14,6 +15,8 @@ use Tests\TestCase;
 
 class ProfesionalSchemaTest extends TestCase
 {
+    private const MIGRACION_MARCA = 'migrations/2026_10_17_100250_add_cuenta_creada_aqui_to_profesional_vinculos_table.php';
+
     use CreaPortalProfesional;
     use RefreshDatabase;
 
@@ -204,9 +207,11 @@ class ProfesionalSchemaTest extends TestCase
         $this->assertContains('profesional_cuentas', $tablasAntes);
         $this->assertContains('profesional_vinculos', $tablasAntes);
 
-        // Reverse order: the links reference the accounts.
+        // Reverse order: the ownership marker is added to the links, which reference the accounts.
+        $marca = require database_path(self::MIGRACION_MARCA);
         $vinculos = require database_path('migrations/2026_10_17_100100_create_profesional_vinculos_table.php');
         $cuentas = require database_path('migrations/2026_10_17_100000_create_profesional_cuentas_table.php');
+        $marca->down();
         $vinculos->down();
         $cuentas->down();
 
@@ -222,6 +227,7 @@ class ProfesionalSchemaTest extends TestCase
 
         $cuentas->up();
         $vinculos->up();
+        $marca->up();
 
         $this->assertEqualsCanonicalizing($tablasAntes, Schema::getTableListing(schemaQualified: false));
         foreach ($nuevas as $tabla) {
@@ -230,5 +236,37 @@ class ProfesionalSchemaTest extends TestCase
         // The re-created schema is usable again.
         $this->vincularPortal($this->crearCuentaPortal('otra@x.com'), $negocio['bea']);
         $this->assertSame(1, ProfesionalVinculo::count());
+    }
+
+    public function test_the_ownership_marker_defaults_to_false_and_its_migration_is_reversible(): void
+    {
+        $negocio = $this->crearNegocioPortal();
+        $cuenta = $this->crearCuentaPortal();
+        // A link written without mentioning the marker, like every row that existed before it.
+        DB::table('profesional_vinculos')->insert([
+            'cuenta_id' => $cuenta->id,
+            'profesional_id' => $negocio['ana']->id,
+            'activo' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $this->assertTrue(Schema::hasColumn('profesional_vinculos', 'cuenta_creada_aqui'));
+        $this->assertFalse(ProfesionalVinculo::sole()->cuenta_creada_aqui);
+        $columnas = Schema::getColumnListing('profesional_vinculos');
+
+        $marca = require database_path(self::MIGRACION_MARCA);
+        $marca->down();
+
+        $this->assertFalse(Schema::hasColumn('profesional_vinculos', 'cuenta_creada_aqui'));
+        $this->assertSame(array_values(array_diff($columnas, ['cuenta_creada_aqui'])), Schema::getColumnListing('profesional_vinculos'));
+        $this->assertSame(1, ProfesionalVinculo::count(), 'rolling back keeps the links');
+
+        $marca->up();
+
+        $this->assertSame($columnas, Schema::getColumnListing('profesional_vinculos'));
+        $this->assertFalse(ProfesionalVinculo::sole()->cuenta_creada_aqui);
+        // Still enforced after the round trip: a professional keeps at most one link.
+        $this->expectException(\Illuminate\Database\UniqueConstraintViolationException::class);
+        $this->vincularPortal($this->crearCuentaPortal('otra@x.com'), $negocio['ana']);
     }
 }

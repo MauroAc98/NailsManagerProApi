@@ -12,7 +12,6 @@ use App\Models\Subscription;
 use App\Models\User;
 use App\Support\PasswordProvisoria;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Hashing\HashManager;
 use Illuminate\Mail\Mailable;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -72,42 +71,6 @@ class ProfesionalAccesoInvitacionTest extends TestCase
         return $fila ? (array) $fila : null;
     }
 
-    /** Swaps the hash manager for one that counts make() calls and delegates. */
-    private function contarHashes(): HashManager
-    {
-        $contador = new class($this->app) extends HashManager
-        {
-            public int $llamadas = 0;
-
-            public function make($value, array $options = [])
-            {
-                $this->llamadas++;
-
-                return parent::make($value, $options);
-            }
-        };
-        $this->app->instance('hash', $contador);
-        Hash::clearResolvedInstance('hash');
-
-        return $contador;
-    }
-
-    /**
-     * Runs $competidor once, right after the first SELECT on $tabla: the
-     * moment another request could slip in between our lookup and our insert.
-     * The row it writes lives outside our savepoint, like a committed row would.
-     */
-    private function alPrimerSelectDe(string $tabla, \Closure $competidor): void
-    {
-        $hecho = false;
-        DB::listen(function ($consulta) use (&$hecho, $tabla, $competidor) {
-            if (! $hecho && str_starts_with($consulta->sql, 'select') && str_contains($consulta->sql, '"'.$tabla.'"')) {
-                $hecho = true;
-                $competidor();
-            }
-        });
-    }
-
     // ── AM-01 S1: unknown email creates the account and the link ───────────
 
     public function test_unknown_email_creates_a_provisional_account_and_an_active_link(): void
@@ -127,6 +90,7 @@ class ProfesionalAccesoInvitacionTest extends TestCase
         $this->assertTrue($vinculo->activo);
         $this->assertSame($this->negocio['user']->id, $vinculo->invitado_por_user_id);
         $this->assertSame(1, ProfesionalCuenta::count());
+        $this->assertTrue($vinculo->cuenta_creada_aqui, 'the link records that this invitation created the account');
     }
 
     public function test_the_stored_password_is_a_hash_and_never_the_email_or_the_name(): void
@@ -162,6 +126,7 @@ class ProfesionalAccesoInvitacionTest extends TestCase
         $nuevo = $existente->vinculos()->where('profesional_id', $this->negocio['bea']->id)->sole();
         $this->assertTrue($nuevo->activo);
         $this->assertSame($this->negocio['user']->id, $nuevo->invitado_por_user_id);
+        $this->assertFalse($nuevo->cuenta_creada_aqui, 'linking an existing account never marks it as created here');
     }
 
     public function test_an_existing_account_can_use_the_new_link_immediately_with_its_current_token(): void
@@ -195,6 +160,21 @@ class ProfesionalAccesoInvitacionTest extends TestCase
 
         $this->assertFalse($existente->fresh()->activo);
         $this->assertSame(1, $existente->vinculos()->count());
+        $this->assertFalse($existente->vinculos()->sole()->cuenta_creada_aqui);
+    }
+
+    public function test_a_pending_account_that_already_existed_is_not_marked_as_created_here(): void
+    {
+        // Created earlier by another negocio's invitation and never activated.
+        $otro = $this->crearNegocioPortal();
+        $this->invitar($otro['ana']->id, 'pendiente@example.com', $otro['user']->createToken('t')->plainTextToken)->assertOk();
+
+        $this->invitar($this->negocio['ana']->id, 'pendiente@example.com')->assertOk();
+
+        $propio = ProfesionalVinculo::where('profesional_id', $this->negocio['ana']->id)->sole();
+        $ajeno = ProfesionalVinculo::where('profesional_id', $otro['ana']->id)->sole();
+        $this->assertFalse($propio->cuenta_creada_aqui);
+        $this->assertTrue($ajeno->cuenta_creada_aqui);
     }
 
     // ── AM-01: no enumeration ───────────────────────────────────────────────
@@ -574,35 +554,6 @@ class ProfesionalAccesoInvitacionTest extends TestCase
         Mail::assertNothingSent();
     }
 
-    /**
-     * Replaces the mailer with one that records each mailable together with
-     * the transaction depth at the moment of sending, and optionally fails.
-     *
-     * @return \stdClass{mails: list<object>, niveles: list<int>}
-     */
-    private function mailerGrabador(bool $falla): \stdClass
-    {
-        $registro = new \stdClass;
-        $registro->mails = [];
-        $registro->niveles = [];
-
-        Mail::shouldReceive('to')->andReturnUsing(fn () => new class($registro, $falla)
-        {
-            public function __construct(private \stdClass $registro, private bool $falla) {}
-
-            public function send($mailable): void
-            {
-                $this->registro->mails[] = $mailable;
-                $this->registro->niveles[] = DB::transactionLevel();
-                if ($this->falla) {
-                    throw new \RuntimeException('smtp caido');
-                }
-            }
-        });
-
-        return $registro;
-    }
-
     public function test_the_mail_is_sent_after_the_transaction_has_committed(): void
     {
         $this->crearCuentaPortal('bea@example.com');
@@ -924,6 +875,7 @@ class ProfesionalAccesoInvitacionTest extends TestCase
         $cuenta = ProfesionalCuenta::sole();
         $this->assertSame($contrasena, $cuenta->getRawOriginal('password'), 'The winner\'s password must not be replaced');
         $this->assertSame($cuenta->id, ProfesionalVinculo::sole()->cuenta_id);
+        $this->assertFalse(ProfesionalVinculo::sole()->cuenta_creada_aqui, 'the account was created by the competing request, not by this one');
     }
 
     public function test_losing_the_race_on_the_professional_link_answers_409_and_leaves_no_orphan_account(): void

@@ -68,7 +68,7 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('pro-invitaciones', fn (Request $r) => Limit::perHour(10)
             ->by('pro-invitaciones:' . ($r->user()?->id ?? 'ip-' . $r->ip()))
             ->response(fn (Request $request, array $headers) => response()->json([
-                'message' => 'Se alcanzó el máximo de invitaciones por hora. Prueba de nuevo más tarde.',
+                'message' => 'Se alcanzó el máximo de invitaciones por hora. Probá de nuevo más tarde.',
                 'code' => 'INVITACIONES_LIMITE',
             ], 429, $headers)));
     }
