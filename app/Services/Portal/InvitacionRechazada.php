@@ -27,16 +27,16 @@ final class InvitacionRechazada extends RuntimeException
 
     public static function emailDeLaPersonaTitular(): self
     {
-        return new self('Ese es el email de la persona titular del negocio. Usa otro email.', 422, 'EMAIL_DE_LA_PERSONA_TITULAR');
+        return new self('Ese es el email de la persona titular del negocio. Usá otro email.', 422, 'EMAIL_DE_LA_PERSONA_TITULAR');
     }
 
     public static function profesionalInactiva(): self
     {
-        return new self('Esa profesional está desactivada. Actívala antes de invitarla.', 422, 'PROFESIONAL_INACTIVA');
+        return new self('Esa profesional está desactivada. Activala antes de invitarla.', 422, 'PROFESIONAL_INACTIVA');
     }
 
     public static function profesionalConAcceso(): self
     {
-        return new self('Esa profesional ya tiene acceso al portal. Quita el acceso actual antes de invitar a otro email.', 409, 'PROFESIONAL_CON_ACCESO');
+        return new self('Esa profesional ya tiene acceso al portal. Quitá el acceso actual antes de invitar a otro email.', 409, 'PROFESIONAL_CON_ACCESO');
     }
 }

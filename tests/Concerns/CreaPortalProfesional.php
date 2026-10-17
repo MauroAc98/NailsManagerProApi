@@ -9,7 +9,10 @@ use App\Models\ProfesionalVinculo;
 use App\Models\Servicio;
 use App\Models\Turno;
 use App\Models\User;
+use Illuminate\Hashing\HashManager;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 
 /**
  * Helpers para los tests del portal de profesionales (cuenta + vinculos).
@@ -56,13 +59,14 @@ trait CreaPortalProfesional
         ], $attrs));
     }
 
-    protected function vincularPortal(ProfesionalCuenta $cuenta, Profesional $profesional, bool $activo = true, ?User $invitadoPor = null): ProfesionalVinculo
+    protected function vincularPortal(ProfesionalCuenta $cuenta, Profesional $profesional, bool $activo = true, ?User $invitadoPor = null, bool $cuentaCreadaAqui = false): ProfesionalVinculo
     {
         return ProfesionalVinculo::create([
             'cuenta_id'            => $cuenta->id,
             'profesional_id'       => $profesional->id,
             'activo'               => $activo,
             'invitado_por_user_id' => $invitadoPor?->id,
+            'cuenta_creada_aqui'   => $cuentaCreadaAqui,
         ]);
     }
 
@@ -106,5 +110,70 @@ trait CreaPortalProfesional
     protected function tokenPara(ProfesionalCuenta $cuenta, array $abilities = ['pro:acceso']): string
     {
         return $cuenta->createToken('pro-portal', $abilities)->plainTextToken;
+    }
+
+    /** Swaps the hash manager for one that counts make() calls and delegates. */
+    protected function contarHashes(): HashManager
+    {
+        $contador = new class($this->app) extends HashManager
+        {
+            public int $llamadas = 0;
+
+            public function make($value, array $options = [])
+            {
+                $this->llamadas++;
+
+                return parent::make($value, $options);
+            }
+        };
+        $this->app->instance('hash', $contador);
+        Hash::clearResolvedInstance('hash');
+
+        return $contador;
+    }
+
+    /**
+     * Runs $competidor once, right after the first SELECT on $tabla: the
+     * moment another request could slip in between our lookup and our insert.
+     * The row it writes lives outside our savepoint, like a committed row would.
+     */
+    protected function alPrimerSelectDe(string $tabla, \Closure $competidor): void
+    {
+        $hecho = false;
+        DB::listen(function ($consulta) use (&$hecho, $tabla, $competidor) {
+            if (! $hecho && str_starts_with($consulta->sql, 'select') && str_contains($consulta->sql, '"'.$tabla.'"')) {
+                $hecho = true;
+                $competidor();
+            }
+        });
+    }
+
+    /**
+     * Replaces the mailer with one that records each mailable together with
+     * the transaction depth at the moment of sending, and optionally fails.
+     *
+     * @return \stdClass{mails: list<object>, niveles: list<int>}
+     */
+    protected function mailerGrabador(bool $falla): \stdClass
+    {
+        $registro = new \stdClass;
+        $registro->mails = [];
+        $registro->niveles = [];
+
+        Mail::shouldReceive('to')->andReturnUsing(fn () => new class($registro, $falla)
+        {
+            public function __construct(private \stdClass $registro, private bool $falla) {}
+
+            public function send($mailable): void
+            {
+                $this->registro->mails[] = $mailable;
+                $this->registro->niveles[] = DB::transactionLevel();
+                if ($this->falla) {
+                    throw new \RuntimeException('smtp caido');
+                }
+            }
+        });
+
+        return $registro;
     }
 }

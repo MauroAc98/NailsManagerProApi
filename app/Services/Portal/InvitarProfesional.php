@@ -70,6 +70,8 @@ class InvitarProfesional
                     'profesional_id' => $profesional->id,
                     'activo' => true,
                     'invitado_por_user_id' => $titular->id,
+                    // Only the invitation that CREATES the account owns it.
+                    'cuenta_creada_aqui' => $esNueva,
                 ]);
             } catch (UniqueConstraintViolationException) {
                 // Another invitation linked this professional between our

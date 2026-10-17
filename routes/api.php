@@ -238,6 +238,13 @@ Route::middleware(['auth:sanctum', 'subscription.check'])->group(function () {
     Route::middleware('portal.pro')->group(function () {
         Route::post('profesionales/{id}/acceso', [ProfesionalAccesoController::class, 'invitar'])
             ->middleware('throttle:pro-invitaciones');
+        Route::get('profesionales/accesos', [ProfesionalAccesoController::class, 'index']);
+        Route::get('profesionales/{id}/acceso', [ProfesionalAccesoController::class, 'show']);
+        Route::patch('profesionales/{id}/acceso', [ProfesionalAccesoController::class, 'actualizar']);
+        Route::delete('profesionales/{id}/acceso', [ProfesionalAccesoController::class, 'destroy']);
+        // Sends a mail to a third party, so it shares the invitations' hourly limit.
+        Route::post('profesionales/{id}/acceso/reset', [ProfesionalAccesoController::class, 'resetPassword'])
+            ->middleware('throttle:pro-invitaciones');
     });
 
     // Estadísticas
